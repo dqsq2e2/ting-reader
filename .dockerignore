@@ -1,0 +1,11 @@
+node_modules
+dist
+ting-reader-backend/cache
+ting-reader-backend/storage
+ting-reader-backend/*.db
+ting-reader-backend/*.db-journal
+ting-reader-backend/*.log
+.env
+.git
+.gitignore
+README.md

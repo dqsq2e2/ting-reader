@@ -1,0 +1,33 @@
+# Node.js
+node_modules/
+dist/
+build/
+.npm
+.eslintcache
+
+# SQLite
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+cache/
+storage/
+data/
+public/dist/

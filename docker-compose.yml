@@ -1,0 +1,15 @@
+services:
+  ting-reader:
+    build: .
+    container_name: ting-reader
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+      - ./storage:/app/storage
+      - ./cache:/app/cache
+    restart: unless-stopped
+    environment:
+      - JWT_SECRET=change-this-to-a-secure-secret
+      - PORT=3000
+      - DB_PATH=/app/data/ting-reader.db
