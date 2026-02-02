@@ -40,6 +40,10 @@ services:
       - /path/to/storage:/app/storage
       - /path/to/cache:/app/cache
     restart: always
+    environment:
+      - JWT_SECRET=change-this-to-a-secure-secret
+      - PORT=3000
+      - DB_PATH=/app/data/ting-reader.db
 ```
 
 启动容器：
