@@ -1,6 +1,6 @@
 # Ting Reader
 
-Ting Reader 是一个轻量级的自托管有声书平台，支持自动刮削元数据、多端播放进度同步以及多架构 Docker 部署。
+Ting Reader 是一个轻量级的自托管有声书平台，支持自动刮削元数据、多端播放进度同步、WebDAV源和本地源播放以及多架构 Docker 部署。
 
 ![License](https://img.shields.io/github/license/dqsq2e2/ting-reader)
 ![Docker Pulls](https://img.shields.io/docker/pulls/dqsq2e2/ting-reader)
