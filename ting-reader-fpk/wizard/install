@@ -34,7 +34,7 @@
                 "type": "text",
                 "field": "wizard_storage_path",
                 "label": "有声书存储路径 (宿主机)",
-                "initValue": "/vol1/Audiobooks",
+                "initValue": "/var/apps/ting-reader/shares/ting-reader/storage",
                 "rules": [
                     {
                         "required": true,
