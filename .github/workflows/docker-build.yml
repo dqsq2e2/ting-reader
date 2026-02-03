@@ -121,7 +121,8 @@ jobs:
           VERSION="${{ env.VERSION }}"
           START_LINE=$(grep -n "## \[$VERSION\]" CHANGELOG.md | cut -d: -f1)
           if [ -n "$START_LINE" ]; then
-            tail -n +$((START_LINE + 1)) CHANGELOG.md | sed -n '/## \[/q;p' > RELEASE_NOTES.md
+            # Extract including the version header line
+            tail -n +$START_LINE CHANGELOG.md | sed -n '1p; 2,${/## \[/q; p}' > RELEASE_NOTES.md
           else
             echo "Version $VERSION not found in CHANGELOG.md"
             echo "Full changelog available in CHANGELOG.md" > RELEASE_NOTES.md
