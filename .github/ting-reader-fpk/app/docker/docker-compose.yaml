@@ -1,0 +1,15 @@
+services:
+  ting-reader:
+    image: dqsq2e2/ting-reader:${TRIM_APPVER}
+    container_name: ting-reader
+    ports:
+      - "${wizard_port}:3000"
+    volumes:
+      - "/var/apps/ting-reader/shares/ting-reader/data:/app/data"
+      - "${wizard_storage_path}:/app/storage"
+      - "/var/apps/ting-reader/shares/ting-reader/cache:/app/cache"
+    restart: unless-stopped
+    environment:
+      - JWT_SECRET=${wizard_jwt_secret}
+      - PORT=3000
+      - DB_PATH=/app/data/ting-reader.db

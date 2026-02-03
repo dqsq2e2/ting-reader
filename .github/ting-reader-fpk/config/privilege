@@ -1,0 +1,8 @@
+{
+    "defaults":
+    {
+        "run-as": "package"
+    },
+    "username": "docker-ting-reader",
+    "groupname": "docker-ting-reader"
+}

@@ -1,0 +1,13 @@
+{
+    ".url": {
+        "ting-reader.main": {
+            "title": "Ting Reader",
+            "icon": "images/icon-{0}.png",
+            "type": "url",
+            "protocol": "http",
+            "port": "${wizard_port}",
+            "url": "/",
+            "allUsers": true
+        }
+    }
+}

@@ -1,0 +1,51 @@
+[
+    {
+        "stepTitle": "应用配置",
+        "items": [
+            {
+                "type": "text",
+                "field": "wizard_port",
+                "label": "访问端口",
+                "initValue": "3000",
+                "rules": [
+                    {
+                        "required": true,
+                        "message": "请输入端口号"
+                    },
+                    {
+                        "pattern": "^[0-9]+$",
+                        "message": "端口号必须是数字"
+                    }
+                ]
+            },
+            {
+                "type": "password",
+                "field": "wizard_jwt_secret",
+                "label": "JWT 密钥",
+                "initValue": "ting-reader-secret-key",
+                "rules": [
+                    {
+                        "required": true,
+                        "message": "请输入 JWT 密钥"
+                    }
+                ]
+            },
+            {
+                "type": "text",
+                "field": "wizard_storage_path",
+                "label": "有声书存储路径 (宿主机)",
+                "initValue": "/var/apps/ting-reader/shares/ting-reader/storage",
+                "rules": [
+                    {
+                        "required": true,
+                        "message": "请输入宿主机上的有声书存储路径"
+                    }
+                ]
+            },
+            {
+                "type": "tips",
+                "helpText": "请确保您输入的宿主机路径存在，且容器有权限访问。"
+            }
+        ]
+    }
+]

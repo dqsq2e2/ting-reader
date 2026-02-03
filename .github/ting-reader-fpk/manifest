@@ -1,0 +1,14 @@
+appname               = ting-reader
+version               = 1.0.0
+display_name          = Ting Reader
+desc                  = Ting Reader 是一个自托管的有声书平台，支持多种格式和流媒体播放，支持WebDAV源和本地文件源。
+platform              = all
+source                = thirdparty
+maintainer            = dqsq2e2
+maintainer_url        = https://github.com/dqsq2e2/ting-reader
+distributor           = dqsq2e2
+distributor_url       = https://github.com/dqsq2e2/ting-reader
+desktop_uidir         = ui
+desktop_applaunchname = ting-reader.main
+service_port          = 3000
+checkport             = true
