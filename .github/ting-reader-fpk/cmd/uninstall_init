@@ -15,6 +15,7 @@ if [ -f "$WIZARD_FILE" ]; then
     if [ "$wizard_storage_path" != "$DEFAULT_STORAGE_PATH" ] && [ -n "$wizard_storage_path" ]; then
         echo "Custom storage path detected. Dynamically removing 'storage' option from wizard..."
         
+        # 重写文件，移除 storage 选项
         cat > "$WIZARD_FILE" <<EOF
 [
     {

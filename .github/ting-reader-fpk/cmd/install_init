@@ -1,5 +1,18 @@
 #!/bin/bash
 
-### This script is called before the user installs the application.
+# Path to the install wizard file
+# 在安装开始前，TRIM_APPDEST 可能还未完全创建，但按照文档，install_init 是在解压 target 前调用的
+# 我们的 wizard 文件夹在包根目录下
+WIZARD_FILE="$(dirname "$TRIM_APPDEST")/wizard/install"
+
+echo "Install Init: Replacing placeholders in wizard..."
+echo "TRIM_APPDEST_VOL: $TRIM_APPDEST_VOL"
+
+if [ -f "$WIZARD_FILE" ]; then
+    # 将 JSON 中的 {TRIM_APPDEST_VOL} 占位符替换为实际的环境变量值
+    # 使用 @ 作为 sed 分隔符，因为路径中包含 /
+    sed -i "s|{TRIM_APPDEST_VOL}|$TRIM_APPDEST_VOL|g" "$WIZARD_FILE"
+    echo "Placeholder replaced in $WIZARD_FILE"
+fi
 
 exit 0

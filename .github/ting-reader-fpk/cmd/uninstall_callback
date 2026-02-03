@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # 获取用户在卸载向导中选择的清理项
-# 环境变量名与向导中的 field 字段一致
 CLEAN_OPTIONS="$wizard_clean_options"
 # 获取安装时映射的 storage 路径
 STORAGE_PATH="$wizard_storage_path"
