@@ -2,4 +2,9 @@
 
 ### This script is called before the user installs the application.
 
+# Pre-create the default storage directory to ensure permissions and availability
+DEFAULT_PATH="${TRIM_APPDEST_VOL}/@appshare/ting-reader/storage"
+echo "Pre-creating default storage directory: $DEFAULT_PATH"
+mkdir -p "$DEFAULT_PATH"
+
 exit 0

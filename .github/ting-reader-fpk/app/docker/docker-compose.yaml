@@ -6,7 +6,7 @@ services:
       - "${wizard_port}:3000"
     volumes:
       - "${TRIM_APPDEST_VOL}/@appshare/ting-reader/data:/app/data"
-      - "${FINAL_STORAGE_PATH}:/app/storage"
+      - "${wizard_storage_path:-${TRIM_APPDEST_VOL}/@appshare/ting-reader/storage}:/app/storage"
       - "${TRIM_APPDEST_VOL}/@appshare/ting-reader/cache:/app/cache"
     restart: unless-stopped
     environment:

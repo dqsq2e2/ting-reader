@@ -2,23 +2,4 @@
 
 ### This script is called after the user installs the application.
 
-# Determine final storage path
-if [ -z "$wizard_storage_path" ]; then
-    FINAL_PATH="${TRIM_APPDEST_VOL}/@appshare/ting-reader/storage"
-else
-    FINAL_PATH="$wizard_storage_path"
-fi
-
-echo "Setting FINAL_STORAGE_PATH to: $FINAL_PATH"
-
-# Ensure the directory exists
-mkdir -p "$FINAL_PATH"
-
-# Write to .env file for docker-compose
-# Note: TRIM_APPDEST is the target folder where docker/ is located
-ENV_FILE="${TRIM_APPDEST}/docker/.env"
-echo "FINAL_STORAGE_PATH=$FINAL_PATH" > "$ENV_FILE"
-
-echo "Generated .env file at $ENV_FILE"
-
 exit 0

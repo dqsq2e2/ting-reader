@@ -2,22 +2,4 @@
 
 ### This script is called after the user upgrades the application.
 
-# During upgrade, wizard_storage_path should be available from the stored config
-if [ -z "$wizard_storage_path" ]; then
-    FINAL_PATH="${TRIM_APPDEST_VOL}/@appshare/ting-reader/storage"
-else
-    FINAL_PATH="$wizard_storage_path"
-fi
-
-echo "Setting FINAL_STORAGE_PATH to: $FINAL_PATH"
-
-# Ensure the directory exists
-mkdir -p "$FINAL_PATH"
-
-# Re-generate .env file
-ENV_FILE="${TRIM_APPDEST}/docker/.env"
-echo "FINAL_STORAGE_PATH=$FINAL_PATH" > "$ENV_FILE"
-
-echo "Updated .env file at $ENV_FILE"
-
 exit 0
