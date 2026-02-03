@@ -5,10 +5,9 @@ ting-reader-backend/storage
 ting-reader-backend/*.db
 ting-reader-backend/*.db-journal
 ting-reader-backend/*.log
+.github/*
 .env
-.env.example
 .git
 .gitignore
 README.md
 ting-reader-fpk
-fnpack
