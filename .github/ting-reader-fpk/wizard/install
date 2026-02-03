@@ -34,7 +34,7 @@
                 "type": "text",
                 "field": "wizard_storage_path",
                 "label": "有声书存储路径 (宿主机)",
-                "initValue": "{TRIM_APPDEST_VOL}/@appshare/ting-reader/storage",
+                "initValue": "${TRIM_APPDEST_VOL}/@appshare/ting-reader/storage",
                 "rules": [
                     {
                         "required": true,
@@ -44,7 +44,7 @@
             },
             {
                 "type": "tips",
-                "helpText": "<strong>存储说明：</strong><br/>默认路径已自动定位到您选择的安装磁盘的 <strong>@appshare</strong> 目录下。您可以根据需要修改映射路径。"
+                "helpText": "<strong>存储说明：</strong><br/>默认路径已根据您选择的安装磁盘自动生成。如果该路径不符合您的需求，请手动修改。"
             }
         ]
     }
