@@ -48,7 +48,8 @@ const Player: React.FC = () => {
     setVolume,
     themeColor,
     setThemeColor,
-    playChapter
+    playChapter,
+    setIsPlaying
   } = usePlayerStore();
 
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -301,7 +302,7 @@ const Player: React.FC = () => {
 
   // Handle Sleep Timer Countdown
   useEffect(() => {
-    if (sleepTimer === null || sleepTimer <= 0) return;
+    if (sleepTimer === null || sleepTimer <= 0 || !isPlaying) return;
 
     const interval = setInterval(() => {
       setSleepTimer(prev => {
@@ -311,7 +312,7 @@ const Player: React.FC = () => {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [sleepTimer === null]);
+  }, [sleepTimer === null, isPlaying]);
 
   // Handle Sleep Timer Expiration
   useEffect(() => {
@@ -488,6 +489,8 @@ const Player: React.FC = () => {
         onProgress={handleProgress}
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleEnded}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
         onError={(e) => {
           const audio = audioRef.current;
           if (audio && audio.error) {
@@ -708,7 +711,13 @@ const Player: React.FC = () => {
                         style={{ width: `${(currentTime / (duration || 1)) * 100}%` }}
                       />
                     </div>
-                    <div className="absolute left-1/2 -translate-x-1/2 bg-[#2D1B10]/90 dark:bg-primary-600/90 backdrop-blur-sm text-white px-2.5 sm:px-4 py-1 rounded-full text-[10px] sm:text-xs font-medium z-10 whitespace-nowrap shadow-lg">
+                    <div 
+                      className="absolute bg-[#2D1B10]/90 dark:bg-primary-600/90 backdrop-blur-sm text-white px-2.5 sm:px-4 py-1 rounded-full text-[10px] sm:text-xs font-medium z-10 whitespace-nowrap shadow-lg transition-all duration-150 ease-out"
+                      style={{ 
+                        left: `${(currentTime / (duration || 1)) * 100}%`,
+                        transform: 'translateX(-50%)'
+                      }}
+                    >
                       {formatTime(currentTime)} / {formatTime(duration)}
                     </div>
                     <input 
@@ -827,6 +836,36 @@ const Player: React.FC = () => {
                           </button>
                         ))}
                       </div>
+
+                      <div className="mt-1 flex items-center gap-1 p-1 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-slate-700 focus-within:border-primary-500/50 transition-colors">
+                        <input
+                          type="number"
+                          min="1"
+                          value={customMinutes}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '' || parseInt(val) >= 0) {
+                              setCustomMinutes(val);
+                            }
+                          }}
+                          placeholder="自定义分钟"
+                          className="flex-1 bg-transparent border-none outline-none px-2 py-1.5 text-xs dark:text-white placeholder:text-slate-400 w-0"
+                        />
+                        <button
+                          onClick={() => {
+                            const mins = parseInt(customMinutes);
+                            if (mins > 0) {
+                              setSleepTimer(mins * 60);
+                              setShowSleepTimer(false);
+                              setCustomMinutes('');
+                            }
+                          }}
+                          className="px-3 py-1.5 text-xs font-bold rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors shrink-0"
+                        >
+                          开启
+                        </button>
+                      </div>
+
                       <button
                         onClick={() => {
                           setSleepTimer(null);

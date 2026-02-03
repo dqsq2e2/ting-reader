@@ -23,6 +23,7 @@ interface PlayerState {
   nextChapter: () => void;
   prevChapter: () => void;
   playChapter: (book: Book, chapters: Chapter[], chapter: Chapter, resumePosition?: number) => void;
+  setIsPlaying: (isPlaying: boolean) => void;
 }
 
 export const usePlayerStore = create<PlayerState>((set, get) => ({
@@ -35,6 +36,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   playbackSpeed: 1.0,
   volume: 1.0,
   themeColor: '#F2EDE4', // Default background color
+
+  setIsPlaying: (isPlaying) => set({ isPlaying }),
 
   playBook: (book, chapters, startChapterId) => {
     // If no startChapterId is provided, find the most recently played chapter
