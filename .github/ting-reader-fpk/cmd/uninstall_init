@@ -1,37 +1,20 @@
 #!/bin/bash
 
 # Default storage path
-DEFAULT_STORAGE_PATH="/var/apps/ting-reader/shares/ting-reader/storage"
+DEFAULT_STORAGE_PATH="${TRIM_APPDEST_VOL}/@appshare/ting-reader/storage"
 
 # Path to the uninstall wizard file
-# 在飞牛系统中，应用根目录通常包含 target(TRIM_APPDEST) 和 wizard 等文件夹
 WIZARD_FILE="$(dirname "$TRIM_APPDEST")/wizard/uninstall"
 
 echo "Uninstall Init: Checking storage path mapping..."
 echo "Stored storage path: $wizard_storage_path"
+echo "Default storage path: $DEFAULT_STORAGE_PATH"
 
 if [ -f "$WIZARD_FILE" ]; then
     # 如果存储路径不是默认路径，说明用户自定义了映射
     if [ "$wizard_storage_path" != "$DEFAULT_STORAGE_PATH" ] && [ -n "$wizard_storage_path" ]; then
         echo "Custom storage path detected. Dynamically removing 'storage' option from wizard..."
         
-        # 移除 storage 选项块 (匹配 "value": "storage" 及其前后的 JSON 结构)
-        # 注意：这里假设了 JSON 的格式比较固定
-        # 移除从 { 到 } 包含 "value": "storage" 的块
-        # 并且由于 storage 是最后一个选项，我们需要处理前一个选项的逗号
-        
-        # 1. 移除 storage 选项及其所在的对象块
-        sed -i '/"value": "storage"/ {N;N;d}' "$WIZARD_FILE" # 移除匹配行及后两行
-        sed -i '/"value": "storage"/ -2,+2 d' "$WIZARD_FILE" # 尝试移除整个块
-        
-        # 更稳妥的 sed 方式：
-        # 匹配包含 "storage" 的行，并删除其向上 2 行到向下 1 行的范围
-        sed -i '/"value": "storage"/!b;n;n;d' "$WIZARD_FILE" # 这只是示例
-        
-        # 考虑到环境限制，我们用一个简单的标记法或直接重写文件可能更可靠
-        # 但既然是 shell 脚本，我们可以用 python 或 node (如果可用) 或者简单的 grep/sed 组合
-        
-        # 方案：如果检测到自定义路径，直接替换为一个预先准备好的不含 storage 选项的 JSON 内容
         cat > "$WIZARD_FILE" <<EOF
 [
     {

@@ -7,9 +7,9 @@ CLEAN_OPTIONS="$wizard_clean_options"
 STORAGE_PATH="$wizard_storage_path"
 
 # 定义内部默认路径
-DEFAULT_DATA_PATH="/var/apps/ting-reader/shares/ting-reader/data"
-DEFAULT_CACHE_PATH="/var/apps/ting-reader/shares/ting-reader/cache"
-DEFAULT_STORAGE_PATH="/var/apps/ting-reader/shares/ting-reader/storage"
+DEFAULT_DATA_PATH="${TRIM_APPDEST_VOL}/@appshare/ting-reader/data"
+DEFAULT_CACHE_PATH="${TRIM_APPDEST_VOL}/@appshare/ting-reader/cache"
+DEFAULT_STORAGE_PATH="${TRIM_APPDEST_VOL}/@appshare/ting-reader/storage"
 
 # 判断环境变量中是否包含指定的清理项
 contains_option() {
