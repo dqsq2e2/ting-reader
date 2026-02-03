@@ -20,7 +20,9 @@ import {
   Save,
   X,
   Sparkles,
-  Loader2
+  Loader2,
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
 import { getCoverUrl } from '../utils/image';
 import { useAuthStore } from '../store/authStore';
@@ -36,6 +38,9 @@ const BookDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isFavorite, setIsFavorite] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deleteSourceFiles, setDeleteSourceFiles] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [editData, setEditData] = useState<Partial<Book>>({});
   const [scraping, setScraping] = useState(false);
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
@@ -199,6 +204,20 @@ const BookDetailPage: React.FC = () => {
       alert('刮削失败');
     } finally {
       setScraping(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    try {
+      setDeleting(true);
+      await apiClient.delete(`/api/books/${id}?deleteFiles=${deleteSourceFiles}`);
+      navigate('/', { replace: true });
+    } catch (err) {
+      console.error('Failed to delete book', err);
+      alert('删除书籍失败');
+    } finally {
+      setDeleting(false);
+      setIsDeleteModalOpen(false);
     }
   };
 
@@ -658,17 +677,83 @@ const BookDetailPage: React.FC = () => {
 
               <div className="flex gap-4 mt-8">
                 <button 
+                  onClick={() => {
+                    setIsEditModalOpen(false);
+                    setIsDeleteModalOpen(true);
+                  }}
+                  className="px-4 py-3 font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all flex items-center gap-2"
+                >
+                  <Trash2 size={20} />
+                  删除书籍
+                </button>
+                <div className="flex-1" />
+                <button 
                   onClick={() => setIsEditModalOpen(false)}
-                  className="flex-1 py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all"
+                  className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all"
                 >
                   取消
                 </button>
                 <button 
                   onClick={handleEditSave}
-                  className="flex-1 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 flex items-center justify-center gap-2 transition-all"
+                  className="px-8 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 flex items-center justify-center gap-2 transition-all"
                 >
                   <Save size={20} />
                   保存更改
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {isDeleteModalOpen && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsDeleteModalOpen(false)}></div>
+          <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-8">
+              <div className="w-16 h-16 bg-red-50 dark:bg-red-900/20 rounded-2xl flex items-center justify-center text-red-500 mx-auto mb-6">
+                <AlertTriangle size={32} />
+              </div>
+              
+              <h3 className="text-xl font-bold text-center dark:text-white mb-2">确认删除书籍？</h3>
+              <p className="text-slate-500 dark:text-slate-400 text-center mb-8">
+                此操作将从书架中移除《{book.title}》，并清除所有相关的播放进度。
+              </p>
+
+              {book.library_type === 'local' && (
+                <div 
+                  className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl mb-8 cursor-pointer group"
+                  onClick={() => setDeleteSourceFiles(!deleteSourceFiles)}
+                >
+                  <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${
+                    deleteSourceFiles 
+                      ? 'bg-red-500 border-red-500 text-white' 
+                      : 'border-slate-300 dark:border-slate-600 group-hover:border-red-400'
+                  }`}>
+                    {deleteSourceFiles && <X size={16} strokeWidth={3} />}
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-bold dark:text-white">同时删除本地源文件</p>
+                    <p className="text-xs text-slate-500">警告：此操作不可撤销</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => setIsDeleteModalOpen(false)}
+                  className="flex-1 py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all"
+                >
+                  取消
+                </button>
+                <button 
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl shadow-lg shadow-red-500/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                >
+                  {deleting ? <Loader2 className="animate-spin" size={20} /> : <Trash2 size={20} />}
+                  确认删除
                 </button>
               </div>
             </div>

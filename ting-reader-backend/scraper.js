@@ -1,5 +1,6 @@
 const axios = require('axios');
 const crypto = require('crypto');
+const cheerio = require('cheerio');
 
 // Specific headers and cookies from Abs-Ximalaya-1.1.1
 const detailApiHeaders = {
@@ -11,6 +12,51 @@ const detailApiHeaders = {
 };
 
 const detailApiCookies = '1&_device=android&28b5647f-40d9-3cb6-802a-54905eccc23d&9.3.96; 1&_token=575426552&C29CC6B0140C8E529835C3060AD1FE97FBF87FFBF4DB5BFB15C60DECE3899A36EDA3462173EE229Mbf90403ACAFF0C4_; channel=and-f5; impl=com.ximalaya.ting.android; osversion=28; fp=009517657x2222322v64v050210000k120211200200000001103611000040; device_model=SM-S9110; XUM=CAAn8P8v; c-oper=%E4%B8%AD%E5%9B%BD%E7%A7%BB%E5%8A%A8; net-mode=WIFI; res=1600%2C900; AID=Yjg2YWIyZTRmNzYyN2FjNA==; manufacturer=samsung; umid=ai0fc70f150ccc444005b5c665d7ee7861; xm_grade=0; specialModeStatus=0; yzChannel=and-f5; _xmLog=h5&9550461b-17b4-4dcc-ab09-8609fcda6c02&2.4.24; xm-page-viewid=album-detail-intro';
+
+// 移除购买须知及其后的所有内容 (Synced from Abs-Ximalaya)
+function removePurchaseNotes(htmlContent) {
+    if (!htmlContent) return '';
+    const $ = cheerio.load(htmlContent);
+
+    let found = false;
+    $('p, div, span').each(function() {
+        const $el = $(this);
+        const text = $el.text();
+        if (!found && /(购买须知|温馨提示|版权声明|加听友群|联系方式|侵权|主播联系|本节目|本作品)/.test(text)) {
+            found = true;
+        }
+        if (found) {
+            $el.remove();
+        }
+    });
+
+    return $.html();
+}
+
+// 移除结尾多余的 <br> 标签 (Synced from Abs-Ximalaya)
+function removeTrailingBr(html) {
+  if (!html) return '';
+  const $ = cheerio.load(html);
+
+  // 删除 body 末尾所有连续的 <br> 标签（无论是否被包裹）
+  $('body').find('br').each((_, el) => {
+    // 如果这个 <br> 之后没有非空内容，就删掉
+    const next = $(el).nextAll().text().trim();
+    if (!next && $(el).parent().nextAll().text().trim() === '') {
+      $(el).remove();
+    }
+  });
+
+  // 清空仅包含 <br> 的标签（例如 <span><br><br></span>）
+  $('body').find('*').each((_, el) => {
+    const content = $(el).html()?.trim();
+    if (content && /^(\s*<br\s*\/?>\s*)+$/.test(content)) {
+      $(el).empty();
+    }
+  });
+
+  return $.html();
+}
 
 /**
  * Generate xm-sign for Ximalaya API
@@ -311,13 +357,15 @@ async function processAlbum(album, headers = {}) {
       const mainInfo = detailData.albumInfo || detailData.mainInfo || detailData.album || {};
       const richIntro = detailData.intro?.richIntro || detailData.intro?.intro || detailData.albumInfo?.intro || '';
       
-      // Clean up rich intro
-      let description = richIntro
+      // Clean up rich intro using synced logic from Abs-Ximalaya
+      let description = removePurchaseNotes(richIntro);
+      description = removeTrailingBr(description);
+      
+      // Final text-only conversion and cleanup
+      description = description
         .replace(/<br\s*\/?>/gi, '\n')
         .replace(/<p[^>]*>/gi, '\n')
         .replace(/<[^>]+>/g, ' ')
-        // Pre-filter: remove common garbage markers and everything following them
-        .replace(/[【\[\(]?(购买须知|温馨提示|加入听友群|版权声明|版权所有|侵权|联系方式|微信|关注|客服|打赏|订阅|福利|加群|主播联系|本节目|本作品)[】\]\)]?.*/gs, '')
         .split('\n')
         .map(line => line.trim())
         .filter(line => {

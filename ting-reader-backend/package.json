@@ -1,6 +1,6 @@
 {
   "name": "ting-reader-backend",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -14,6 +14,7 @@
     "axios": "^1.13.4",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.6.2",
+    "cheerio": "^1.2.0",
     "colorthief": "^2.6.0",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",

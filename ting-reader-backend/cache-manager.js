@@ -107,10 +107,35 @@ async function clearOldCache() {
   }
 }
 
+async function deleteChapterCache(chapterId) {
+  try {
+    const cachePath = getCachePath(chapterId);
+    if (fs.existsSync(cachePath)) {
+      await fsPromises.unlink(cachePath);
+    }
+  } catch (err) {
+    // Ignore errors
+  }
+}
+
+async function clearCacheForBook(bookId, db) {
+  try {
+    const chapters = db.prepare('SELECT id FROM chapters WHERE book_id = ?').all(bookId);
+    for (const chapter of chapters) {
+      await deleteChapterCache(chapter.id);
+    }
+    console.log(`Cleared cache for book ${bookId}`);
+  } catch (err) {
+    console.error(`Failed to clear cache for book ${bookId}:`, err.message);
+  }
+}
+
 module.exports = {
   isCached,
   saveToCache,
   getCachePath,
   clearOldCache,
-  getMimeType
+  getMimeType,
+  clearCacheForBook,
+  deleteChapterCache
 };

@@ -7,6 +7,7 @@ const mm = require('music-metadata');
 const { scrapeXimalaya } = require('./scraper');
 const { decryptXM } = require('./xm-decryptor');
 const { calculateThemeColor } = require('./color-utils');
+const cacheManager = require('./cache-manager');
 
 // Custom Tokenizer for WebDAV to allow music-metadata to perform Range requests
 async function getAccurateMetadata(client, filePath, virtualSize, realSize, isXM = false) {
@@ -248,8 +249,41 @@ async function scanLibrary(libraryId, taskId) {
     db.prepare("UPDATE tasks SET message = ? WHERE id = ?").run(`正在准备扫描: ${library.name}`, taskId);
   }
 
-  await recursiveScan(client, libraryId, rootPath, taskId);
+  // Track found items to cleanup missing ones
+  const foundBooks = new Set();
+  const foundChapters = new Set();
+
+  await recursiveScan(client, libraryId, rootPath, taskId, foundBooks, foundChapters);
   
+  // Cleanup logic: Remove books and chapters that are no longer in the storage
+  if (taskId) {
+    db.prepare("UPDATE tasks SET message = ? WHERE id = ?").run(`正在清理不存在的记录...`, taskId);
+  }
+
+  // 1. Find all books in this library that were not found during scan
+  const currentBooks = db.prepare('SELECT id FROM books WHERE library_id = ?').all(libraryId);
+  for (const book of currentBooks) {
+    if (!foundBooks.has(book.id)) {
+      console.log(`Book ${book.id} no longer exists, deleting...`);
+      // Clear cache for book before deleting
+      await cacheManager.clearCacheForBook(book.id, db);
+      // Delete chapters first (due to FK)
+      db.prepare('DELETE FROM chapters WHERE book_id = ?').run(book.id);
+      db.prepare('DELETE FROM books WHERE id = ?').run(book.id);
+    } else {
+      // 2. For books that still exist, check if any chapters were removed
+      const currentChapters = db.prepare('SELECT id FROM chapters WHERE book_id = ?').all(book.id);
+      for (const chapter of currentChapters) {
+        if (!foundChapters.has(chapter.id)) {
+          console.log(`Chapter ${chapter.id} no longer exists, deleting...`);
+          // Clear cache for chapter
+          await cacheManager.deleteChapterCache(chapter.id);
+          db.prepare('DELETE FROM chapters WHERE id = ?').run(chapter.id);
+        }
+      }
+    }
+  }
+
   // Update last scanned time
   db.prepare('UPDATE libraries SET last_scanned_at = CURRENT_TIMESTAMP WHERE id = ?').run(libraryId);
   
@@ -259,7 +293,7 @@ async function scanLibrary(libraryId, taskId) {
   }
 }
 
-async function recursiveScan(client, libraryId, currentPath, taskId) {
+async function recursiveScan(client, libraryId, currentPath, taskId, foundBooks, foundChapters) {
   let directoryItems;
   try {
     if (taskId) {
@@ -309,18 +343,18 @@ async function recursiveScan(client, libraryId, currentPath, taskId) {
     // Group files by their album metadata to handle mixed folders
     const groups = await groupFilesByAlbum(client, audioFiles);
     
-    for (const [albumName, files] of Object.entries(groups)) {
+    for (const [groupKey, albumInfo] of Object.entries(groups)) {
       if (taskId) {
-        db.prepare("UPDATE tasks SET message = ? WHERE id = ?").run(`处理书籍: ${albumName}`, taskId);
+        db.prepare("UPDATE tasks SET message = ? WHERE id = ?").run(`处理书籍: ${albumInfo.name}`, taskId);
       }
-      await processBookFiles(libraryId, currentPath, albumName, files, imageFiles, taskId);
+      await processBookFiles(libraryId, currentPath, albumInfo, albumInfo.files, imageFiles, taskId, foundBooks, foundChapters);
     }
   }
 
   // Continue scanning subdirectories
   for (const dir of subDirs) {
     try {
-      await recursiveScan(client, libraryId, dir, taskId);
+      await recursiveScan(client, libraryId, dir, taskId, foundBooks, foundChapters);
     } catch (error) {
       console.error(`Error scanning subdirectory ${dir}:`, error.message);
       // We don't throw here to allow other subdirectories to be scanned
@@ -340,8 +374,6 @@ async function groupFilesByAlbum(client, audioFiles) {
     let album = null;
     
     // Only read metadata for grouping if it's a generic directory or we suspect multiple albums
-    // In many cases, files in the same folder belong together.
-    // We'll read the first 1MB to get tags
     try {
       const stream = client.createReadStream(file.filename, { 
         range: { start: 0, end: 1048576 }, // 1MB is usually enough for ID3 tags
@@ -352,22 +384,34 @@ async function groupFilesByAlbum(client, audioFiles) {
         album = String(metadata.common.album).trim();
       }
     } catch (err) {
-      // Ignore errors, fallback to dirName
+      // Ignore errors
     }
     
+    // Identity object: tells us if this album name came from metadata or folder
     const groupKey = album || dirName;
     if (!groups[groupKey]) {
-      groups[groupKey] = [];
+      groups[groupKey] = {
+        name: groupKey,
+        isFromMetadata: !!album,
+        files: []
+      };
     }
-    groups[groupKey].push(file);
+    groups[groupKey].files.push(file);
   }
   
   return groups;
 }
 
-async function processBookFiles(libraryId, dirPath, albumName, audioFiles, imageFiles, taskId) {
-  // Use a combination of path and albumName for hash to support multiple books in one folder
-  const bookHash = crypto.createHash('md5').update(`${libraryId}:${dirPath}:${albumName}`).digest('hex');
+async function processBookFiles(libraryId, dirPath, albumInfo, audioFiles, imageFiles, taskId, foundBooks, foundChapters) {
+  const { name: albumName, isFromMetadata } = albumInfo;
+  
+  // If identity is from metadata, we use a global hash (Library + Album) to allow merging across folders.
+  // If it's from a folder name, we include the path to keep it unique to this folder.
+  const hashInput = isFromMetadata 
+    ? `${libraryId}:album:${albumName}` 
+    : `${libraryId}:path:${dirPath}:${albumName}`;
+    
+  const bookHash = crypto.createHash('md5').update(hashInput).digest('hex');
   
   const library = db.prepare('SELECT * FROM libraries WHERE id = ?').get(libraryId);
   const client = getStorageClient(library);
@@ -555,6 +599,9 @@ async function processBookFiles(libraryId, dirPath, albumName, audioFiles, image
     }
   }
 
+  // Mark book as found
+  foundBooks.add(book.id);
+
   // Process chapters
   // Sort audio files by name to ensure correct order
   audioFiles.sort((a, b) => a.basename.localeCompare(b.basename, undefined, { numeric: true, sensitivity: 'base' }));
@@ -566,7 +613,7 @@ async function processBookFiles(libraryId, dirPath, albumName, audioFiles, image
     const file = audioFiles[i];
     
     // Check if chapter exists
-    const existingChapter = db.prepare('SELECT id FROM chapters WHERE book_id = ? AND path = ?').get(book.id, file.filename);
+    let existingChapter = db.prepare('SELECT id FROM chapters WHERE book_id = ? AND path = ?').get(book.id, file.filename);
     
     if (!existingChapter) {
       if (taskId && i % 10 === 0) {
@@ -676,11 +723,17 @@ async function processBookFiles(libraryId, dirPath, albumName, audioFiles, image
         finalChapterTitle = cleanedTagTitle;
       }
 
+      const chapterId = uuidv4();
       db.prepare(`
         INSERT INTO chapters (id, book_id, title, path, duration, chapter_index, is_extra)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(uuidv4(), book.id, finalChapterTitle, file.filename, duration, chapterIndex, isExtra ? 1 : 0);
+      `).run(chapterId, book.id, finalChapterTitle, file.filename, duration, chapterIndex, isExtra ? 1 : 0);
+      
+      existingChapter = { id: chapterId };
     }
+    
+    // Mark chapter as found
+    foundChapters.add(existingChapter.id);
   }
   console.log(`Finished processing book: ${title}`);
 }

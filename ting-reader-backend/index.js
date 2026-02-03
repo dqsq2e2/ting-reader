@@ -140,7 +140,17 @@ app.post('/api/libraries', authenticate, isAdmin, (req, res) => {
     INSERT INTO libraries (id, name, type, url, username, password, root_path)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(id, name, type, url, username, password, root_path);
-  res.json({ id });
+
+  // Auto-scan after adding library
+  const taskId = uuidv4();
+  db.prepare("INSERT INTO tasks (id, type, status, payload) VALUES (?, ?, ?, ?)").run(taskId, 'scan', 'pending', JSON.stringify({ libraryId: id }));
+  
+  scanLibrary(id, taskId).catch(err => {
+    console.error('Auto-scan error:', err);
+    db.prepare("UPDATE tasks SET status = ?, error = ? WHERE id = ?").run('failed', err.message, taskId);
+  });
+
+  res.json({ id, taskId });
 });
 
 app.delete('/api/libraries/:id', authenticate, isAdmin, (req, res) => {
@@ -235,8 +245,9 @@ app.get('/api/tags', authenticate, (req, res) => {
 
 app.get('/api/books/:id', authenticate, (req, res) => {
   const book = db.prepare(`
-    SELECT b.*, (f.user_id IS NOT NULL) as is_favorite
+    SELECT b.*, l.type as library_type, (f.user_id IS NOT NULL) as is_favorite
     FROM books b
+    JOIN libraries l ON b.library_id = l.id
     LEFT JOIN favorites f ON b.id = f.book_id AND f.user_id = ?
     WHERE b.id = ?
   `).get(req.userId, req.params.id);
@@ -244,6 +255,39 @@ app.get('/api/books/:id', authenticate, (req, res) => {
   if (!book) return res.status(404).json({ error: 'Book not found' });
   
   res.json(book);
+});
+
+app.delete('/api/books/:id', authenticate, isAdmin, async (req, res) => {
+  const { deleteFiles } = req.query;
+  const bookId = req.params.id;
+  
+  const book = db.prepare('SELECT * FROM books WHERE id = ?').get(bookId);
+  if (!book) return res.status(404).json({ error: 'Book not found' });
+  
+  const library = db.prepare('SELECT * FROM libraries WHERE id = ?').get(book.library_id);
+  
+  try {
+    // 1. Clear cache files regardless of source deletion
+    await cacheManager.clearCacheForBook(bookId, db);
+    
+    // 2. Delete source files if requested and library is local
+    if (deleteFiles === 'true' && library.type === 'local') {
+      const fullPath = path.join(STORAGE_ROOT, book.path);
+      if (fs.existsSync(fullPath) && fullPath.startsWith(STORAGE_ROOT)) {
+        console.log(`Deleting local source files: ${fullPath}`);
+        // Be careful: use fs.rmSync or similar for recursive deletion
+        fs.rmSync(fullPath, { recursive: true, force: true });
+      }
+    }
+    
+    // 3. Delete from database (FK will handle chapters and progress)
+    db.prepare('DELETE FROM books WHERE id = ?').run(bookId);
+    
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Delete book error:', err);
+    res.status(500).json({ error: 'Failed to delete book', details: err.message });
+  }
 });
 
 app.get('/api/books/:id/chapters', authenticate, (req, res) => {
@@ -555,6 +599,23 @@ app.get('/api/stream/:chapterId', authenticate, async (req, res) => {
     
     const client = getStorageClient(library);
     const isXM = chapter.path.toLowerCase().endsWith('.xm');
+    const isLocal = library.type === 'local';
+
+    // Optimization: Local sources (non-XM) don't need caching and can be served directly
+    if (isLocal && !isXM) {
+      const fullPath = path.join(STORAGE_ROOT, chapter.path);
+      if (fs.existsSync(fullPath)) {
+        console.log(`Serving local file directly: ${fullPath}`);
+        return res.sendFile(fullPath, {
+          acceptRanges: true,
+          headers: {
+            'Cross-Origin-Resource-Policy': 'cross-origin',
+            'Access-Control-Allow-Origin': '*',
+            'X-Content-Type-Options': 'nosniff'
+          }
+        });
+      }
+    }
 
     if (isXM) {
       // XM Decryption Logic
@@ -703,8 +764,14 @@ async function preloadChapter(chapterId, library) {
     const chapter = db.prepare('SELECT * FROM chapters WHERE id = ?').get(chapterId);
     if (!chapter) return;
     
-    const client = getStorageClient(library);
+    // Optimization: Local sources (non-XM) don't need preloading/caching
     const isXM = chapter.path.toLowerCase().endsWith('.xm');
+    if (library.type === 'local' && !isXM) {
+      console.log(`Skipping preload for local file: ${chapterId}`);
+      return;
+    }
+    
+    const client = getStorageClient(library);
     
     let data;
     if (isXM) {

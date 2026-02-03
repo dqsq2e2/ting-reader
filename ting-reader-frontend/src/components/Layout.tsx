@@ -59,8 +59,8 @@ const Layout: React.FC = () => {
 
   const adminItems = [
     { icon: <Database size={20} />, label: '库管理', path: '/admin/libraries' },
-    { icon: <Users size={20} />, label: '用户管理', path: '/admin/users' },
     { icon: <Terminal size={20} />, label: '任务日志', path: '/admin/tasks' },
+    { icon: <Users size={20} />, label: '用户管理', path: '/admin/users' },
   ];
 
   const handleLogout = () => {
