@@ -89,15 +89,28 @@ jobs:
         if: steps.filter.outputs.docker == 'true' || steps.filter.outputs.fpk == 'true'
         run: |
           fnpack build --directory ting-reader-fpk
-          mv ting-reader.fpk ting-reader-${{ env.VERSION }}.fpk
+          # 确保文件存在并重命名，增加容错性
+          if [ -f "ting-reader.fpk" ]; then
+            mv ting-reader.fpk ting-reader-${{ env.VERSION }}.fpk
+          else
+            # 如果名字不是 ting-reader.fpk，尝试查找任何 .fpk 文件
+            FPK_NAME=$(ls *.fpk | head -n 1)
+            if [ -n "$FPK_NAME" ]; then
+              mv "$FPK_NAME" ting-reader-${{ env.VERSION }}.fpk
+            else
+              echo "Error: No .fpk file found after build"
+              exit 1
+            fi
+          fi
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main' && (steps.filter.outputs.docker == 'true' || steps.filter.outputs.fpk == 'true')
         with:
           tag_name: v${{ env.VERSION }}
           name: Release v${{ env.VERSION }}
-          files: |
-            ting-reader-${{ env.VERSION }}.fpk
+          files: ting-reader-${{ env.VERSION }}.fpk
+          generate_release_notes: true
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
