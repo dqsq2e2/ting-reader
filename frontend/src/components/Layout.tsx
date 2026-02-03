@@ -120,7 +120,7 @@ const Layout: React.FC = () => {
       `}>
         <div className="flex flex-col h-full p-4">
           <div className="hidden xl:flex items-center gap-3 px-4 py-6 mb-4">
-            <img src="/logo.png" alt="Logo" className="w-10 h-10 rounded-xl shadow-lg shadow-primary-500/10 object-cover" />
+            <img src="/logo.png" alt="Logo" className="w-10 h-10 shadow-lg shadow-primary-500/10 object-contain" />
             <span className="font-bold text-xl dark:text-white tracking-tight">Ting Reader</span>
           </div>
 
@@ -176,7 +176,7 @@ const Layout: React.FC = () => {
         {/* Mobile Header */}
         <div className="xl:hidden h-16 shrink-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 z-40 pt-[env(safe-area-inset-top)]">
           <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="Logo" className="w-9 h-9 rounded-xl shadow-lg shadow-primary-500/10 object-cover" />
+            <img src="/logo.png" alt="Logo" className="w-9 h-9 shadow-lg shadow-primary-500/10 object-contain" />
             <span className="font-bold text-lg dark:text-white tracking-tight">Ting Reader</span>
           </div>
           <div className="flex items-center gap-2">

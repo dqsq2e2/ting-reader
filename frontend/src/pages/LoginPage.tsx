@@ -35,8 +35,8 @@ const LoginPage: React.FC = () => {
       <div className="flex-1 flex items-center justify-center w-full">
         <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-xl p-8 space-y-8 border border-slate-200 dark:border-slate-800">
           <div className="text-center">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary-600 text-white shadow-xl shadow-primary-500/20 mb-6">
-              <Headphones size={32} />
+            <div className="inline-flex items-center justify-center w-20 h-20 mb-6">
+              <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
             </div>
             <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Ting Reader</h1>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">您的私有有声书馆</p>
