@@ -1,0 +1,18 @@
+{
+  "name": "ting-reader",
+  "version": "1.0.0",
+  "description": "A self-hosted audiobook platform",
+  "private": true,
+  "scripts": {
+    "install:all": "npm install && cd ting-reader-frontend && npm install && cd ../ting-reader-backend && npm install",
+    "build:frontend": "cd ting-reader-frontend && npm run build",
+    "start:backend": "cd ting-reader-backend && npm start"
+  },
+  "keywords": [
+    "audiobook",
+    "self-hosted",
+    "fnnas"
+  ],
+  "author": "dqsq2e2",
+  "license": "MIT"
+}
