@@ -1,4 +1,4 @@
-name: Docker Build and Push
+name: Docker Build, Push and FPK Release
 
 on:
   push:
@@ -9,6 +9,8 @@ on:
       - '.gitignore'
       - 'docs/**'
       - '.github/ISSUE_TEMPLATE/**'
+      - 'ting-reader-fpk/**'
+      - 'fnpack'
 
 jobs:
   docker:
@@ -16,6 +18,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Get version from package.json
+        id: get_version
+        run: |
+          VERSION=$(jq -r '.version' ting-reader-backend/package.json)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Set up QEMU for multi-arch
         uses: docker/setup-qemu-action@v3
@@ -37,6 +46,37 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: dqsq2e2/ting-reader:latest
+          tags: |
+            dqsq2e2/ting-reader:latest
+            dqsq2e2/ting-reader:${{ env.VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Prepare fnpack
+        run: |
+          # 使用代码仓库中的 fnpack
+          chmod +x fnpack
+          sudo mv fnpack /usr/local/bin/fnpack
+
+      - name: Update FPK configuration
+        run: |
+          # 更新 manifest 中的版本号
+          sed -i "s/^version[[:space:]]*=.*/version = ${{ env.VERSION }}/" ting-reader-fpk/manifest
+          
+          # 更新 docker-compose.yaml 中的镜像标签
+          sed -i "s|image: dqsq2e2/ting-reader:latest|image: dqsq2e2/ting-reader:${{ env.VERSION }}|g" ting-reader-fpk/app/docker/docker-compose.yaml
+
+      - name: Build FPK
+        run: |
+          fnpack build --directory ting-reader-fpk
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: Release v${{ env.VERSION }}
+          files: |
+            ting-reader.fpk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
