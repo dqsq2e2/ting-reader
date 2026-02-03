@@ -1,5 +1,5 @@
 # Stage 1: Build Frontend
-FROM node:20-alpine AS frontend-builder
+FROM node:20-slim AS frontend-builder
 WORKDIR /app/frontend
 COPY ting-reader-frontend/package*.json ./
 # Use npm ci for faster and more reliable builds
@@ -8,18 +8,22 @@ COPY ting-reader-frontend/ ./
 RUN npm run build
 
 # Stage 2: Runtime
-FROM node:20-alpine
+FROM node:20-slim
 WORKDIR /app
 
 # Install build dependencies for better-sqlite3
-RUN apk add --no-cache python3 make g++ 
+RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY ting-reader-backend/package*.json ./
 # Use npm ci and omit devDependencies
 RUN npm ci --omit=dev
 
 # Remove build dependencies to keep image small
-RUN apk del python3 make g++
+RUN apt-get purge -y python3 make g++ && apt-get autoremove -y
 
 COPY ting-reader-backend/ ./
 # Copy built frontend from stage 1
