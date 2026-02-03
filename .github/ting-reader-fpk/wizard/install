@@ -34,7 +34,7 @@
                 "type": "text",
                 "field": "wizard_storage_path",
                 "label": "有声书存储路径 (宿主机)",
-                "initValue": "${TRIM_APPDEST_VOL}/@appshare/ting-reader/storage",
+                "initValue": "",
                 "rules": [
                     {
                         "required": true,
@@ -44,7 +44,7 @@
             },
             {
                 "type": "tips",
-                "helpText": "<strong>存储说明：</strong><br/>默认路径已根据您选择的安装磁盘自动生成。如果该路径不符合您的需求，请手动修改。"
+                "helpText": "请确保您输入的宿主机路径存在，且容器有权限访问。应用安装完成后，您需要将音频文件上传到该路径。"
             }
         ]
     }

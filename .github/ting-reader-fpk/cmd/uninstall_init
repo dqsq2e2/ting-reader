@@ -1,55 +1,5 @@
 #!/bin/bash
 
-# Default storage path
-DEFAULT_STORAGE_PATH="${TRIM_APPDEST_VOL}/@appshare/ting-reader/storage"
-
-# Path to the uninstall wizard file
-WIZARD_FILE="$(dirname "$TRIM_APPDEST")/wizard/uninstall"
-
-echo "Uninstall Init: Checking storage path mapping..."
-echo "Stored storage path: $wizard_storage_path"
-echo "Default storage path: $DEFAULT_STORAGE_PATH"
-
-if [ -f "$WIZARD_FILE" ]; then
-    # 如果存储路径不是默认路径，说明用户自定义了映射
-    if [ "$wizard_storage_path" != "$DEFAULT_STORAGE_PATH" ] && [ -n "$wizard_storage_path" ]; then
-        echo "Custom storage path detected. Dynamically removing 'storage' option from wizard..."
-        
-        # 重写文件，移除 storage 选项
-        cat > "$WIZARD_FILE" <<EOF
-[
-    {
-        "stepTitle": "确认卸载",
-        "items": [
-            {
-                "type": "tips",
-                "helpText": "您即将卸载 Ting Reader。请选择是否需要清理应用数据："
-            },
-            {
-                "type": "checkbox",
-                "field": "wizard_clean_options",
-                "label": "数据清理选项",
-                "initValue": "",
-                "options": [
-                    {
-                        "label": "清理数据库与配置 (data)",
-                        "value": "data"
-                    },
-                    {
-                        "label": "清理缓存文件 (cache)",
-                        "value": "cache"
-                    }
-                ]
-            },
-            {
-                "type": "tips",
-                "helpText": "<strong>说明：</strong><br/>1. 默认不勾选则保留所有数据。<br/>2. 检测到您自定义了 storage 映射路径，为保护数据安全，已自动隐藏清理 storage 的选项。"
-            }
-        ]
-    }
-]
-EOF
-    fi
-fi
+### This script is called before the user uninstalls the application.
 
 exit 0

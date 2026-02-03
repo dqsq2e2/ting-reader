@@ -1,26 +1,5 @@
 #!/bin/bash
 
-# 获取 FPK 解压后的临时目录
-# 根据文档，TRIM_TEMP_TPKFILE 是 FPK 包解压后的根目录
-WIZARD_FILE="${TRIM_TEMP_TPKFILE}/wizard/install"
-
-echo "Install Init: Processing wizard file for volume path replacement..."
-echo "Target volume path (TRIM_APPDEST_VOL): $TRIM_APPDEST_VOL"
-echo "Temp TPK directory: $TRIM_TEMP_TPKFILE"
-
-if [ -f "$WIZARD_FILE" ]; then
-    # 物理替换 JSON 文件中的占位符
-    # 使用 \${TRIM_APPDEST_VOL} 匹配文本，替换为变量 $TRIM_APPDEST_VOL 的值
-    # 使用 | 作为分隔符，避免路径中的 / 导致 sed 报错
-    sed -i "s|\${TRIM_APPDEST_VOL}|$TRIM_APPDEST_VOL|g" "$WIZARD_FILE"
-    
-    if [ $? -eq 0 ]; then
-        echo "Successfully updated $WIZARD_FILE with actual volume path."
-    else
-        echo "Error: Failed to update wizard file." >&2
-    fi
-else
-    echo "Error: Wizard file not found at $WIZARD_FILE" >&2
-fi
+### This script is called before the user installs the application.
 
 exit 0

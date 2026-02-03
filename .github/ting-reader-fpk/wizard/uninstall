@@ -19,16 +19,12 @@
                     {
                         "label": "清理缓存文件 (cache)",
                         "value": "cache"
-                    },
-                    {
-                        "label": "清理有声书文件 (storage)",
-                        "value": "storage"
                     }
                 ]
             },
             {
                 "type": "tips",
-                "helpText": "<strong>说明：</strong><br/>1. 默认不勾选则保留所有数据。<br/>2. 为了保护您的数据安全，如果您在安装时自定义了 storage 的映射路径，该清理选项将不会出现在列表中。"
+                "helpText": "<strong>说明：</strong><br/>1. 默认不勾选则保留所有数据。<br/>2. 为保护您的有声书数据安全，卸载程序<strong>不会</strong>清理 storage 目录下的音频文件。如需删除，请前往文件管理手动清理。"
             }
         ]
     }
