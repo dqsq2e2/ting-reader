@@ -12,21 +12,26 @@
             {
                 "name": "ting-reader/data",
                 "permission": {
-                    "rw": ["docker-ting-reader"]
-                }
-            },
-            {
-                "name": "ting-reader/storage",
-                "permission": {
-                    "rw": ["docker-ting-reader"]
+                    "rw": [
+                        "docker-ting-reader"
+                    ]
                 }
             },
             {
                 "name": "ting-reader/cache",
                 "permission": {
-                    "rw": ["docker-ting-reader"]
+                    "rw": [
+                        "docker-ting-reader"
+                    ]
                 }
             }
         ]
-    }
+    },
+    "authorization-path": [
+        {
+            "field": "wizard_storage_path",
+            "description": "有声书存储目录",
+            "permission": "rw"
+        }
+    ]
 }
