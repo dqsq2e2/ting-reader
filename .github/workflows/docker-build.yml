@@ -19,12 +19,12 @@ jobs:
         with:
           filters: |
             docker:
-              - 'ting-reader-backend/**'
-              - 'ting-reader-frontend/**'
+              - 'backend/**'
+              - 'frontend/**'
               - 'Dockerfile'
               - 'docker-compose.yml'
             fpk:
-              - 'ting-reader-fpk/**'
+              - '.github/ting-reader-fpk/**'
               - '.github/workflows/fnpack'
             version:
               - 'package.json'
@@ -89,12 +89,12 @@ jobs:
       - name: Update FPK configuration
         if: steps.filter.outputs.fpk == 'true' || steps.filter.outputs.version == 'true' || steps.check_release.outputs.exists != 'true'
         run: |
-          sed -i "s/^version[[:space:]]*=.*/version = ${{ env.VERSION }}/" ting-reader-fpk/manifest
+          sed -i "s/^version[[:space:]]*=.*/version = ${{ env.VERSION }}/" .github/ting-reader-fpk/manifest
 
       - name: Build FPK
         if: steps.filter.outputs.fpk == 'true' || steps.filter.outputs.version == 'true' || steps.check_release.outputs.exists != 'true'
         run: |
-          fnpack build --directory ting-reader-fpk
+          fnpack build --directory .github/ting-reader-fpk
           mv ting-reader.fpk ting-reader-${{ env.VERSION }}.fpk
 
       - name: Extract Release Notes
