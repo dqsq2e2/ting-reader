@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   ting-reader:
     image: dqsq2e2/ting-reader:${TRIM_APPVER}
