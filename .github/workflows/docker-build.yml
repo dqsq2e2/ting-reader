@@ -29,8 +29,17 @@ jobs:
             version:
               - 'package.json'
             code:
-              - '**'
-              - '!.github/**'
+              - 'backend/**'
+              - 'frontend/**'
+              - 'Dockerfile'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'docker-compose.yml'
+              - '*.md'
+              - 'LICENSE'
+              - '.gitignore'
+              - '.dockerignore'
+              - '.gitattributes'
 
       - name: Get version from package.json
         id: get_version
