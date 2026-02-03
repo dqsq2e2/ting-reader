@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   ting-reader:
-    image: dqsq2e2/ting-reader:1.0.0
+    image: dqsq2e2/ting-reader:${TRIM_APPVER}
     container_name: ting-reader
     ports:
       - "${wizard_port}:3000"
