@@ -10,7 +10,7 @@
                 "type": "checkbox",
                 "field": "wizard_clean_options",
                 "label": "数据清理选项",
-                "initValue": [],
+                "initValue": "",
                 "options": [
                     {
                         "label": "清理数据库与配置 (data)",
