@@ -439,7 +439,7 @@ const AdminLibraries: React.FC = () => {
                         )}
                       </div>
                       <p className="text-[11px] text-slate-400 pl-1">
-                        提示：音频文件必须放置在后端 <strong>ting-reader-backend/storage/</strong> 目录下
+                        提示：音频文件必须放置在后端 <strong>backend/storage/</strong> 目录下
                       </p>
                     </div>
                   </div>
