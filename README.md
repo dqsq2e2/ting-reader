@@ -8,55 +8,21 @@ Ting Reader 是一个轻量级的自托管有声书平台，支持自动刮削�
 
 ## 📸 界面展示
 
-<details>
-<summary><b>🖥️ 桌面端功能展示 (点击展开)</b></summary>
+<details open>
+<summary><b>🖥️ 桌面端功能展示 (左右滑动查看)</b></summary>
 
-#### 🔹 基础浏览
-| 首页 |
-| :---: |
-| ![首页](image/daznf0.png) |
-| **书架** |
-| ![书架](image/dbav84.png) |
-
-#### 🔹 搜索与收藏
-| 搜索 |
-| :---: |
-| ![搜索](image/dbhmg1.png) |
-| **收藏** |
-| ![收藏](image/dbkpra.png) |
-
-#### 🔹 播放体验
-| 书籍详情与播放小窗 |
-| :---: |
-| ![书籍详情](image/dduqb0.png) |
-
-#### 🔹 管理后台
-| 库管理 |
-| :---: |
-| ![库管理](image/dbwxfj.png) |
-| **任务日志** |
-| ![任务日志](image/dbzir4.png) |
-| **用户管理** |
-| ![用户管理](image/dc1rpr.png) |
-| **个性化设置** |
-| ![个性化设置](image/dckldc.png) |
+| 首页 | 书架 | 搜索 | 收藏 | 库管理 | 任务日志 | 用户管理 | 个性化设置 | 详情与播放 |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| <img src="image/daznf0.png" width="800"> | <img src="image/dbav84.png" width="800"> | <img src="image/dbhmg1.png" width="800"> | <img src="image/dbkpra.png" width="800"> | <img src="image/dbwxfj.png" width="800"> | <img src="image/dbzir4.png" width="800"> | <img src="image/dc1rpr.png" width="800"> | <img src="image/dckldc.png" width="800"> | <img src="image/dduqb0.png" width="800"> |
 
 </details>
 
-<details>
-<summary><b>📱 移动端体验展示 (点击展开)</b></summary>
+<details open>
+<summary><b>📱 移动端体验展示 (左右滑动查看)</b></summary>
 
-#### 🔸 核心界面
-| 首页 | 书架 |
-| :---: | :---: |
-| ![首页](image/dlp66c.jpg) | ![书架](image/dlq8nr.jpg) |
-| **搜索** | **收藏** |
-| ![搜索](image/dm167f.jpg) | ![收藏](image/dmans9.jpg) |
-
-#### 🔸 播放体验
-| 沉浸式播放界面 | 书籍详情 |
-| :---: | :---: |
-| ![播放界面](image/dm6hbq.jpg) | ![书籍详情](image/dm8ofs.jpg) |
+| 首页 | 书架 | 搜索 | 沉浸播放 | 书籍详情 | 收藏 |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| <img src="image/dlp66c.jpg" height="600"> | <img src="image/dlq8nr.jpg" height="600"> | <img src="image/dm167f.jpg" height="600"> | <img src="image/dm6hbq.jpg" height="600"> | <img src="image/dm8ofs.jpg" height="600"> | <img src="image/dmans9.jpg" height="600"> |
 
 </details>
 
