@@ -80,7 +80,13 @@ const AdminUsers: React.FC = () => {
 
   const handleOpenAddModal = () => {
     setEditingId(null);
-    setFormData({ username: '', password: '', role: 'user', librariesAccessible: [], booksAccessible: [] });
+    setFormData({ 
+      username: '', 
+      password: '', 
+      role: 'user', 
+      librariesAccessible: [], 
+      booksAccessible: [] 
+    });
     setSelectedBooks([]);
     setBookSearchQuery('');
     setIsModalOpen(true);
@@ -155,7 +161,13 @@ const AdminUsers: React.FC = () => {
         await apiClient.post('/api/users', payload);
       }
       setIsModalOpen(false);
-      setFormData({ username: '', password: '', role: 'user', librariesAccessible: [], booksAccessible: [] });
+      setFormData({ 
+        username: '', 
+        password: '', 
+        role: 'user', 
+        librariesAccessible: [], 
+        booksAccessible: [] 
+      });
       setEditingId(null);
       fetchUsers();
     } catch (err: any) {
@@ -187,7 +199,13 @@ const AdminUsers: React.FC = () => {
           <button 
             onClick={() => {
               setEditingId(null);
-              setFormData({ username: '', password: '', role: 'user' });
+              setFormData({ 
+                username: '', 
+                password: '', 
+                role: 'user',
+                librariesAccessible: [],
+                booksAccessible: []
+              });
               setIsModalOpen(true);
             }}
             className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 md:px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 transition-all text-sm md:text-base"

@@ -3,6 +3,8 @@ export interface User {
   username: string;
   role: 'admin' | 'user';
   created_at: string;
+  librariesAccessible?: string[];
+  booksAccessible?: string[];
 }
 
 export interface Library {
