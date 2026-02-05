@@ -1,33 +1,40 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import apiClient from '../api/client';
-import type { Book } from '../types';
+import type { Book, Library } from '../types';
 import BookCard from '../components/BookCard';
-import { Search, Filter, Database, Plus } from 'lucide-react';
+import { Search, Filter, Database, Plus, Library as LibraryIcon } from 'lucide-react';
 import { usePlayerStore } from '../store/playerStore';
 
 const BookshelfPage: React.FC = () => {
   const navigate = useNavigate();
   const currentChapter = usePlayerStore((state) => state.currentChapter);
   const [books, setBooks] = useState<Book[]>([]);
+  const [libraries, setLibraries] = useState<Library[]>([]);
+  const [selectedLibraryId, setSelectedLibraryId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'created_at' | 'title' | 'author'>('created_at');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
 
   useEffect(() => {
-    const fetchBooks = async () => {
+    const fetchData = async () => {
+      setLoading(true);
       try {
-        const response = await apiClient.get('/api/books');
-        setBooks(response.data);
+        const [booksRes, libsRes] = await Promise.all([
+          apiClient.get('/api/books', { params: { library_id: selectedLibraryId || undefined } }),
+          apiClient.get('/api/libraries')
+        ]);
+        setBooks(booksRes.data);
+        setLibraries(libsRes.data);
       } catch (err) {
-        console.error('Failed to fetch books', err);
+        console.error('Failed to fetch data', err);
       } finally {
         setLoading(false);
       }
     };
-    fetchBooks();
-  }, []);
+    fetchData();
+  }, [selectedLibraryId]);
 
   const sortedBooks = [...books].sort((a, b) => {
     if (sortBy === 'title') return a.title.localeCompare(b.title, 'zh-CN');
@@ -59,6 +66,30 @@ const BookshelfPage: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-3">
+            {/* Library Selector */}
+            {libraries.length > 0 && (
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                  <LibraryIcon size={16} />
+                </div>
+                <select
+                  value={selectedLibraryId}
+                  onChange={(e) => setSelectedLibraryId(e.target.value)}
+                  className="pl-9 pr-8 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 text-sm font-medium text-slate-700 dark:text-slate-200 appearance-none cursor-pointer max-w-[140px] sm:max-w-none truncate"
+                >
+                  <option value="">所有媒体库</option>
+                  {libraries.map(lib => (
+                    <option key={lib.id} value={lib.id}>{lib.name}</option>
+                  ))}
+                </select>
+                <div className="absolute inset-y-0 right-0 pr-2 flex items-center pointer-events-none text-slate-400">
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+              </div>
+            )}
+
             <div className="relative flex-1 md:w-64">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input 

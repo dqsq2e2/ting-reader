@@ -18,9 +18,13 @@ async function getAccurateMetadata(client, filePath, virtualSize, realSize, isXM
   try {
     const ext = filePath.toLowerCase().split('.').pop();
     let mimeType = 'audio/mpeg';
-    if (ext === 'm4a') mimeType = 'audio/mp4';
+    if (ext === 'm4a' || ext === 'm4b') mimeType = 'audio/mp4';
     else if (ext === 'wav') mimeType = 'audio/wav';
     else if (ext === 'flac') mimeType = 'audio/x-flac';
+    else if (ext === 'ogg') mimeType = 'audio/ogg';
+    else if (ext === 'opus') mimeType = 'audio/opus';
+    else if (ext === 'aac') mimeType = 'audio/aac';
+    else if (ext === 'wma') mimeType = 'audio/x-ms-wma';
 
     console.log(`Getting metadata for ${path.basename(filePath)} (Size: ${virtualSize})`);
 
@@ -125,8 +129,8 @@ async function getAccurateMetadata(client, filePath, virtualSize, realSize, isXM
   }
 }
 
-const SUPPORTED_EXTENSIONS = ['.mp3', '.m4a', '.wav', '.flac', '.xm'];
-const EXCLUDED_EXTENSIONS = ['.m4b'];
+const SUPPORTED_EXTENSIONS = ['.mp3', '.m4a', '.m4b', '.wav', '.flac', '.ogg', '.opus', '.aac', '.wma', '.xm'];
+const EXCLUDED_EXTENSIONS = [];
 const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
 
 function generateBookHash(libraryId, dirPath) {
@@ -677,8 +681,18 @@ async function processBookFiles(libraryId, dirPath, albumInfo, audioFiles, image
              range: { start: 0, end: Math.min(fileSize - 1, 2 * 1024 * 1024) }, // Try first 2MB
              format: 'binary'
            });
+           
+           let mimeType = 'audio/mpeg';
+           if (ext === '.m4a' || ext === '.m4b') mimeType = 'audio/mp4';
+           else if (ext === '.wav') mimeType = 'audio/wav';
+           else if (ext === '.flac') mimeType = 'audio/x-flac';
+           else if (ext === '.ogg') mimeType = 'audio/ogg';
+           else if (ext === '.opus') mimeType = 'audio/opus';
+           else if (ext === '.aac') mimeType = 'audio/aac';
+           else if (ext === '.wma') mimeType = 'audio/x-ms-wma';
+
            const metadata = await mm.parseStream(stream, { 
-             mimeType: ext === '.m4a' ? 'audio/mp4' : 'audio/mpeg', 
+             mimeType, 
              size: fileSize 
            });
            if (metadata) {

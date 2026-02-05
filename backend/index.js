@@ -15,6 +15,7 @@ const { decryptXM } = require('./xm-decryptor');
 const { calculateThemeColor } = require('./color-utils');
 const { scrapeXimalaya } = require('./scraper');
 const cacheManager = require('./cache-manager');
+const ffmpeg = require('fluent-ffmpeg');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -207,7 +208,7 @@ app.post('/api/libraries/:id/scan', authenticate, isAdmin, async (req, res) => {
 
 // --- Book Routes ---
 app.get('/api/books', authenticate, (req, res) => {
-  const { search, tag } = req.query;
+  const { search, tag, library_id } = req.query;
   let query = 'SELECT * FROM books';
   const params = [];
 
@@ -221,6 +222,11 @@ app.get('/api/books', authenticate, (req, res) => {
   if (tag) {
     conditions.push('tags LIKE ?');
     params.push(`%${tag}%`);
+  }
+
+  if (library_id) {
+    conditions.push('library_id = ?');
+    params.push(library_id);
   }
 
   if (conditions.length > 0) {
@@ -743,8 +749,39 @@ app.get('/api/stream/:chapterId', authenticate, async (req, res) => {
         return res.status(500).json({ error: 'Decryption failed', details: decryptErr.message });
       }
     } else {
-      // WebDAV Regular File Streaming
+      // Regular File Streaming
       try {
+        const ext = chapter.path.toLowerCase().split('.').pop();
+        // Transcode WMA, OGG, OPUS, FLAC to MP3 for better compatibility
+        const needsTranscoding = ['wma', 'ogg', 'opus', 'flac'].includes(ext);
+
+        if (needsTranscoding) {
+          console.log(`Transcoding ${ext.toUpperCase()} to MP3: ${chapter.path}`);
+          
+          res.setHeader('Content-Type', 'audio/mpeg');
+          res.setHeader('Transfer-Encoding', 'chunked');
+          
+          const inputStream = client.createReadStream(chapter.path);
+          
+          ffmpeg(inputStream)
+            .toFormat('mp3')
+            .audioCodec('libmp3lame')
+            .audioBitrate('128k')
+            .on('error', (err) => {
+              if (err.message !== 'Output stream closed') {
+                console.error('FFmpeg transcoding error:', err.message);
+              }
+              if (inputStream && inputStream.destroy) inputStream.destroy();
+            })
+            .pipe(res, { end: true });
+
+          res.on('close', () => {
+            if (inputStream && inputStream.destroy) inputStream.destroy();
+          });
+          return;
+        }
+
+        // Standard Streaming for supported formats (MP3, M4A, WAV, AAC)
         const stat = await client.stat(chapter.path);
         const fileSize = stat.size;
         const range = req.headers.range;
@@ -822,7 +859,7 @@ app.get('/api/stream/:chapterId', authenticate, async (req, res) => {
           });
         }
       } catch (err) {
-        console.error('WebDAV Stream error:', err);
+        console.error('Stream error:', err);
         if (!res.headersSent) {
           res.status(500).send('Streaming error');
         }
