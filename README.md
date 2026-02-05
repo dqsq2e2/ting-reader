@@ -35,7 +35,7 @@ Ting Reader 是一个轻量级的自托管有声书平台，支持自动刮削�
 
 </details>
 
-<details open>
+<details>
 <summary><b>📱 移动端体验展示 (点击展开)</b></summary>
 
 | 首页 | 书架 |
