@@ -29,8 +29,18 @@ import { getCoverUrl } from '../utils/image';
 import { setAlpha, toSolidColor } from '../utils/color';
 
 const Player: React.FC = () => {
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? '' : 'http://localhost:3000');
-  const token = useAuthStore(state => state.token);
+  const { token, activeUrl } = useAuthStore();
+  const API_BASE_URL = activeUrl || import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? '' : 'http://localhost:3000');
+  
+  const getStreamUrl = (chapterId: string) => {
+    if ((window as any).electronAPI) {
+      // Electron mode: use custom protocol for caching
+      const remote = encodeURIComponent(API_BASE_URL);
+      return `ting://stream/${chapterId}?token=${token}&remote=${remote}`;
+    }
+    return `${API_BASE_URL}/api/stream/${chapterId}?token=${token}`;
+  };
+
   const { 
     currentBook, 
     currentChapter, 
@@ -210,7 +220,7 @@ const Player: React.FC = () => {
       const currentIndex = chapters.findIndex((c: any) => c.id === currentChapter.id);
       if (currentIndex !== -1 && currentIndex < chapters.length - 1) {
         const nextChapterId = chapters[currentIndex + 1].id;
-        const nextSrc = `${API_BASE_URL}/api/stream/${nextChapterId}?token=${token}`;
+        const nextSrc = getStreamUrl(nextChapterId);
         
         // Create or update preload element
         if (!preloadAudioRef.current) {
@@ -543,7 +553,7 @@ const Player: React.FC = () => {
     >
       <audio
         ref={audioRef}
-        src={`${API_BASE_URL}/api/stream/${currentChapter.id}?token=${token}`}
+        src={getStreamUrl(currentChapter.id)}
         crossOrigin="anonymous"
         onTimeUpdate={handleTimeUpdate}
         onProgress={handleProgress}

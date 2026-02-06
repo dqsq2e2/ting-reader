@@ -20,7 +20,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'ting-reader-secret-key';
-const STORAGE_ROOT = path.join(__dirname, 'storage');
+const STORAGE_ROOT = process.env.STORAGE_PATH || path.join(__dirname, 'storage');
 
 // Ensure storage root exists
 if (!fs.existsSync(STORAGE_ROOT)) {
