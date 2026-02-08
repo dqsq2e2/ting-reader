@@ -81,27 +81,43 @@ const AdminLibraries: React.FC = () => {
   const handleSaveLibrary = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      let savedLibId = editingId;
       if (editingId) {
         await apiClient.patch(`/api/libraries/${editingId}`, formData);
       } else {
-        await apiClient.post('/api/libraries', formData);
+        const res = await apiClient.post('/api/libraries', formData);
+        if (res.data && res.data.id) {
+            savedLibId = res.data.id;
+        }
       }
       setIsModalOpen(false);
       setEditingId(null);
       setFormData({ name: '', type: 'webdav', url: '', username: '', password: '', root_path: '/' });
-      fetchLibraries();
+      await fetchLibraries();
+      
+      // Automatically trigger scan after save
+      if (savedLibId) {
+        // We use a small timeout to let the UI update first, or just call it directly.
+        // Calling it directly is fine as handleScan sets state.
+        // However, we just fetched libraries, so the list is fresh.
+        handleScan(savedLibId, true);
+      }
     } catch (err) {
       alert(editingId ? '修改失败，请检查配置' : '添加失败，请检查配置');
     }
   };
 
-  const handleScan = async (id: string) => {
+  const handleScan = async (id: string, silent: boolean = false) => {
     setScanning(id);
     try {
       await apiClient.post(`/api/libraries/${id}/scan`);
-      alert('扫描任务已启动');
+      if (!silent) {
+        alert('扫描任务已启动');
+      }
     } catch (err) {
-      alert('扫描启动失败');
+      if (!silent) {
+        alert('扫描启动失败');
+      }
     } finally {
       setScanning(null);
     }
@@ -145,14 +161,14 @@ const AdminLibraries: React.FC = () => {
       <div className="grid gap-6">
         {libraries.map((lib) => (
           <div key={lib.id} className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-100 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 rounded-xl bg-primary-50 dark:bg-primary-900/20 text-primary-600 flex items-center justify-center">
+            <div className="flex items-center gap-4 min-w-0 w-full md:w-auto">
+              <div className="w-14 h-14 rounded-xl bg-primary-50 dark:bg-primary-900/20 text-primary-600 flex items-center justify-center shrink-0">
                 <Database size={28} />
               </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="text-xl font-bold dark:text-white">{lib.name}</h3>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-xl font-bold dark:text-white truncate">{lib.name}</h3>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0 ${
                     lib.type === 'local' 
                       ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400' 
                       : 'bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400'
@@ -160,14 +176,18 @@ const AdminLibraries: React.FC = () => {
                     {lib.type === 'local' ? '本地存储' : 'WebDAV'}
                   </span>
                 </div>
-                <div className="flex flex-wrap gap-4 mt-1">
-                  <div className="flex items-center gap-1.5 text-sm text-slate-500 max-w-full">
-                    <Globe size={14} className="shrink-0" />
-                    <span className="truncate" title={lib.url}>{lib.url}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-sm text-slate-500 max-w-full">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 mt-1">
+                  {lib.type !== 'local' && (
+                    <div className="flex items-center gap-1.5 text-sm text-slate-500 min-w-0">
+                      <Globe size={14} className="shrink-0" />
+                      <span className="truncate max-w-[180px] sm:max-w-[240px] md:max-w-[300px]" title={lib.url}>{lib.url}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1.5 text-sm text-slate-500 min-w-0">
                     <Folder size={14} className="shrink-0" />
-                    <span className="truncate max-w-[300px] md:max-w-[400px]" title={lib.root_path}>{lib.root_path}</span>
+                    <span className="truncate max-w-[180px] sm:max-w-[240px] md:max-w-[300px]" title={lib.type === 'local' ? lib.url : lib.root_path}>
+                      {lib.type === 'local' ? lib.url : lib.root_path}
+                    </span>
                   </div>
                 </div>
               </div>
