@@ -192,7 +192,22 @@ function cleanChapterTitle(filename, bookTitle = '') {
     if (cleanBookTitle.length > 1) {
       const escapedTitle = cleanBookTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const regex = new RegExp(escapedTitle, 'gi');
-      title = title.replace(regex, '');
+      
+      // Check if removing book title would leave the string empty (ignoring chapter numbers and separators)
+      // This handles cases like "BookName Chapter 1 BookName" -> should result in "BookName" not empty
+      // We use a temporary string to simulate the full cleanup process
+      const tempTitle = title.replace(regex, '')
+                             .replace(/第\s*\d+\s*[集回章话]\s*/g, '')
+                             .replace(/^[：:\s\-_.]+/, '')
+                             .replace(/[：:\s\-_.]+$/, '');
+                             
+      if (tempTitle.trim().length === 0) {
+        // If it would become empty, it means the chapter title IS the book title (or just chapter number)
+        // We set it to book title so we have a meaningful title instead of falling back to the raw filename
+        title = cleanBookTitle;
+      } else {
+        title = title.replace(regex, '');
+      }
     }
   }
   
