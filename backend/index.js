@@ -16,6 +16,7 @@ const { calculateThemeColor } = require('./color-utils');
 const { scrapeXimalaya } = require('./scraper');
 const cacheManager = require('./cache-manager');
 const ffmpeg = require('fluent-ffmpeg');
+const compression = require('compression');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -27,6 +28,7 @@ if (!fs.existsSync(STORAGE_ROOT)) {
   fs.mkdirSync(STORAGE_ROOT, { recursive: true });
 }
 
+app.use(compression());
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -332,7 +334,8 @@ app.delete('/api/books/:id', authenticate, isAdmin, async (req, res) => {
 
 app.get('/api/books/:id/chapters', authenticate, (req, res) => {
   const chapters = db.prepare(`
-    SELECT c.*, p.position as progress_position, p.updated_at as progress_updated_at
+    SELECT c.id, c.book_id, c.title, c.duration, c.chapter_index, c.is_extra, 
+           p.position as progress_position, p.updated_at as progress_updated_at
     FROM chapters c
     LEFT JOIN progress p ON c.id = p.chapter_id AND p.user_id = ?
     WHERE c.book_id = ? 
