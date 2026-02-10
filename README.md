@@ -110,7 +110,7 @@ docker-compose up -d
 
 Ting Reader 官方 Android 客户端，提供原生的后台播放控制与本地缓存管理。
 
-- **下载地址**：前往 [GitHub Releases](https://github.com/dqsq2e2/ting-reader/releases) 下载最新版本的 `.apk` 安装包。
+- **下载地址**：前往 [GitHub Releases](https://github.com/dqsq2e2/ting-reader-app/releases) 下载最新版本的 `.apk` 安装包。
 - **功能特性**：
   - **原生体验**：支持系统级媒体通知栏控制、锁屏显示与耳机线控。
   - **智能缓存**：内置 LRU 缓存管理器，自动清理过期音频，节省手机空间。
