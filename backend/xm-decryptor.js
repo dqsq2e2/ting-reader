@@ -241,25 +241,21 @@ async function processWasmDecryption(decryptedBuffer, info) {
     return Buffer.alloc(0);
   }
 
-  let decryptedStr;
-  try {
-    const decoder = new TextDecoder('utf-8', { fatal: true });
-    decryptedStr = decoder.decode(decryptedBuffer);
-  } catch (e) {
-    console.error('AES decrypted data is not valid UTF-8. First 16 bytes hex:', decryptedBuffer.slice(0, 16).toString('hex'));
-    throw new Error('Invalid AES decrypted data (not UTF-8)');
-  }
-
+  // OPTIMIZATION: Skip unnecessary Buffer -> String -> Buffer conversion
+  // AES decrypted content is already the UTF-8 bytes we need for WASM.
+  // Previous code was: Buffer(AES) -> String(UTF16) -> Buffer(UTF8)
+  // This caused massive memory spikes (2x-3x size) for large files.
+  
   const instance = await getWasmInstance();
   const { a: func_a, c: func_c, g: func_g, i: memory } = instance.exports;
 
   const stackPointer = func_a(-16);
   const trackId = (info.tracknumber !== undefined && info.tracknumber !== null) ? info.tracknumber.toString() : "0";
   
-  const decryptedStrBuffer = Buffer.from(decryptedStr, 'utf8');
+  // Use decryptedBuffer directly as input for WASM
   const trackIdBuffer = Buffer.from(trackId, 'utf8');
 
-  const deDataOffset = func_c(decryptedStrBuffer.length);
+  const deDataOffset = func_c(decryptedBuffer.length);
   const trackIdOffset = func_c(trackIdBuffer.length);
 
   if (deDataOffset === 0 || trackIdOffset === 0) {
@@ -268,10 +264,10 @@ async function processWasmDecryption(decryptedBuffer, info) {
 
   try {
     let memView = new Uint8Array(memory.buffer);
-    memView.set(decryptedStrBuffer, deDataOffset);
+    memView.set(decryptedBuffer, deDataOffset);
     memView.set(trackIdBuffer, trackIdOffset);
 
-    func_g(stackPointer, deDataOffset, decryptedStrBuffer.length, trackIdOffset, trackIdBuffer.length);
+    func_g(stackPointer, deDataOffset, decryptedBuffer.length, trackIdOffset, trackIdBuffer.length);
 
     const resultView = new DataView(memory.buffer);
     const resultPointer = resultView.getInt32(stackPointer, true);
@@ -281,16 +277,18 @@ async function processWasmDecryption(decryptedBuffer, info) {
       throw new Error('WASM decryption returned invalid pointer or length');
     }
 
+    // Direct buffer copy from WASM memory to avoid String conversion if possible?
+    // The WASM returns a base64 string part, unfortunately.
+    // But we can optimize by not keeping 'resultData' string too long.
+    
     const resultData = Buffer.from(memory.buffer, resultPointer, resultLength).toString('utf8');
     
-    // Help GC by clearing large buffers before final allocation
-    decryptedStr = null;
+    // Explicitly nullify view to detach from WASM memory
     memView = null;
     
     const fullBase64 = (info.encodingTechnology || '') + resultData;
     const finalBuffer = Buffer.from(fullBase64, 'base64');
     
-    // Clear string copies
     return finalBuffer;
   } catch (err) {
     console.error(`WASM Decryption Core Error: ${err.message}`);
