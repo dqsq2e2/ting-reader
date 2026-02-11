@@ -753,11 +753,14 @@ app.get('/api/stream/:chapterId', authenticate, async (req, res) => {
         const controller = new AbortController();
         res.on('close', () => controller.abort());
 
-        const content = await client.getFileContents(chapter.path, { 
+        let content = await client.getFileContents(chapter.path, { 
           format: 'binary',
           signal: controller.signal 
         });
-        const decrypted = await decryptXM(content);
+        let decrypted = await decryptXM(content);
+        
+        // Release original encrypted content immediately
+        content = null;
         
         if (!decrypted || decrypted.length === 0) {
           throw new Error('Decryption resulted in empty data');
@@ -765,6 +768,9 @@ app.get('/api/stream/:chapterId', authenticate, async (req, res) => {
         
         const cachePath = cacheManager.getCachePath(chapterId);
         await cacheManager.saveToCache(chapterId, decrypted);
+        
+        // Release decrypted buffer immediately after saving to disk
+        decrypted = null;
         
         const contentType = await cacheManager.getMimeType(chapterId);
         

@@ -1,6 +1,6 @@
 {
   "name": "ting-reader",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "A self-hosted audiobook platform",
   "private": true,
   "scripts": {

@@ -5,14 +5,25 @@ const path = require('path');
 
 const XM_KEY = Buffer.from("ximalayaximalayaximalayaximalaya");
 
-let wasmInstance = null;
+// Cache the WASM binary content in memory (it's small, ~87KB)
+let wasmFileBuffer = null;
 
+function getWasmFileBuffer() {
+  if (!wasmFileBuffer) {
+    wasmFileBuffer = fs.readFileSync(path.join(__dirname, 'xm.wasm'));
+  }
+  return wasmFileBuffer;
+}
+
+// NOTE: We do NOT cache the WebAssembly.Instance.
+// Why? Because WASM memory grows to fit the input data (e.g. 50MB+ for a chapter)
+// but NEVER shrinks. Keeping a global instance would permanently reserve the 
+// peak memory usage. By instantiating fresh for each decryption, we ensure
+// the memory is returned to the OS (via GC) after each file is processed.
 async function getWasmInstance() {
-  if (wasmInstance) return wasmInstance;
-  const wasmBuffer = fs.readFileSync(path.join(__dirname, 'xm.wasm'));
-  const wasmModule = await WebAssembly.instantiate(wasmBuffer, {});
-  wasmInstance = wasmModule.instance;
-  return wasmInstance;
+  const buffer = getWasmFileBuffer();
+  const wasmModule = await WebAssembly.instantiate(buffer, {});
+  return wasmModule.instance;
 }
 
 async function decryptXM(content) {
@@ -271,8 +282,16 @@ async function processWasmDecryption(decryptedBuffer, info) {
     }
 
     const resultData = Buffer.from(memory.buffer, resultPointer, resultLength).toString('utf8');
+    
+    // Help GC by clearing large buffers before final allocation
+    decryptedStr = null;
+    memView = null;
+    
     const fullBase64 = (info.encodingTechnology || '') + resultData;
-    return Buffer.from(fullBase64, 'base64');
+    const finalBuffer = Buffer.from(fullBase64, 'base64');
+    
+    // Clear string copies
+    return finalBuffer;
   } catch (err) {
     console.error(`WASM Decryption Core Error: ${err.message}`);
     throw err;

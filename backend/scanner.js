@@ -801,24 +801,33 @@ async function processBookFiles(client, libraryId, dirPath, albumInfo, audioFile
       try {
         const ext = '.' + file.basename.split('.').pop().toLowerCase();
         const isXM = ext === '.xm';
-        const isSmallFile = fileSize < 10 * 1024 * 1024; // 10MB
+        // Increase small file threshold to 20MB to ensure accurate duration for m4a/mp3 files
+        // especially those converted from encrypted formats which may have non-standard layouts.
+        // Since scanning is sequential, a 20MB buffer won't cause memory spikes (unlike XM decryption).
+        const isSmallFile = fileSize < 20 * 1024 * 1024; 
         
         if (isXM || isSmallFile) {
           if (signal && signal.aborted) throw new Error('Scan cancelled');
           try {
             console.log(`Scanning ${isXM ? 'XM' : 'regular'} file: ${file.basename} (Full Read Mode)`);
-            const buffer = await client.getFileContents(file.filename, { format: 'binary' });
+            let buffer = await client.getFileContents(file.filename, { format: 'binary' });
             
             let audioBuffer = buffer;
             if (isXM) {
               console.log(`Read ${buffer.length} bytes for ${file.basename}, decrypting...`);
               audioBuffer = await decryptXM(buffer);
+              // Explicitly release the original encrypted buffer
+              buffer = null; 
               console.log(`Decrypted ${audioBuffer.length} bytes for ${file.basename}, parsing metadata...`);
             } else {
               console.log(`Read ${buffer.length} bytes for ${file.basename}, parsing metadata...`);
             }
 
             const metadata = await mm.parseBuffer(audioBuffer);
+            
+            // Explicitly release the decrypted audio buffer as soon as metadata is parsed
+            audioBuffer = null;
+            if (!isXM && buffer) buffer = null; // Release regular buffer if not XM
             
             if (metadata.format.duration) {
               duration = Math.round(metadata.format.duration);
