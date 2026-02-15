@@ -98,6 +98,14 @@ app.post('/api/auth/login', async (req, res) => {
   res.json({ user: { id: user.id, username: user.username, role: user.role }, token });
 });
 
+app.get('/api/me', authenticate, (req, res) => {
+  const user = db.prepare('SELECT id, username, role FROM users WHERE id = ?').get(req.userId);
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+  res.json(user);
+});
+
 // --- Library Routes ---
 app.get('/api/libraries', authenticate, (req, res) => {
   if (req.userRole === 'admin') {
@@ -600,22 +608,26 @@ app.get('/api/stats', authenticate, (req, res) => {
 // --- User Settings Routes ---
 app.get('/api/settings', authenticate, (req, res) => {
   const settings = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(req.userId);
-  res.json(settings || { playback_speed: 1.0, sleep_timer_default: 0, auto_preload: 0, theme: 'system', widget_css: '' });
+  res.json(settings || { playback_speed: 1.0, sleep_timer_default: 0, auto_preload: 0, auto_cache: 0, client_auto_download: 0, theme: 'system', widget_css: '' });
 });
 
 app.post('/api/settings', authenticate, (req, res) => {
-  const { playback_speed, sleep_timer_default, auto_preload, theme, widget_css } = req.body;
+  const { playback_speed, sleep_timer_default, auto_preload, auto_cache, theme, widget_css } = req.body;
   const autoPreloadInt = auto_preload ? 1 : 0;
+  const autoCacheInt = auto_cache ? 1 : 0;
+  const clientAutoDownloadInt = req.body.client_auto_download ? 1 : 0;
   db.prepare(`
-    INSERT INTO user_settings (user_id, playback_speed, sleep_timer_default, auto_preload, theme, widget_css)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO user_settings (user_id, playback_speed, sleep_timer_default, auto_preload, auto_cache, client_auto_download, theme, widget_css)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(user_id) DO UPDATE SET
       playback_speed = COALESCE(excluded.playback_speed, playback_speed),
       sleep_timer_default = COALESCE(excluded.sleep_timer_default, sleep_timer_default),
       auto_preload = COALESCE(excluded.auto_preload, auto_preload),
+      auto_cache = COALESCE(excluded.auto_cache, auto_cache),
+      client_auto_download = COALESCE(excluded.client_auto_download, client_auto_download),
       theme = COALESCE(excluded.theme, theme),
       widget_css = COALESCE(excluded.widget_css, widget_css)
-  `).run(req.userId, playback_speed, sleep_timer_default, autoPreloadInt, theme, widget_css);
+  `).run(req.userId, playback_speed, sleep_timer_default, autoPreloadInt, autoCacheInt, clientAutoDownloadInt, theme, widget_css);
   res.json({ success: true });
 });
 
@@ -966,6 +978,68 @@ app.post('/api/cache/:chapterId', authenticate, async (req, res) => {
 
   preloadChapter(chapterId, library);
   res.json({ success: true, message: 'Caching started' });
+});
+
+app.get('/api/cache', authenticate, async (req, res) => {
+  try {
+    const cachedFiles = await cacheManager.listCachedFiles();
+    
+    // Enrich with book and chapter info
+    const enriched = cachedFiles.map(file => {
+      const chapter = db.prepare('SELECT title, book_id, chapter_index, path FROM chapters WHERE id = ?').get(file.id);
+      if (chapter) {
+        const book = db.prepare('SELECT title, cover_url FROM books WHERE id = ?').get(chapter.book_id);
+        return {
+          ...file,
+          title: chapter.title,
+          chapterIndex: chapter.chapter_index,
+          bookTitle: book ? book.title : 'Unknown Book',
+          coverUrl: book ? book.cover_url : null,
+          bookId: chapter.book_id,
+          path: chapter.path
+        };
+      }
+      return {
+        ...file,
+        title: 'Unknown Chapter',
+        bookTitle: 'Unknown Book'
+      };
+    }).filter(file => {
+      if (!file.path) return true;
+      return !file.path.toLowerCase().endsWith('.xm');
+    });
+
+    res.json(enriched);
+  } catch (err) {
+    console.error('List cache failed:', err);
+    res.status(500).json({ error: 'Failed to list cache' });
+  }
+});
+
+app.delete('/api/cache/:chapterId', authenticate, async (req, res) => {
+  try {
+    await cacheManager.deleteChapterCache(req.params.chapterId);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Delete cache failed:', err);
+    res.status(500).json({ error: 'Failed to delete cache' });
+  }
+});
+
+app.delete('/api/cache', authenticate, async (req, res) => {
+    try {
+        await cacheManager.clearOldCache(); // Or clear all? The user asked for clear all in Settings
+        // But clearOldCache only clears if limits exceeded.
+        // We might need a clearAll function in cacheManager if we want to support "Clear All" button for server.
+        // For now, let's just use clearOldCache or implement a loop.
+        const files = await cacheManager.listCachedFiles();
+        for (const file of files) {
+            await cacheManager.deleteChapterCache(file.id);
+        }
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to clear cache' });
+    }
 });
 
 // --- Proxy Routes ---

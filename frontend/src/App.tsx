@@ -11,6 +11,7 @@ import AdminLibraries from './pages/AdminLibraries';
 import AdminUsers from './pages/AdminUsers';
 import TaskLogsPage from './pages/TaskLogsPage';
 import SettingsPage from './pages/SettingsPage';
+import DownloadsPage from './pages/DownloadsPage';
 import WidgetPage from './pages/WidgetPage';
 import { useAuthStore } from './store/authStore';
 
@@ -45,6 +46,7 @@ function App() {
           <Route path="search" element={<SearchPage />} />
           <Route path="favorites" element={<FavoritesPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="downloads" element={<DownloadsPage />} />
           
           <Route path="admin/libraries" element={
             <AdminRoute>

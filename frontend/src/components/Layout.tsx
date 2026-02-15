@@ -13,7 +13,8 @@ import {
   Database,
   Users,
   Terminal,
-  Headphones
+  Headphones,
+  Download
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useTheme } from '../hooks/useTheme';
@@ -25,6 +26,8 @@ import Player from './Player';
 const Layout: React.FC = () => {
   const { refreshTheme } = useTheme(); // Initialize theme application
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(true);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
   
@@ -34,9 +37,33 @@ const Layout: React.FC = () => {
   const hasCurrentChapter = usePlayerStore(state => !!state.currentChapter);
   const setPlaybackSpeed = usePlayerStore(state => state.setPlaybackSpeed);
 
+  // Validate Token on Mount
+  React.useEffect(() => {
+    const validateConnection = async () => {
+      setIsConnecting(true);
+      setConnectionError(null);
+      try {
+        // Try to fetch current user info to validate token
+        await apiClient.get('/api/me');
+        setIsConnecting(false);
+      } catch (err: any) {
+        console.error('Connection validation failed', err);
+        // Don't auto-logout immediately, give user a chance to see error or retry
+        setConnectionError('连接服务器失败或登录已过期');
+        setIsConnecting(false);
+      }
+    };
+
+    if (user) {
+      validateConnection();
+    } else {
+      setIsConnecting(false);
+    }
+  }, [user]);
+
   // Fetch and apply user settings
   React.useEffect(() => {
-    if (user) {
+    if (user && !isConnecting && !connectionError) {
       apiClient.get('/api/settings').then(res => {
         const settings = res.data;
         if (settings.playback_speed) {
@@ -44,7 +71,7 @@ const Layout: React.FC = () => {
         }
       }).catch(err => console.error('Failed to sync user settings', err));
     }
-  }, [user?.id, setPlaybackSpeed]);
+  }, [user?.id, setPlaybackSpeed, isConnecting, connectionError]);
 
   React.useEffect(() => {
     refreshTheme();
@@ -59,6 +86,7 @@ const Layout: React.FC = () => {
 
   const adminItems = [
     { icon: <Database size={20} />, label: '库管理', path: '/admin/libraries' },
+    { icon: <Download size={20} />, label: '缓存管理', path: '/downloads' },
     { icon: <Terminal size={20} />, label: '任务日志', path: '/admin/tasks' },
     { icon: <Users size={20} />, label: '用户管理', path: '/admin/users' },
   ];
@@ -67,6 +95,59 @@ const Layout: React.FC = () => {
     logout();
     navigate('/login');
   };
+
+  // Connection Check / Loading Screen
+  if (isConnecting || connectionError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-slate-50 dark:bg-slate-950 p-4">
+        <div className="w-full max-w-sm bg-white dark:bg-slate-900 rounded-2xl shadow-xl p-8 text-center space-y-6 border border-slate-200 dark:border-slate-800">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary-50 dark:bg-primary-900/20 mb-2">
+            <img src="/logo.png" alt="Logo" className="w-10 h-10 object-contain" />
+          </div>
+          
+          {isConnecting ? (
+            <>
+              <h2 className="text-xl font-bold dark:text-white">正在连接服务器...</h2>
+              <div className="flex justify-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+              </div>
+              <p className="text-sm text-slate-500">正在验证您的登录凭证</p>
+            </>
+          ) : (
+            <>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white">连接失败</h2>
+              <p className="text-sm text-red-500 bg-red-50 dark:bg-red-900/10 p-3 rounded-lg border border-red-100 dark:border-red-900/20">
+                {connectionError}
+              </p>
+              <div className="space-y-3 pt-2">
+                <button
+                  onClick={() => window.location.reload()}
+                  className="w-full py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl transition-colors"
+                >
+                  重试连接
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="w-full py-2.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 font-bold rounded-xl transition-colors"
+                >
+                  退出登录
+                </button>
+              </div>
+            </>
+          )}
+
+          {isConnecting && (
+            <button
+              onClick={handleLogout}
+              className="mt-4 text-sm text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 font-medium transition-colors"
+            >
+              取消并退出登录
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   const NavLink = ({ item, mobile = false }: { item: typeof menuItems[0], mobile?: boolean }) => {
     const isActive = location.pathname === item.path;

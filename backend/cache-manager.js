@@ -130,6 +130,24 @@ async function clearCacheForBook(bookId, db) {
   }
 }
 
+async function listCachedFiles() {
+  const files = await fsPromises.readdir(CACHE_DIR);
+  const fileDetails = await Promise.all(
+    files.map(async (name) => {
+      const filePath = path.join(CACHE_DIR, name);
+      const stats = await fsPromises.stat(filePath);
+      return { 
+        id: name.replace('.bin', ''), 
+        size: stats.size, 
+        mtime: stats.mtime 
+      };
+    })
+  );
+  // Sort by newest first
+  fileDetails.sort((a, b) => b.mtime - a.mtime);
+  return fileDetails;
+}
+
 module.exports = {
   isCached,
   saveToCache,
@@ -137,5 +155,6 @@ module.exports = {
   clearOldCache,
   getMimeType,
   clearCacheForBook,
-  deleteChapterCache
+  deleteChapterCache,
+  listCachedFiles
 };

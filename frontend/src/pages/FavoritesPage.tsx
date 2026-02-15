@@ -51,15 +51,15 @@ const FavoritesPage: React.FC = () => {
           ))}
         </div>
       ) : (
-        <div className="py-32 text-center bg-white dark:bg-slate-900 rounded-3xl border border-dashed border-slate-200 dark:border-slate-800">
-          <div className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-red-50 dark:bg-red-900/10 text-red-400 mb-6">
-            <Heart size={48} />
+        <div className="py-20 text-center bg-white dark:bg-slate-900 rounded-3xl border border-dashed border-slate-200 dark:border-slate-800">
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-red-50 dark:bg-red-900/10 text-red-400 mb-6">
+            <Heart size={40} />
           </div>
-          <h3 className="text-2xl font-bold dark:text-white">您的收藏夹还是空的</h3>
-          <p className="text-slate-500 mt-2 mb-8">点击书籍详情页的爱心图标，即可收藏您喜欢的作品</p>
+          <h3 className="text-xl font-bold dark:text-white">您的收藏夹还是空的</h3>
+          <p className="text-sm text-slate-500 mt-2 mb-8">点击书籍详情页的爱心图标，即可收藏您喜欢的作品</p>
           <Link 
             to="/bookshelf" 
-            className="px-8 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 transition-all"
+            className="px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-bold rounded-xl shadow-lg shadow-primary-500/30 transition-all"
           >
             去书架看看
           </Link>

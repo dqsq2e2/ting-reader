@@ -52,6 +52,8 @@ db.exec(`
     playback_speed REAL DEFAULT 1.0,
     sleep_timer_default INTEGER DEFAULT 0,
     auto_preload INTEGER DEFAULT 0, -- 0: false, 1: true
+    auto_cache INTEGER DEFAULT 0, -- 0: false, 1: true (Server-side auto cache for WebDAV)
+    client_auto_download INTEGER DEFAULT 0, -- 0: false, 1: true
     theme TEXT DEFAULT 'system', -- 'light', 'dark', 'system'
     widget_css TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -143,6 +145,10 @@ try {
 
 try {
   db.prepare("ALTER TABLE user_settings ADD COLUMN widget_css TEXT").run();
+} catch (e) {}
+
+try {
+  db.prepare("ALTER TABLE user_settings ADD COLUMN auto_cache INTEGER DEFAULT 0").run();
 } catch (e) {}
 
 // Migration for per-chapter progress

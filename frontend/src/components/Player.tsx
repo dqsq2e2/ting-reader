@@ -28,6 +28,95 @@ import {
 import { getCoverUrl } from '../utils/image';
 import { setAlpha, toSolidColor } from '../utils/color';
 
+interface ProgressBarProps {
+  isMini?: boolean;
+  isSeeking: boolean;
+  seekTime: number;
+  currentTime: number;
+  duration: number;
+  bufferedTime: number;
+  themeColor?: string | null;
+  onSeek: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onSeekStart: () => void;
+  onSeekEnd: (e: React.ChangeEvent<HTMLInputElement>) => void;
+}
+
+const ProgressBar: React.FC<ProgressBarProps> = ({ 
+  isMini = false,
+  isSeeking,
+  seekTime,
+  currentTime,
+  duration,
+  bufferedTime,
+  themeColor,
+  onSeek,
+  onSeekStart,
+  onSeekEnd
+}) => {
+  const displayTime = isSeeking ? seekTime : currentTime;
+  const playedPercent = (displayTime / (duration || 1)) * 100;
+  const bufferedPercent = (bufferedTime / (duration || 1)) * 100;
+  
+  // Safety check for themeColor
+  const safeThemeColor = themeColor || 'rgba(0,0,0,0.15)';
+  const barColor = safeThemeColor ? safeThemeColor.replace('0.15', '1.0').replace('0.1', '1.0') : undefined;
+  
+  return (
+    <div className={`relative group/progress ${isMini ? 'flex-1 h-3 sm:h-2' : 'w-full h-4'} flex items-center select-none touch-none`}>
+      {/* Track Background */}
+      <div 
+        className={`absolute left-0 right-0 top-1/2 -translate-y-1/2 ${isMini ? 'h-1' : 'h-1.5'} bg-slate-300 dark:bg-slate-900 rounded-full overflow-hidden`}
+      >
+        {/* Buffered Bar */}
+        <div 
+          className="absolute inset-y-0 left-0 bg-slate-400/30 dark:bg-slate-700/40 transition-all duration-300" 
+          style={{ width: `${bufferedPercent}%` }}
+        />
+        {/* Played Bar */}
+        <div 
+          className="absolute inset-y-0 left-0 z-10" 
+          style={{ 
+            width: `${playedPercent}%`,
+            backgroundColor: barColor,
+            boxShadow: safeThemeColor ? `0 0 10px ${safeThemeColor.replace('0.15', '0.4').replace('0.1', '0.4')}` : undefined
+          }}
+        />
+      </div>
+
+      {/* Thumb / Handle */}
+      <div 
+        className={`absolute top-1/2 -translate-y-1/2 z-20 w-3 h-3 bg-white rounded-full shadow-md transition-transform duration-100 ease-out pointer-events-none ${isSeeking ? 'scale-150' : 'scale-100'}`}
+        style={{ 
+          left: `${playedPercent}%`, 
+          marginLeft: '-6px',
+          backgroundColor: isSeeking ? '#ffffff' : (barColor || '#ffffff'),
+          border: `1px solid ${barColor || 'transparent'}`
+        }}
+      />
+
+      {/* Range Input for Seeking - Positioned and sized correctly to cover the entire bar */}
+      <input 
+        type="range" 
+        min="0" 
+        max={duration || 0} 
+        step="any"
+        value={displayTime} 
+        onInput={onSeek}
+        onMouseDown={onSeekStart}
+        onTouchStart={onSeekStart}
+        onMouseUp={onSeekEnd}
+        onTouchEnd={onSeekEnd}
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-30"
+        style={{
+          margin: 0,
+          padding: 0,
+          WebkitAppearance: 'none'
+        }}
+      />
+    </div>
+  );
+};
+
 const Player: React.FC = () => {
   const { token, activeUrl } = useAuthStore();
   const API_BASE_URL = activeUrl || import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? '' : 'http://localhost:3000');
@@ -143,6 +232,7 @@ const Player: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [bufferedTime, setBufferedTime] = useState(0);
   const [autoPreload, setAutoPreload] = useState(false);
+  const [autoCache, setAutoCache] = useState(false);
   const isInitialLoadRef = useRef(true);
   const preloadAudioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -150,6 +240,7 @@ const Player: React.FC = () => {
   useEffect(() => {
     apiClient.get('/api/settings').then(res => {
       setAutoPreload(!!res.data.auto_preload);
+      setAutoCache(!!res.data.auto_cache);
     }).catch(err => console.error('Failed to fetch settings', err));
   }, []);
 
@@ -210,9 +301,9 @@ const Player: React.FC = () => {
     }
   }, [isPlaying, currentChapter?.id]);
 
-  // Preload next chapter logic
+  // Preload and Server-side Cache next chapter logic
   useEffect(() => {
-    if (!autoPreload || !currentChapter || !currentBook) return;
+    if ((!autoPreload && !autoCache) || !currentChapter || !currentBook) return;
     
     // Find next chapter index
     apiClient.get(`/api/books/${currentBook.id}/chapters`).then(res => {
@@ -222,20 +313,30 @@ const Player: React.FC = () => {
         const nextChapterId = chapters[currentIndex + 1].id;
         const nextSrc = getStreamUrl(nextChapterId);
         
-        // Create or update preload element
-        if (!preloadAudioRef.current) {
-          preloadAudioRef.current = new Audio();
-          preloadAudioRef.current.preload = 'auto';
+        // 1. Auto Preload (Memory)
+        if (autoPreload) {
+          if (!preloadAudioRef.current) {
+            preloadAudioRef.current = new Audio();
+            preloadAudioRef.current.preload = 'auto';
+          }
+          
+          if (preloadAudioRef.current.src !== nextSrc) {
+            console.log('Preloading next chapter:', chapters[currentIndex + 1].title);
+            preloadAudioRef.current.src = nextSrc;
+            preloadAudioRef.current.load();
+          }
         }
-        
-        if (preloadAudioRef.current.src !== nextSrc) {
-          console.log('Preloading next chapter:', chapters[currentIndex + 1].title);
-          preloadAudioRef.current.src = nextSrc;
-          preloadAudioRef.current.load();
+
+        // 2. Auto Cache (Server-side WebDAV)
+        if (autoCache) {
+           console.log('Triggering server-side cache for:', chapters[currentIndex + 1].title);
+           apiClient.post(`/api/cache/${nextChapterId}`).catch(err => {
+              console.error('Failed to trigger server cache', err);
+           });
         }
       }
     }).catch(err => console.error('Preload failed', err));
-  }, [currentChapter?.id, autoPreload, currentBook?.id]);
+  }, [currentChapter?.id, autoPreload, autoCache, currentBook?.id]);
 
   // Handle Skip Intro and Outro
   const handleTimeUpdate = () => {
@@ -389,12 +490,32 @@ const Player: React.FC = () => {
     }
   };
 
+  const [isSeeking, setIsSeeking] = useState(false);
+  const [seekTime, setSeekTime] = useState(0);
+
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
-    if (audioRef.current) {
-      audioRef.current.currentTime = time;
+    setSeekTime(time);
+    if (!isSeeking) {
+      if (audioRef.current) {
+        audioRef.current.currentTime = time;
+      }
       setCurrentTime(time);
     }
+  };
+
+  const handleSeekStart = () => {
+    setIsSeeking(true);
+    setSeekTime(currentTime);
+  };
+
+  const handleSeekEnd = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const time = parseFloat(e.target.value);
+    setIsSeeking(false);
+    if (audioRef.current) {
+      audioRef.current.currentTime = time;
+    }
+    setCurrentTime(time);
   };
 
   const formatTime = (time: number) => {
@@ -492,42 +613,6 @@ const Player: React.FC = () => {
     right: isWidgetMode ? '0' : undefined,
   } : {};
 
-  const ProgressBar = ({ isMini = false }) => {
-    const playedPercent = (currentTime / (duration || 1)) * 100;
-    const bufferedPercent = (bufferedTime / (duration || 1)) * 100;
-    
-    // Safety check for themeColor
-    const safeThemeColor = themeColor || 'rgba(0,0,0,0.15)';
-    
-    return (
-      <div className={`relative group/progress ${isMini ? 'flex-1 h-2 sm:h-1.5' : 'w-full h-2.5'} bg-slate-300 dark:bg-slate-900 rounded-full overflow-hidden`}>
-        {/* Buffered Bar */}
-        <div 
-          className="absolute inset-y-0 left-0 bg-slate-400/30 dark:bg-slate-700/40 transition-all duration-300" 
-          style={{ width: `${bufferedPercent}%` }}
-        />
-        {/* Played Bar */}
-        <div 
-          className="absolute inset-y-0 left-0 z-10" 
-          style={{ 
-            width: `${playedPercent}%`,
-            backgroundColor: safeThemeColor.replace('0.15', '1.0').replace('0.1', '1.0'),
-            boxShadow: `0 0 10px ${safeThemeColor.replace('0.15', '0.4').replace('0.1', '0.4')}`
-          }}
-        />
-        {/* Range Input for Seeking */}
-        <input 
-          type="range" 
-          min="0" 
-          max={duration || 0} 
-          value={currentTime} 
-          onChange={handleSeek}
-          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
-        />
-      </div>
-    );
-  };
-
   const handleEnded = () => {
     if (currentBook && currentChapter) {
       apiClient.post('/api/progress', {
@@ -623,7 +708,18 @@ const Player: React.FC = () => {
             {/* Widget Vertical Layout: Progress Bar (Visible only on small widget) */}
             {isWidgetMode && (
               <div className="hidden max-[380px]:block w-full px-1 py-1">
-                 <ProgressBar isMini={true} />
+                 <ProgressBar 
+                   isMini={true} 
+                   isSeeking={isSeeking}
+                   seekTime={seekTime}
+                   currentTime={currentTime}
+                   duration={duration}
+                   bufferedTime={bufferedTime}
+                   themeColor={themeColor}
+                   onSeek={handleSeek}
+                   onSeekStart={handleSeekStart}
+                   onSeekEnd={handleSeekEnd}
+                 />
               </div>
             )}
 
@@ -672,7 +768,18 @@ const Player: React.FC = () => {
 
               <div className="w-full flex items-center gap-3">
                 <span className="text-[10px] text-slate-400 w-8 text-right">{formatTime(currentTime)}</span>
-                <ProgressBar isMini={true} />
+                <ProgressBar 
+                  isMini={true} 
+                  isSeeking={isSeeking}
+                  seekTime={seekTime}
+                  currentTime={currentTime}
+                  duration={duration}
+                  bufferedTime={bufferedTime}
+                  themeColor={themeColor}
+                  onSeek={handleSeek}
+                  onSeekStart={handleSeekStart}
+                  onSeekEnd={handleSeekEnd}
+                />
                 <span className="text-[10px] text-slate-400 w-8">{formatTime(duration)}</span>
               </div>
             </div>
@@ -680,7 +787,18 @@ const Player: React.FC = () => {
             {/* Mobile Controls - Only visible on small screens */}
             <div className={`flex md:hidden items-center gap-2 sm:gap-3 flex-1 min-w-0 justify-end ${isWidgetMode ? 'max-[380px]:w-full max-[380px]:justify-center max-[380px]:gap-6 max-[380px]:flex-none' : ''}`}>
               <div className="flex-1 min-w-0 h-1.5 py-4 block max-[380px]:hidden">
-                <ProgressBar isMini={true} />
+                <ProgressBar 
+                  isMini={true} 
+                  isSeeking={isSeeking}
+                  seekTime={seekTime}
+                  currentTime={currentTime}
+                  duration={duration}
+                  bufferedTime={bufferedTime}
+                  themeColor={themeColor}
+                  onSeek={handleSeek}
+                  onSeekStart={handleSeekStart}
+                  onSeekEnd={handleSeekEnd}
+                />
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 {isWidgetMode && (
@@ -814,39 +932,27 @@ const Player: React.FC = () => {
 
             <div className="w-full space-y-8 sm:space-y-12">
               {/* Progress Bar Section */}
-              <div className="relative group/progress px-2 sm:px-4">
-                <div className="flex items-center gap-2 sm:gap-4">
-                  <button onClick={prevChapter} className="text-[#4A3728] dark:text-slate-400 opacity-60 hover:opacity-100 transition-opacity">
-                    <SkipBack size={20} className="sm:w-6 sm:h-6" fill="currentColor" />
-                  </button>
-                  <div className="flex-1 relative h-10 sm:h-12 flex items-center">
-                    <div className="absolute inset-x-0 h-1.5 sm:h-2.5 bg-slate-300/40 dark:bg-slate-800 rounded-full overflow-hidden">
-                      <div 
-                        className="absolute inset-y-0 left-0 bg-[#4A3728] dark:bg-primary-600 shadow-[0_0_8px_rgba(74,55,40,0.3)]" 
-                        style={{ width: `${(currentTime / (duration || 1)) * 100}%` }}
-                      />
-                    </div>
-                    <div 
-                      className="absolute bg-[#2D1B10]/90 dark:bg-primary-600/90 backdrop-blur-sm text-white px-2.5 sm:px-4 py-1 rounded-full text-[10px] sm:text-xs font-medium z-10 whitespace-nowrap shadow-lg transition-all duration-150 ease-out"
-                      style={{ 
-                        left: `${(currentTime / (duration || 1)) * 100}%`,
-                        transform: 'translateX(-50%)'
-                      }}
-                    >
-                      {formatTime(currentTime)} / {formatTime(duration)}
-                    </div>
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max={duration || 0} 
-                      value={currentTime} 
-                      onChange={handleSeek}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
+              <div className="px-2 sm:px-4">
+                <div className="flex items-center gap-3 sm:gap-6">
+                  <span className="text-[10px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 min-w-[40px] text-right">
+                    {formatTime(currentTime)}
+                  </span>
+                  <div className="flex-1">
+                    <ProgressBar 
+                      isSeeking={isSeeking}
+                      seekTime={seekTime}
+                      currentTime={currentTime}
+                      duration={duration}
+                      bufferedTime={bufferedTime}
+                      themeColor={themeColor}
+                      onSeek={handleSeek}
+                      onSeekStart={handleSeekStart}
+                      onSeekEnd={handleSeekEnd}
                     />
                   </div>
-                  <button onClick={nextChapter} className="text-[#4A3728] dark:text-slate-400 opacity-30 hover:opacity-60 transition-opacity">
-                    <SkipForward size={20} className="sm:w-6 sm:h-6" fill="currentColor" />
-                  </button>
+                  <span className="text-[10px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 min-w-[40px]">
+                    {formatTime(duration)}
+                  </span>
                 </div>
               </div>
 

@@ -159,17 +159,17 @@ const BookshelfPage: React.FC = () => {
           )}
         </>
       ) : (
-        <div className="py-24 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
-          <div className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-primary-50 dark:bg-primary-900/20 text-primary-600 mb-6">
-            <Database size={48} />
+        <div className="py-20 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-primary-50 dark:bg-primary-900/20 text-primary-600 mb-6">
+            <Database size={40} />
           </div>
-          <h3 className="text-2xl font-bold dark:text-white mb-3">书架空空如也</h3>
-          <p className="text-slate-500 max-w-md mx-auto mb-10">您还没有添加任何存储库，或者存储库中还没有扫描到音频文件。</p>
+          <h3 className="text-xl font-bold dark:text-white mb-2">书架空空如也</h3>
+          <p className="text-sm text-slate-500 max-w-md mx-auto mb-8">您还没有添加任何存储库，或者存储库中还没有扫描到音频文件。</p>
           <Link 
             to="/admin/libraries"
-            className="inline-flex items-center gap-2 px-8 py-4 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-2xl shadow-xl shadow-primary-500/30 transition-all active:scale-95"
+            className="inline-flex items-center gap-2 px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-bold rounded-xl shadow-xl shadow-primary-500/30 transition-all active:scale-95"
           >
-            <Plus size={20} />
+            <Plus size={18} />
             配置存储库
           </Link>
         </div>

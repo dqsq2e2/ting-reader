@@ -519,9 +519,19 @@ const BookDetailPage: React.FC = () => {
                   borderColor: setAlpha(themeColor, 0.3),
                 } : {}}
               >
-                <div className="flex items-center gap-4 min-w-0">
+                <div 
+                  className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1 cursor-pointer"
+                  onClick={(e) => {
+                      if (isBatchMode) {
+                          e.stopPropagation();
+                          toggleChapterSelection(chapter.id);
+                      } else {
+                          playChapter(book!, chapters, chapter);
+                      }
+                  }}
+                >
                   <div 
-                    className={`w-12 h-12 rounded-xl flex items-center justify-center font-bold text-lg shrink-0 ${
+                    className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center font-bold text-base sm:text-lg shrink-0 ${
                       isCurrent ? 'text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
                     }`}
                     style={isCurrent && themeColor ? { backgroundColor: toSolidColor(themeColor) } : {}}
@@ -535,14 +545,14 @@ const BookDetailPage: React.FC = () => {
                     >
                       {chapter.title}
                     </p>
-                    <div className="flex items-center gap-3 mt-1">
+                    <div className="flex items-center gap-2 mt-1">
                       <div className="flex items-center gap-1 text-xs text-slate-400 font-medium">
                         <Clock size={12} />
                         {formatDuration(chapter.duration)}
                       </div>
                       {getChapterProgressText(chapter) && (
                         <div 
-                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md whitespace-nowrap ${
                             getChapterProgressText(chapter) === '已播完' 
                               ? 'bg-green-50 text-green-500 dark:bg-green-900/20' 
                               : 'bg-primary-50 text-primary-600 dark:bg-primary-900/20'
@@ -579,127 +589,130 @@ const BookDetailPage: React.FC = () => {
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsEditModalOpen(false)}></div>
           <div className="relative w-full max-w-2xl max-h-[90vh] bg-white dark:bg-slate-900 rounded-3xl shadow-2xl overflow-y-auto animate-in zoom-in-95 duration-200 no-scrollbar">
-            <div className="p-6 md:p-8">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold dark:text-white">编辑书籍元数据</h2>
+            <div className="p-4 sm:p-6 md:p-8">
+              <div className="flex items-center justify-between mb-4 sm:mb-6">
+                <h2 className="text-xl sm:text-2xl font-bold dark:text-white">编辑书籍元数据</h2>
                 <button 
                   onClick={handleScrape}
                   disabled={scraping}
-                  className="flex items-center gap-2 px-4 py-2 bg-primary-50 dark:bg-primary-900/20 text-primary-600 rounded-xl text-sm font-bold hover:bg-primary-100 transition-all disabled:opacity-50"
+                  className="flex items-center gap-2 px-3 py-1.5 sm:px-4 sm:py-2 bg-primary-50 dark:bg-primary-900/20 text-primary-600 rounded-xl text-xs sm:text-sm font-bold hover:bg-primary-100 transition-all disabled:opacity-50"
                 >
-                  {scraping ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}
-                  自动刮削 (喜马拉雅)
+                  {scraping ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />}
+                  <span className="hidden sm:inline">自动刮削 (喜马拉雅)</span>
+                  <span className="sm:hidden">刮削</span>
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                <div className="space-y-3 sm:space-y-4">
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">书名</label>
+                    <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">书名</label>
                     <input 
                       type="text" 
                       value={editData.title || ''}
                       onChange={e => setEditData({...editData, title: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                      className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">作者</label>
+                    <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">作者</label>
                     <input 
                       type="text" 
                       value={editData.author || ''}
                       onChange={e => setEditData({...editData, author: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                      className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">演播者</label>
+                    <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">演播者</label>
                     <input 
                       type="text" 
                       value={editData.narrator || ''}
                       onChange={e => setEditData({...editData, narrator: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                      className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">标签 (逗号分隔)</label>
+                    <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">标签 (逗号分隔)</label>
                     <input 
                       type="text" 
                       value={editData.tags || ''}
                       onChange={e => setEditData({...editData, tags: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                      className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                     />
                   </div>
                 </div>
                 
-                <div className="space-y-4">
+                <div className="space-y-3 sm:space-y-4">
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">封面 URL</label>
+                    <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">封面 URL</label>
                     <input 
                       type="text" 
                       value={editData.cover_url || ''}
                       onChange={e => setEditData({...editData, cover_url: e.target.value})}
-                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                      className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-2 gap-3 sm:gap-4">
                     <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">跳过片头 (秒)</label>
+                      <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">跳过片头 (秒)</label>
                       <input 
                         type="number" 
                         value={editData.skip_intro || 0}
                         onChange={e => setEditData({...editData, skip_intro: parseInt(e.target.value) || 0})}
-                        className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                        className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">跳过片尾 (秒)</label>
+                      <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">跳过片尾 (秒)</label>
                       <input 
                         type="number" 
                         value={editData.skip_outro || 0}
                         onChange={e => setEditData({...editData, skip_outro: parseInt(e.target.value) || 0})}
-                        className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                        className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                       />
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="mt-6 space-y-1">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">简介</label>
+              <div className="mt-4 sm:mt-6 space-y-1">
+                <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">简介</label>
                 <textarea 
                   rows={4}
                   value={editData.description || ''}
                   onChange={e => setEditData({...editData, description: e.target.value})}
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white resize-none"
+                  className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white resize-none"
                 />
               </div>
 
-              <div className="flex gap-4 mt-8">
+              <div className="flex flex-col-reverse sm:flex-row gap-3 sm:gap-4 mt-6 sm:mt-8">
                 <button 
                   onClick={() => {
                     setIsEditModalOpen(false);
                     setIsDeleteModalOpen(true);
                   }}
-                  className="px-4 py-3 font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all flex items-center gap-2"
+                  className="px-4 py-2.5 sm:py-3 font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all flex items-center justify-center gap-2 sm:justify-start"
                 >
-                  <Trash2 size={20} />
+                  <Trash2 size={18} className="sm:w-5 sm:h-5" />
                   删除书籍
                 </button>
                 <div className="flex-1" />
-                <button 
-                  onClick={() => setIsEditModalOpen(false)}
-                  className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all"
-                >
-                  取消
-                </button>
-                <button 
-                  onClick={handleEditSave}
-                  className="px-8 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 flex items-center justify-center gap-2 transition-all"
-                >
-                  <Save size={20} />
-                  保存更改
-                </button>
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => setIsEditModalOpen(false)}
+                    className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 sm:py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all text-sm sm:text-base"
+                  >
+                    取消
+                  </button>
+                  <button 
+                    onClick={handleEditSave}
+                    className="flex-1 sm:flex-none px-6 sm:px-8 py-2.5 sm:py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 flex items-center justify-center gap-2 transition-all text-sm sm:text-base"
+                  >
+                    <Save size={18} className="sm:w-5 sm:h-5" />
+                    保存更改
+                  </button>
+                </div>
               </div>
             </div>
           </div>
