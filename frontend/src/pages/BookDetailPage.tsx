@@ -133,7 +133,7 @@ const BookDetailPage: React.FC = () => {
   useEffect(() => {
     if (hasInitialScrolled.current) return;
 
-    if (book && currentChapter && (currentChapter.book_id === book.id || currentChapter.bookId === book.id)) {
+    if (book && currentChapter && currentChapter.book_id === book.id) {
       // Determine if current chapter is in main or extra
       const inMain = mainChapters.find(c => c.id === currentChapter.id);
       const inExtra = extraChapters.find(c => c.id === currentChapter.id);
@@ -170,10 +170,15 @@ const BookDetailPage: React.FC = () => {
             el.scrollIntoView({ block: 'center', behavior: 'smooth' });
             hasInitialScrolled.current = true;
           }
+          
+          const groupTab = document.getElementById(`group-tab-${groupIndex}`);
+          if (groupTab) {
+            groupTab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+          }
         }, 100);
       }
     }
-  }, [book?.id, currentChapter?.id, mainChapters, extraChapters, activeTab, currentGroupIndex]);
+  }, [book?.id, currentChapter?.id, mainChapters, extraChapters, activeTab, currentGroupIndex, currentChapters, chaptersPerGroup]);
 
   useEffect(() => {
     const checkOverflow = () => {
@@ -529,6 +534,7 @@ const BookDetailPage: React.FC = () => {
               {groups.map((group, index) => (
                 <button
                   key={index}
+                  id={`group-tab-${index}`}
                   onClick={() => setCurrentGroupIndex(index)}
                   className={`px-4 py-2 rounded-xl text-sm font-bold transition-all border shrink-0 snap-start ${
                     currentGroupIndex === index
