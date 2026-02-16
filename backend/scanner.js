@@ -232,47 +232,71 @@ function cleanChapterTitle(filename, bookTitle = '') {
     const cleanBookTitle = bookTitle.split(/[丨|｜\-]/)[0].trim();
     if (cleanBookTitle.length > 1) {
       const escapedTitle = cleanBookTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp(escapedTitle, 'gi');
       
-      // Check if removing book title would leave the string empty (ignoring chapter numbers and separators)
-      // This handles cases like "BookName Chapter 1 BookName" -> should result in "BookName" not empty
-      // We use a temporary string to simulate the full cleanup process
-      const tempTitle = title.replace(regex, '')
-                             .replace(/第\s*\d+\s*[集回章话]\s*/g, '')
-                             .replace(/^[：:\s\-_.]+/, '')
-                             .replace(/[：:\s\-_.]+$/, '');
-                             
-      if (tempTitle.trim().length === 0) {
-        // If it would become empty, it means the chapter title IS the book title (or just chapter number)
-        // We set it to book title so we have a meaningful title instead of falling back to the raw filename
-        // We set it to book title so we have a meaningful title instead of falling back to the raw filename
-        // But in scanner.js context, we want to try to keep "Chapter N" if possible
-        // However, the original logic set title = cleanBookTitle.
-        // Let's modify this to be more sensible: if empty, try to return filename cleaned?
-        // Actually, let's just stick to the regex replace, effectively making it empty string, 
-        // which will trigger the fallback at return statement
-        title = title.replace(regex, '');
-      } else {
-        title = title.replace(regex, '');
+      // Step 3a: Remove from Start
+      // Use ^ anchor to be safe
+      const startRegex = new RegExp(`^${escapedTitle}`, 'i');
+      title = title.replace(startRegex, '');
+      
+      // Step 3b: Remove from End
+      // BUT ONLY IF what remains is NOT just a number/separator
+      const endRegex = new RegExp(`${escapedTitle}$`, 'i');
+      
+      if (endRegex.test(title)) {
+        const potentialTitle = title.replace(endRegex, '');
+        // Check if potentialTitle is just a number/separator
+        // e.g. " 第9集 " -> Yes
+        // e.g. " 第9集 Title " -> No
+        
+        const isJustNumber = /^[\s.\-_]*((第\s*\d+\s*[集回章话])|(\d+))[\s.\-_]*$/.test(potentialTitle);
+        
+        if (!isJustNumber) {
+          title = potentialTitle;
+        } else {
+          // If it IS just a number, we KEEP the book title at the end because it's likely the chapter title
+          // e.g. "第9集 乱世书" -> Keep "乱世书"
+        }
       }
     }
   }
   
-  // 4. Remove "第xxx集/章/回"
-  title = title.replace(/第\s*\d+\s*[集回章话]\s*/g, '');
+  // 4. Handle Chapter Numbers
+  // We want to remove "第xxx集" ONLY if there is other content.
+  // If the title becomes ONLY "第xxx集" (or empty), we should keep it or simplify it.
+  
+  // Let's capture the chapter number part first
+  const chapterPattern = /(第\s*\d+\s*[集回章话])/;
+  const match = title.match(chapterPattern);
+  const chapterStr = match ? match[1] : '';
+  
+  // Try removing it
+  let tempTitle = title.replace(/第\s*\d+\s*[集回章话]\s*/g, '');
   
   // 5. Remove leading/trailing numbers and separators
-  title = title.replace(/^\d+[\s.\-_]+/, '').replace(/[\s.\-_]+\d+$/, '');
+  tempTitle = tempTitle.replace(/^\d+[\s.\-_]+/, '').replace(/[\s.\-_]+\d+$/, '');
   
   // 6. Remove common suffixes: "-ZmAudio"
-  title = title.replace(/[-_]ZmAudio$/i, '');
+  tempTitle = tempTitle.replace(/[-_]ZmAudio$/i, '');
   
   // 7. Final cleanup of any remaining weird characters at start/end
   // Now includes colons and other separators that might be left after removing markers
-  title = title.replace(/^[：:\s\-_.]+/, '').replace(/[：:\s\-_.]+$/, '');
+  tempTitle = tempTitle.replace(/^[：:\s\-_.]+/, '').replace(/[：:\s\-_.]+$/, '').trim();
+  
+  // If tempTitle is empty, it means the title was just [BookTitle] + [ChapterNum] + [Promo]
+  // In this case, we should return the chapter number part if we found one.
+  if (tempTitle.length === 0) {
+    if (chapterStr) return { title: chapterStr, isExtra };
+    
+    // If no specific "第xxx集" but maybe just a number?
+    // If title contains digits, maybe use that?
+    const numMatch = title.match(/(\d+)/);
+    if (numMatch) return { title: numMatch[1], isExtra };
+    
+    return { title: '', isExtra };
+  }
   
   return { 
-    title: title.trim() || filename.replace(/\.[^/.]+$/, "").replace(/^\d+[\s.\-_]+/, '').trim(), 
+    title: tempTitle,
     isExtra 
   };
 }
