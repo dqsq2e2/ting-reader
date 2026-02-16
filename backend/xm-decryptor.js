@@ -43,6 +43,61 @@ async function decryptXM(content) {
     console.warn('node-id3 failed to read tags, will rely on manual extraction');
   }
   
+  const xmInfo = extractXMInfo(content);
+
+  console.log('XM Info extracted:', { 
+    track: xmInfo.tracknumber, 
+    size: xmInfo.size, 
+    iv: xmInfo.iv ? (typeof xmInfo.iv === 'string' ? xmInfo.iv : 'Buffer') : 'MISSING',
+    tech: xmInfo.encodingTechnology,
+    headerSize: xmInfo.headerSize
+  });
+
+  if (!xmInfo.iv) {
+    throw new Error('No IV found in tags (TSRC, ISRC, TENC, or manual)');
+  }
+
+  try {
+    // If content provided is smaller than needed for full decryption, 
+    // we only decrypt what we have (as long as it covers the encrypted segment).
+    // The caller is responsible for ensuring content.length >= xmInfo.headerSize + xmInfo.size
+    
+    if (content.length < xmInfo.headerSize + xmInfo.size) {
+      console.warn(`Content length (${content.length}) is smaller than required for decryption (${xmInfo.headerSize + xmInfo.size}). Decryption might fail or be incomplete.`);
+    }
+
+    const encryptedData = content.slice(xmInfo.headerSize, xmInfo.headerSize + xmInfo.size);
+    if (encryptedData.length === 0) {
+      throw new Error(`Encrypted segment is empty. HeaderSize: ${xmInfo.headerSize}, Size: ${xmInfo.size}`);
+    }
+
+    const decodedData = await decryptAesSegment(encryptedData, xmInfo);
+    
+    const finalData = Buffer.concat([
+      decodedData,
+      content.slice(xmInfo.headerSize + xmInfo.size)
+    ]);
+
+    return finalData;
+  } catch (err) {
+    console.error('Decryption failed:', err.message);
+    throw err;
+  }
+}
+
+function extractXMInfo(content) {
+  const headerSize = getID3Size(content);
+  // Read enough to get tags, but limit to avoid memory issues if headerSize is huge (unlikely for just tags)
+  // 8192 is usually enough for text tags. If cover art is huge, node-id3 might skip it or read partial.
+  const header = content.slice(0, Math.max(headerSize, 8192));
+  
+  let tags = null;
+  try {
+    tags = nodeID3.read(header);
+  } catch (e) {
+    console.warn('node-id3 failed to read tags, will rely on manual extraction');
+  }
+  
   const xmInfo = {
     tracknumber: 0,
     size: 0,
@@ -67,40 +122,17 @@ async function decryptXM(content) {
   if (xmInfo.tracknumber === 0) xmInfo.tracknumber = manual.track;
 
   // Final fallback for size
+  // Note: If content is partial, we can't rely on content.length
+  // But usually size is found in tags. If not, we might be in trouble for partial reads.
   if (xmInfo.size === 0) {
-    xmInfo.size = content.length - xmInfo.headerSize;
+    // If we are reading a partial file, this fallback is dangerous.
+    // However, if we don't have size from tags, we have to assume the rest is encrypted?
+    // Or we assume a default chunk size?
+    // For now, keep original logic but warn.
+    xmInfo.size = Math.max(0, content.length - xmInfo.headerSize);
   }
-
-  console.log('XM Info extracted:', { 
-    track: xmInfo.tracknumber, 
-    size: xmInfo.size, 
-    iv: xmInfo.iv ? (typeof xmInfo.iv === 'string' ? xmInfo.iv : 'Buffer') : 'MISSING',
-    tech: xmInfo.encodingTechnology,
-    headerSize: xmInfo.headerSize
-  });
-
-  if (!xmInfo.iv) {
-    throw new Error('No IV found in tags (TSRC, ISRC, TENC, or manual)');
-  }
-
-  try {
-    const encryptedData = content.slice(xmInfo.headerSize, xmInfo.headerSize + xmInfo.size);
-    if (encryptedData.length === 0) {
-      throw new Error(`Encrypted segment is empty. HeaderSize: ${xmInfo.headerSize}, Size: ${xmInfo.size}`);
-    }
-
-    const decodedData = await decryptAesSegment(encryptedData, xmInfo);
-    
-    const finalData = Buffer.concat([
-      decodedData,
-      content.slice(xmInfo.headerSize + xmInfo.size)
-    ]);
-
-    return finalData;
-  } catch (err) {
-    console.error('Decryption failed:', err.message);
-    throw err;
-  }
+  
+  return xmInfo;
 }
 
 function getID3Size(buffer) {
@@ -296,4 +328,4 @@ async function processWasmDecryption(decryptedBuffer, info) {
   }
 }
 
-module.exports = { decryptXM };
+module.exports = { decryptXM, extractXMInfo, getID3Size };

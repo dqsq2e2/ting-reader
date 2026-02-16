@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
 import type { Book, Chapter } from '../types';
 
 interface PlayerState {
@@ -27,9 +26,7 @@ interface PlayerState {
   setIsPlaying: (isPlaying: boolean) => void;
 }
 
-export const usePlayerStore = create<PlayerState>()(
-  persist(
-    (set, get) => ({
+export const usePlayerStore = create<PlayerState>((set, get) => ({
       currentBook: null,
       currentChapter: null,
       chapters: [],
@@ -126,21 +123,4 @@ export const usePlayerStore = create<PlayerState>()(
 
         set(newState);
       }
-    }),
-    {
-      name: 'player-storage',
-      storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({
-        currentBook: state.currentBook,
-        currentChapter: state.currentChapter,
-        chapters: state.chapters,
-        // isPlaying: state.isPlaying, // Do not persist isPlaying state
-        duration: state.duration,
-        currentTime: state.currentTime,
-        playbackSpeed: state.playbackSpeed,
-        volume: state.volume,
-        themeColor: state.themeColor,
-      }),
-    }
-  )
-);
+}));

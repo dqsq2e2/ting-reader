@@ -5,7 +5,7 @@ const db = require('./db');
 const { v4: uuidv4 } = require('uuid');
 const mm = require('music-metadata');
 const { scrapeXimalaya } = require('./scraper');
-const { decryptXM } = require('./xm-decryptor');
+const { decryptXM, extractXMInfo } = require('./xm-decryptor');
 const { calculateThemeColor } = require('./color-utils');
 const cacheManager = require('./cache-manager');
 
@@ -166,6 +166,44 @@ function decodeXmlyGibberish(str) {
 function cleanChapterTitle(filename, bookTitle = '') {
   let title = filename.replace(/\.[^/.]+$/, ""); // Remove extension
   
+  // New Logic: Handle " - " separated parts
+  if (title.includes(' - ')) {
+    const parts = title.split(' - ');
+    // We want to find the part that starts the actual chapter title
+    // Heuristic: Look for the first part from the right that contains a chapter number pattern
+    // Or if the last part contains the book title, it might be the start of the chapter title (as seen in user case)
+    
+    let chapterPartIndex = -1;
+    
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const part = parts[i];
+      // Check for chapter number patterns
+      if (
+        /第\s*\d+\s*[集回章话]/.test(part) || // 第001集
+        /[集回章话]\s*\d+/.test(part) ||      // 集001
+        /^\d+[\s.\-_]+/.test(part) ||         // 001 Title
+        /[\s.\-_]+\d+$/.test(part) ||         // Title 001
+        /^\d+$/.test(part)                    // 001
+      ) {
+        chapterPartIndex = i;
+        // If we found a strong match like "第xxx集", we can probably stop and take this part
+        if (/第\s*\d+\s*[集回章话]/.test(part)) break;
+      }
+    }
+    
+    if (chapterPartIndex !== -1) {
+      // Reassemble from the found part onwards
+      title = parts.slice(chapterPartIndex).join(' - ');
+    } else {
+      // Fallback: If no number found, maybe just take the last part?
+      // Or keep the whole title?
+      // For "Author - Book", we might want "Book".
+      // But for "Book - Title", we might want "Title".
+      // Let's take the last part as a safe default for " - " separated files
+      title = parts[parts.length - 1];
+    }
+  }
+
   // 1. Detect and remove "Extra" markers (番外, etc.)
   const extraPatterns = [/番外[：:\-\s]*/i, /花絮[：:\-\s]*/i, /特典[：:\-\s]*/i, /SP[：:\-\s]*/i, /Extra[：:\-\s]*/i];
   let isExtra = false;
@@ -207,7 +245,13 @@ function cleanChapterTitle(filename, bookTitle = '') {
       if (tempTitle.trim().length === 0) {
         // If it would become empty, it means the chapter title IS the book title (or just chapter number)
         // We set it to book title so we have a meaningful title instead of falling back to the raw filename
-        title = cleanBookTitle;
+        // We set it to book title so we have a meaningful title instead of falling back to the raw filename
+        // But in scanner.js context, we want to try to keep "Chapter N" if possible
+        // However, the original logic set title = cleanBookTitle.
+        // Let's modify this to be more sensible: if empty, try to return filename cleaned?
+        // Actually, let's just stick to the regex replace, effectively making it empty string, 
+        // which will trigger the fallback at return statement
+        title = title.replace(regex, '');
       } else {
         title = title.replace(regex, '');
       }
@@ -453,6 +497,63 @@ async function recursiveScan(client, libraryId, currentPath, taskId, foundBooks,
   }
 }
 
+function parseBookInfoFromFilename(filename) {
+  // Common patterns for Ximalaya downloaded files
+  // 1. [Author] - [Book Title] [Tags] - [Book Title] [Episode] [Chapter Title]
+  //    e.g. 水寒_六合同风 - 总有仙子对我图谋不轨 多女主&修罗场 水寒领衔多人有声剧 - 总有仙子对我图谋不轨 第001集 病娇圣女想把我炼成剑灵1.m4a
+  
+  // 2. [Book Title] - [Episode] [Chapter Title]
+  //    e.g. 总有仙子对我图谋不轨 - 第001集 病娇圣女想把我炼成剑灵1.m4a
+  
+  // 3. [Author] - [Book Title] - [Chapter Title]
+  //    e.g. 水寒_六合同风 - 总有仙子对我图谋不轨 - 第001集
+
+  // Remove extension
+  const baseName = filename.replace(/\.[^/.]+$/, "");
+  
+  let info = { title: null, author: null };
+  
+  // Split by " - " which is a common separator in these tools
+  const parts = baseName.split(' - ');
+  
+  if (parts.length >= 3) {
+    // Pattern 1: Author - Book Title (with tags) - Book Title + Episode
+    // Heuristic: If Part 1 and Part 2 have a common prefix, that's likely the title
+    const p1 = parts[1].trim();
+    const p2 = parts[2].trim();
+    
+    let commonPrefix = "";
+    for (let i = 0; i < Math.min(p1.length, p2.length); i++) {
+      if (p1[i] === p2[i]) {
+        commonPrefix += p1[i];
+      } else {
+        break;
+      }
+    }
+    
+    commonPrefix = commonPrefix.trim();
+    if (commonPrefix.length > 1) {
+       info.title = commonPrefix;
+    } else {
+       // If no common prefix, maybe Part 1 is the title?
+       // Take first word if it has spaces
+       info.title = p1.split(' ')[0]; 
+    }
+    
+    // Author might be Part 0
+    info.author = parts[0].trim();
+    
+  } else if (parts.length === 2) {
+    // Pattern: Author - Book (or Book - Chapter)
+    // If Part 2 starts with "第", then Part 1 is likely Book
+    if (parts[1].trim().match(/^第\s*\d+/)) {
+      info.title = parts[0].trim();
+    }
+  }
+  
+  return info;
+}
+
 async function groupFilesByAlbum(client, audioFiles, signal) {
   const groups = {};
   const dirName = audioFiles[0].filename.split('/').slice(-2, -1)[0] || 'Unknown Book';
@@ -613,9 +714,20 @@ async function processBookFiles(client, libraryId, dirPath, albumInfo, audioFile
   // Determine the best title for scraping and saving
   // 1. If folder name looks like a generic Ximalaya name, use album tag
   let bestTitle = albumName;
-  if (albumName.includes('喜马拉雅') || albumName.length < 2 || albumName.match(/^\d+$/)) {
+  if (albumName.includes('喜马拉雅') || albumName.length < 2 || albumName.match(/^\d+$/) || albumName === 'Unknown Book') {
     if (tagAlbumTitle && tagAlbumTitle.length > 1) {
       bestTitle = tagAlbumTitle;
+    } else if (audioFiles.length > 0) {
+      // 2. If no metadata, try to extract from filename
+      const filenameInfo = parseBookInfoFromFilename(audioFiles[0].basename);
+      if (filenameInfo.title && filenameInfo.title.length > 1) {
+        bestTitle = filenameInfo.title;
+        console.log(`Extracted title from filename: ${bestTitle}`);
+      }
+      if (filenameInfo.author && (!author || author === 'Unknown Author')) {
+        author = filenameInfo.author;
+        console.log(`Extracted author from filename: ${author}`);
+      }
     }
   }
 
@@ -809,17 +921,50 @@ async function processBookFiles(client, libraryId, dirPath, albumInfo, audioFile
         if (isXM || isSmallFile) {
           if (signal && signal.aborted) throw new Error('Scan cancelled');
           try {
-            console.log(`Scanning ${isXM ? 'XM' : 'regular'} file: ${file.basename} (Full Read Mode)`);
-            let buffer = await client.getFileContents(file.filename, { format: 'binary' });
+            console.log(`Scanning ${isXM ? 'XM' : 'regular'} file: ${file.basename} (${isXM ? 'Partial Read Mode' : 'Full Read Mode'})`);
             
-            let audioBuffer = buffer;
+            let audioBuffer = null;
+            let buffer = null;
+
             if (isXM) {
+              // OPTIMIZATION: Read only the necessary parts for XM decryption
+              // 1. Read first 16KB to get ID3 header and encrypted size
+              const headerBuffer = await client.getFileContents(file.filename, { 
+                range: { start: 0, end: 16384 },
+                format: 'binary'
+              });
+              
+              const xmInfo = extractXMInfo(headerBuffer);
+              
+              // 2. Determine how much to read
+              // We need header + encrypted chunk + some plaintext for music-metadata to see frames
+              // If size is 0 (unknown), we default to 4MB which is usually enough for metadata
+              let readSize = 0;
+              if (xmInfo.size > 0) {
+                readSize = xmInfo.headerSize + xmInfo.size + 131072; // +128KB for safety/frames
+              } else {
+                readSize = 4 * 1024 * 1024; // 4MB default fallback
+              }
+
+              // Cap at file size
+              if (readSize > fileSize) readSize = fileSize;
+              
+              console.log(`XM Info: header=${xmInfo.headerSize}, encrypted=${xmInfo.size}, reading ${readSize} bytes`);
+
+              // 3. Read the required chunk
+              buffer = await client.getFileContents(file.filename, { 
+                range: { start: 0, end: readSize - 1 },
+                format: 'binary'
+              });
+
               console.log(`Read ${buffer.length} bytes for ${file.basename}, decrypting...`);
               audioBuffer = await decryptXM(buffer);
-              // Explicitly release the original encrypted buffer
-              buffer = null; 
+              buffer = null; // Release encrypted buffer
               console.log(`Decrypted ${audioBuffer.length} bytes for ${file.basename}, parsing metadata...`);
             } else {
+              // Regular small file - read full content
+              buffer = await client.getFileContents(file.filename, { format: 'binary' });
+              audioBuffer = buffer;
               console.log(`Read ${buffer.length} bytes for ${file.basename}, parsing metadata...`);
             }
 

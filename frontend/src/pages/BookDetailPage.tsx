@@ -107,6 +107,7 @@ const BookDetailPage: React.FC = () => {
   // const currentChapter = usePlayerStore((state) => state.currentChapter); // Moved up
   const isPlaying = usePlayerStore((state) => state.isPlaying);
   const playChapter = usePlayerStore((state) => state.playChapter);
+  const togglePlay = usePlayerStore((state) => state.togglePlay);
 
   useEffect(() => {
     if (book?.theme_color) {
@@ -611,20 +612,7 @@ const BookDetailPage: React.FC = () => {
               <div 
                 key={chapter.id}
                 id={`chapter-${chapter.id}`}
-                onClick={() => {
-                  if (isBatchMode) {
-                      toggleChapterSelection(chapter.id);
-                  } else {
-                      // Logic sync with desktop/mobile:
-                      // If clicking current chapter, toggle play/pause
-                      // Otherwise play new chapter
-                      if (isCurrent) {
-                          togglePlay();
-                      } else {
-                          playChapter(book!, chapters, chapter);
-                      }
-                  }
-                }}
+                onClick={() => playChapter(book!, chapters, chapter)}
                 className={`group flex items-center justify-between p-4 rounded-2xl cursor-pointer transition-all border ${
                   isActive 
                     ? 'bg-opacity-10 border-opacity-20' 
@@ -637,14 +625,6 @@ const BookDetailPage: React.FC = () => {
               >
                 <div 
                   className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1 cursor-pointer"
-                  onClick={(e) => {
-                      if (isBatchMode) {
-                          e.stopPropagation();
-                          toggleChapterSelection(chapter.id);
-                      } else {
-                          playChapter(book!, chapters, chapter);
-                      }
-                  }}
                 >
                   <div 
                     className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center font-bold text-base sm:text-lg shrink-0 ${
