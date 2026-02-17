@@ -1,12 +1,43 @@
 # Ting Reader
 
-Ting Reader 是一个轻量级的自托管有声书平台，支持自动刮削元数据、多端播放进度同步以及多架构 Docker 部署。
+Ting Reader 是一个轻量级的自托管有声书平台，专为有声书爱好者打造。它支持自动刮削元数据、多端播放进度同步、极致的视觉体验以及多架构 Docker 部署。
 
 ![License](https://img.shields.io/github/license/dqsq2e2/ting-reader)
 ![Docker Pulls](https://img.shields.io/docker/pulls/dqsq2e2/ting-reader)
 ![GitHub Release](https://img.shields.io/github/v/release/dqsq2e2/ting-reader)
+[![Official Website](https://img.shields.io/badge/Official-Website-blue?logo=internetexplorer)](https://www.tingreader.cn)
 
 ## 📸 界面展示
+
+<details>
+<summary><b>📱 移动端与响应式界面 (点击展开)</b></summary>
+
+#### 🔹 登录认证
+| 用户登录 | 离线模式 |
+| :---: | :---: |
+| <img src="image/login.jpg" width="200"> | <img src="image/login_offline.jpg" width="200"> |
+
+#### 🔹 主菜单
+| 首页 | 书架 | 搜索 | 收藏 |
+| :---: | :---: | :---: | :---: |
+| <img src="image/home.jpg" width="200"> | <img src="image/bookshelf.jpg" width="200"> | <img src="image/search.jpg" width="200"> | <img src="image/favorites.jpg" width="200"> |
+
+#### 🔹 沉浸式播放
+| 播放界面 | 章节列表 | 播放设置 | 小窗播放 |
+| :---: | :---: | :---: | :---: |
+| <img src="image/player.jpg" width="200"> | <img src="image/player_chapters.jpg" width="200"> | <img src="image/player_settings.jpg" width="200"> | <img src="image/mini_player.jpg" width="200"> |
+
+#### 🔹 书籍详情与管理
+| 详情概览 | 章节目录 | 元数据编辑 |
+| :---: | :---: | :---: |
+| <img src="image/book_detail.jpg" width="200"> | <img src="image/book_chapters.jpg" width="200"> | <img src="image/book_edit_metadata.jpg" width="200"> |
+
+#### 🔹 后台管理
+| 存储库管理 | 用户管理 | 任务日志 |
+| :---: | :---: | :---: |
+| <img src="image/admin_repos.jpg" width="200"> | <img src="image/admin_users.jpg" width="200"> | <img src="image/admin_logs.jpg" width="200"> |
+
+</details>
 
 <details>
 <summary><b>🖥️ 桌面端功能展示 (点击展开)</b></summary>
@@ -32,19 +63,6 @@ Ting Reader 是一个轻量级的自托管有声书平台，支持自动刮削�
 <img src="image/dbzir4.png" width="900">
 - **用户管理**
 <img src="image/dc1rpr.png" width="900">
-
-</details>
-
-<details>
-<summary><b>📱 移动端体验展示 (点击展开)</b></summary>
-
-| 首页 | 书架 |
-| :---: | :---: |
-| <img src="image/dlp66c.jpg" width="350"> | <img src="image/dlq8nr.jpg" width="350"> |
-| **搜索** | **收藏** |
-| <img src="image/dm167f.jpg" width="350"> | <img src="image/dmans9.jpg" width="350"> |
-| **播放界面** | **书籍详情** |
-| <img src="image/dm6hbq.jpg" width="350"> | <img src="image/dm8ofs.jpg" width="350"> |
 
 </details>
 
@@ -110,7 +128,7 @@ docker-compose up -d
 
 Ting Reader 官方 Android 客户端，提供原生的后台播放控制与本地缓存管理。
 
-- **下载地址**：前往 [GitHub Releases](https://github.com/dqsq2e2/ting-reader-app/releases) 下载最新版本的 `.apk` 安装包。
+- **下载地址**：前往 [GitHub Releases](https://github.com/dqsq2e2/ting-reader/releases) 下载最新版本的 `.apk` 安装包。
 - **功能特性**：
   - **原生体验**：支持系统级媒体通知栏控制、锁屏显示与耳机线控。
   - **智能缓存**：内置 LRU 缓存管理器，自动清理过期音频，节省手机空间。
