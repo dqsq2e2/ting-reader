@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'pwa-64.png', 'pwa-128.png', 'pwa-256.png', 'pwa-512.png'],
+      includeAssets: ['favicon.ico', 'pwa-64.png', 'pwa-128.png', 'pwa-256.png', 'pwa-512.png', 'pwa-*-maskable.png'],
       devOptions: {
         enabled: true,
         type: 'module',
@@ -43,7 +43,31 @@ export default defineConfig({
             src: 'pwa-512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any maskable'
+            purpose: 'any'
+          },
+          {
+            src: 'pwa-64-maskable.png',
+            sizes: '64x64',
+            type: 'image/png',
+            purpose: 'maskable'
+          },
+          {
+            src: 'pwa-128-maskable.png',
+            sizes: '128x128',
+            type: 'image/png',
+            purpose: 'maskable'
+          },
+          {
+            src: 'pwa-256-maskable.png',
+            sizes: '256x256',
+            type: 'image/png',
+            purpose: 'maskable'
+          },
+          {
+            src: 'pwa-512-maskable.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable'
           }
         ]
       },
