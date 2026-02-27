@@ -1,0 +1,151 @@
+name: Docker Build, Push and FPK Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'Dockerfile'
+      - 'package.json'
+      - '.github/ting-reader-fpk/**'
+      - '.github/workflows/docker-publish.yml'
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            docker:
+              - 'backend/**'
+              - 'frontend/**'
+              - 'Dockerfile'
+              - 'docker-compose.yml'
+            fpk:
+              - '.github/ting-reader-fpk/**'
+              - '.github/workflows/fnpack'
+            version:
+              - 'package.json'
+            code:
+              - 'backend/**'
+              - 'frontend/**'
+              - 'Dockerfile'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'docker-compose.yml'
+              - '*.md'
+              - 'LICENSE'
+              - '.gitignore'
+              - '.dockerignore'
+              - '.gitattributes'
+              - 'image/**'
+
+      - name: Get version from package.json
+        id: get_version
+        run: |
+          VERSION=$(jq -r '.version' package.json)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Check if release exists
+        id: check_release
+        run: |
+          if gh release view "v${{ env.VERSION }}" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Release v${{ env.VERSION }} already exists. Skipping release steps."
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Release v${{ env.VERSION }} does not exist. Proceeding with build and release."
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU for multi-arch
+        if: steps.filter.outputs.docker == 'true' || steps.filter.outputs.version == 'true' || steps.check_release.outputs.exists != 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: steps.filter.outputs.docker == 'true' || steps.filter.outputs.version == 'true' || steps.check_release.outputs.exists != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        if: github.event_name != 'pull_request' && (steps.filter.outputs.docker == 'true' || steps.filter.outputs.version == 'true' || steps.check_release.outputs.exists != 'true')
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        if: steps.filter.outputs.docker == 'true' || steps.filter.outputs.version == 'true' || steps.check_release.outputs.exists != 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            dqsq2e2/ting-reader:latest
+            dqsq2e2/ting-reader:${{ env.VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Prepare fnpack
+        if: steps.filter.outputs.fpk == 'true' || steps.filter.outputs.version == 'true' || steps.check_release.outputs.exists != 'true'
+        run: |
+          chmod +x .github/workflows/fnpack
+          sudo mv .github/workflows/fnpack /usr/local/bin/fnpack
+
+      - name: Update FPK configuration
+        if: steps.filter.outputs.fpk == 'true' || steps.filter.outputs.version == 'true' || steps.check_release.outputs.exists != 'true'
+        run: |
+          sed -i "s/^version[[:space:]]*=.*/version = ${{ env.VERSION }}/" .github/ting-reader-fpk/manifest
+
+      - name: Build FPK
+        if: steps.filter.outputs.fpk == 'true' || steps.filter.outputs.version == 'true' || steps.check_release.outputs.exists != 'true'
+        run: |
+          fnpack build --directory .github/ting-reader-fpk
+          mv ting-reader.fpk ting-reader-${{ env.VERSION }}.fpk
+
+      - name: Extract Release Notes
+        id: extract_notes
+        if: github.ref == 'refs/heads/main' && (steps.filter.outputs.code == 'true' || steps.filter.outputs.fpk == 'true' || steps.check_release.outputs.exists != 'true')
+        run: |
+          VERSION="${{ env.VERSION }}"
+          START_LINE=$(grep -n "## \[$VERSION\]" CHANGELOG.md | cut -d: -f1)
+          if [ -n "$START_LINE" ]; then
+            # Extract including the version header line
+            tail -n +$START_LINE CHANGELOG.md | sed -n '1p; 2,${/## \[/q; p}' > RELEASE_NOTES.md
+          else
+            echo "Version $VERSION not found in CHANGELOG.md"
+            echo "Full changelog available in CHANGELOG.md" > RELEASE_NOTES.md
+          fi
+
+      - name: Update Git Tag
+        if: github.ref == 'refs/heads/main' && steps.filter.outputs.code == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git tag -f v${{ env.VERSION }}
+          git push origin v${{ env.VERSION }} --force
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: github.ref == 'refs/heads/main' && (steps.filter.outputs.code == 'true' || steps.filter.outputs.fpk == 'true' || steps.check_release.outputs.exists != 'true')
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: Release v${{ env.VERSION }}
+          body_path: RELEASE_NOTES.md
+          fail_on_unmatched_files: false
+          files: |
+            ting-reader-${{ env.VERSION }}.fpk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
