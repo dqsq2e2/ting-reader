@@ -13,7 +13,7 @@ COPY frontend ./
 RUN npm run build
 
 # Stage 2: Build Backend
-FROM rust:1.85-bookworm AS backend-builder
+FROM rust:bookworm AS backend-builder
 WORKDIR /app/backend
 
 # Copy manifests
