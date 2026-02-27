@@ -1,0 +1,112 @@
+[package]
+name = "ting_reader"
+version = "1.1.0"
+edition = "2021"
+rust-version = "1.70"
+
+[dependencies]
+reqwest = { version = "0.11", features = ["json", "rustls-tls", "stream"] }
+# HTTP Server
+axum = { version = "0.7", features = ["multipart"] }
+tower = { version = "0.4", features = ["util", "timeout"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "fs", "compression-full"] }
+
+# Async Runtime
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
+async-trait = "0.1"
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled", "backup"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.24"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Logging and Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+tracing-appender = "0.2"
+
+# Error Handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Configuration
+config = "0.14"
+toml = "0.8"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# WASM Runtime
+wasmtime = "18.0"
+wasmtime-wasi = "18.0"
+wasmtime-wasi-http = "18.0"
+wasi-common = "18.0"
+
+# JavaScript Runtime
+deno_core = "0.256"
+
+# Plugin Loading
+libloading = "0.8"
+
+# FFI
+libc = "0.2"
+
+# Utilities
+uuid = { version = "1.7", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+semver = { version = "1.0", features = ["serde"] }
+regex = "1.10"
+url = "2.5"
+
+# Configuration Validation
+jsonschema = "0.17"
+
+# Encryption
+aes-gcm = "0.10"
+base64 = "0.21"
+
+# Audio Processing
+symphonia = { version = "0.5", features = ["all"] }
+bytes = "1.5"
+
+# MIME type detection
+mime_guess = "2.0"
+
+# XML Processing
+quick-xml = { version = "0.31", features = ["serialize"] }
+
+# File System
+walkdir = "2.4"
+dirs = "5.0"
+
+# Cryptography
+sha2 = "0.10"
+
+# Authentication
+bcrypt = "0.15"
+jsonwebtoken = "9.2"
+futures = "0.3.31"
+zip = "1.1.4"
+image = "0.25.6"
+color-thief = "0.2.2"
+urlencoding = "2.1"
+natord = "1.0.9"
+
+[dev-dependencies]
+# Testing
+proptest = "1.4"
+quickcheck = "1.0"
+quickcheck_macros = "1.0"
+tempfile = "3.10"
+reqwest = { version = "0.11", features = ["json"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
