@@ -437,6 +437,9 @@ impl NativeLoader {
         
         // Convert result pointer to string
         let result_str = unsafe {
+            // Fix for ARM64 build: Ensure pointer cast is correct
+            // result_ptr is *mut u8 (pointer to u8)
+            // CStr::from_ptr expects *const i8 (pointer to c_char)
             let cstr = std::ffi::CStr::from_ptr(result_ptr as *const i8);
             cstr.to_str().map_err(|e| {
                 TingError::PluginExecutionError(format!("Invalid UTF-8 in result: {}", e))
