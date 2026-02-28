@@ -71,7 +71,7 @@ aes-gcm = "0.10"
 base64 = "0.21"
 
 # Audio Processing
-symphonia = { version = "0.5", features = ["all"] }
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "aac", "isomp4", "alac"] }
 bytes = "1.5"
 
 # MIME type detection
@@ -92,7 +92,7 @@ bcrypt = "0.15"
 jsonwebtoken = "9.2"
 futures = "0.3.31"
 zip = "1.1.4"
-image = "0.25.6"
+image = { version = "0.25.6", default-features = false, features = ["jpeg", "png", "webp"] }
 color-thief = "0.2.2"
 urlencoding = "2.1"
 natord = "1.0.9"
