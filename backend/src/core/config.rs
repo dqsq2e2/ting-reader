@@ -116,6 +116,7 @@ impl Config {
         // Example: TING_SERVER__PORT=8080
         builder = builder.add_source(
             Environment::with_prefix("TING")
+                .prefix_separator("_")
                 .separator("__")
                 .try_parsing(true)
         );

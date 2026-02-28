@@ -55,6 +55,9 @@ RUN apt-get update && apt-get install -y \
 # Copy backend binary
 COPY --from=backend-builder /app/backend/target/release/ting_reader /app/ting-reader
 
+# Copy default configuration
+COPY backend/config.toml /app/config.toml
+
 # Copy frontend static files
 COPY --from=frontend-builder /app/frontend/dist /app/static
 
