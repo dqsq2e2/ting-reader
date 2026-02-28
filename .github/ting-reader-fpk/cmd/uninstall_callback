@@ -2,13 +2,11 @@
 
 # 获取用户在卸载向导中选择的清理项
 CLEAN_OPTIONS="$wizard_clean_options"
-# 获取安装时映射的 storage 路径
-STORAGE_PATH="$wizard_storage_path"
 
 # 定义内部默认路径
 DEFAULT_DATA_PATH="${TRIM_APPDEST_VOL}/@appshare/ting-reader/data"
-DEFAULT_CACHE_PATH="${TRIM_APPDEST_VOL}/@appshare/ting-reader/cache"
-DEFAULT_STORAGE_PATH="${TRIM_APPDEST_VOL}/@appshare/ting-reader/storage"
+DEFAULT_PLUGINS_PATH="${TRIM_APPDEST_VOL}/@appshare/ting-reader/plugins"
+DEFAULT_TEMP_PATH="${TRIM_APPDEST_VOL}/@appshare/ting-reader/temp"
 
 # 判断环境变量中是否包含指定的清理项
 contains_option() {
@@ -22,28 +20,23 @@ echo "User selected options: $CLEAN_OPTIONS"
 if contains_option "data"; then
     if [ -d "$DEFAULT_DATA_PATH" ]; then
         echo "Cleaning data directory: $DEFAULT_DATA_PATH"
-        rm -rf "$DEFAULT_DATA_PATH"/*
+        rm -rf "$DEFAULT_DATA_PATH"
     fi
 fi
 
-# 2. 清理 cache 文件夹
-if contains_option "cache"; then
-    if [ -d "$DEFAULT_CACHE_PATH" ]; then
-        echo "Cleaning cache directory: $DEFAULT_CACHE_PATH"
-        rm -rf "$DEFAULT_CACHE_PATH"/*
+# 2. 清理 plugins 文件夹
+if contains_option "plugins"; then
+    if [ -d "$DEFAULT_PLUGINS_PATH" ]; then
+        echo "Cleaning plugins directory: $DEFAULT_PLUGINS_PATH"
+        rm -rf "$DEFAULT_PLUGINS_PATH"
     fi
 fi
 
-# 3. 清理 storage 文件夹
-if contains_option "storage"; then
-    # 二重保险：即便向导里有这个选项，我们也再次检查路径是否为默认路径
-    if [ "$STORAGE_PATH" == "$DEFAULT_STORAGE_PATH" ]; then
-        if [ -d "$DEFAULT_STORAGE_PATH" ]; then
-            echo "Cleaning default storage directory: $DEFAULT_STORAGE_PATH"
-            rm -rf "$DEFAULT_STORAGE_PATH"/*
-        fi
-    else
-        echo "Skipping storage cleanup: Custom path detected ($STORAGE_PATH)."
+# 3. 清理 temp 文件夹
+if contains_option "temp"; then
+    if [ -d "$DEFAULT_TEMP_PATH" ]; then
+        echo "Cleaning temp directory: $DEFAULT_TEMP_PATH"
+        rm -rf "$DEFAULT_TEMP_PATH"
     fi
 fi
 

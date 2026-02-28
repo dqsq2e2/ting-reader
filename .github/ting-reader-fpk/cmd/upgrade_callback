@@ -2,4 +2,32 @@
 
 ### This script is called after the user upgrades the application.
 
+SECRET_FILE="${TRIM_PKGETC}/jwt_secret"
+ENV_FILE="${TRIM_APPDEST}/docker/.env"
+
+if [ -f "$SECRET_FILE" ]; then
+    # Existing secret found
+    JWT_SECRET=$(cat "$SECRET_FILE")
+    echo "Found existing JWT Secret."
+else
+    # No secret file found (upgrade from old version or first time using this logic)
+    # Check if we have old wizard variable (might not work if wizard config changed)
+    if [ -n "$wizard_jwt_secret" ]; then
+        JWT_SECRET="$wizard_jwt_secret"
+        echo "Migrating old wizard JWT Secret..."
+    else
+        # Generate new secret
+        JWT_SECRET=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
+        echo "Generating new JWT Secret..."
+    fi
+    
+    # Save to persistent file
+    echo "$JWT_SECRET" > "$SECRET_FILE"
+fi
+
+# Create .env file for docker-compose
+echo "TING_SECURITY__JWT_SECRET=${JWT_SECRET}" > "$ENV_FILE"
+
+echo "Environment file updated at: $ENV_FILE"
+
 exit 0

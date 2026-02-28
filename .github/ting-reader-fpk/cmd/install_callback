@@ -2,4 +2,25 @@
 
 ### This script is called after the user installs the application.
 
+SECRET_FILE="${TRIM_PKGETC}/jwt_secret"
+ENV_FILE="${TRIM_APPDEST}/docker/.env"
+
+if [ -f "$SECRET_FILE" ]; then
+    # Use existing secret from persistent config
+    JWT_SECRET=$(cat "$SECRET_FILE")
+    echo "Found existing JWT Secret."
+else
+    # Generate new secret
+    JWT_SECRET=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
+    echo "Generating new JWT Secret..."
+    
+    # Save to persistent config directory
+    echo "$JWT_SECRET" > "$SECRET_FILE"
+fi
+
+# Create .env file for docker-compose
+echo "TING_SECURITY__JWT_SECRET=${JWT_SECRET}" > "$ENV_FILE"
+
+echo "Environment file created at: $ENV_FILE"
+
 exit 0

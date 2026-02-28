@@ -26,7 +26,15 @@
                 }
             },
             {
-                "name": "ting-reader/cache",
+                "name": "ting-reader/plugins",
+                "permission": {
+                    "rw": [
+                        "docker-ting-reader"
+                    ]
+                }
+            },
+            {
+                "name": "ting-reader/temp",
                 "permission": {
                     "rw": [
                         "docker-ting-reader"

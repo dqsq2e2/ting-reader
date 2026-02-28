@@ -17,14 +17,18 @@
                         "value": "data"
                     },
                     {
-                        "label": "清理缓存文件 (cache)",
-                        "value": "cache"
+                        "label": "清理插件 (plugins)",
+                        "value": "plugins"
+                    },
+                    {
+                        "label": "清理临时文件 (temp)",
+                        "value": "temp"
                     }
                 ]
             },
             {
                 "type": "tips",
-                "helpText": "<strong>说明：</strong><br/>1. 默认不勾选则保留所有数据。<br/>2. 为保护您的有声书数据安全，卸载程序<strong>不会</strong>清理 storage 目录下的音频文件。如需删除，请前往文件管理手动清理。"
+                "helpText": "<strong>说明：</strong><br/>1. 默认不勾选则保留所有数据。<br/>2. 为保护您的有声书数据安全，卸载程序<strong>不会</strong>清理存储目录下的音频文件。如需删除，请前往文件管理手动清理。"
             }
         ]
     }

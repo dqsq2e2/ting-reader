@@ -7,9 +7,14 @@ services:
     volumes:
       - "${TRIM_APPDEST_VOL}/@appshare/ting-reader/data:/app/data"
       - "${wizard_storage_path:-${TRIM_APPDEST_VOL}/@appshare/ting-reader/storage}:/app/storage"
-      - "${TRIM_APPDEST_VOL}/@appshare/ting-reader/cache:/app/cache"
+      - "${TRIM_APPDEST_VOL}/@appshare/ting-reader/plugins:/app/plugins"
+      - "${TRIM_APPDEST_VOL}/@appshare/ting-reader/temp:/app/temp"
     restart: unless-stopped
     environment:
-      - JWT_SECRET=${wizard_jwt_secret}
-      - PORT=3000
-      - DB_PATH=/app/data/ting-reader.db
+      - RUST_LOG=info
+      - TING_SERVER__HOST=0.0.0.0
+      - TING_SERVER__PORT=3000
+      - TING_SECURITY__JWT_SECRET=${TING_SECURITY__JWT_SECRET}
+      - TEMP_DIR=/app/temp
+      - DATA_DIR=/app/data
+      - STORAGE_DIR=/app/storage
