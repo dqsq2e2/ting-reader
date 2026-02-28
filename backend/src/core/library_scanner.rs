@@ -34,6 +34,13 @@ const AUDIO_EXTENSIONS: &[&str] = &["mp3", "m4a", "m4b", "flac", "ogg", "wav", "
 /// Standard audio extensions that can be handled by the default audio streamer
 const STANDARD_EXTENSIONS: &[&str] = &["mp3", "m4a", "m4b", "flac", "ogg", "wav", "opus", "wma", "aac"];
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum MetadataSource {
+    Nfo,
+    FileMetadata,
+    Fallback,
+}
+
 /// Library scanner service
 pub struct LibraryScanner {
     book_repo: Arc<BookRepository>,
@@ -635,7 +642,7 @@ impl LibraryScanner {
         if !meta_album.trim().is_empty() {
             // If the title from metadata is actually an album title, we might use it.
             if !meta_album.trim().is_empty() {
-                book_title = meta_album;
+                book_title = meta_album.clone();
             }
         }
 
@@ -671,21 +678,32 @@ impl LibraryScanner {
         if let Some(scraper_service) = &self.scraper_service {
              match scraper_service.scrape_book_metadata(&title, scraper_config).await {
                 Ok(detail) => {
+                    // Only overwrite if we don't have ID3 metadata (meta_album is empty)
                     if !detail.title.is_empty() {
-                        book.title = Some(detail.title);
+                        if meta_album.trim().is_empty() {
+                            book.title = Some(detail.title);
+                        }
                     }
+                    
                     if !detail.author.is_empty() {
-                        book.author = Some(detail.author);
+                        // Only overwrite if current is Unknown (meaning no ID3 author found)
+                        if book.author.as_deref() == Some("Unknown") || book.author.is_none() {
+                            book.author = Some(detail.author);
+                        }
                     }
+                    
                     if !detail.intro.is_empty() {
                         book.description = Some(detail.intro);
                     }
-                    if detail.cover_url.is_some() {
+                    
+                    if detail.cover_url.is_some() && book.cover_url.is_none() {
                         book.cover_url = detail.cover_url;
                     }
-                    if detail.narrator.is_some() {
+                    
+                    if detail.narrator.is_some() && book.narrator.is_none() {
                         book.narrator = detail.narrator;
                     }
+                    
                     if !detail.tags.is_empty() {
                         book.tags = Some(detail.tags.join(","));
                     }
@@ -863,7 +881,7 @@ impl LibraryScanner {
             }
         } else {
             // Not corrected (or New), proceed with extraction
-            let (t, a, n, d, tg, c) = self.extract_metadata(dir, files).await;
+            let (t, a, n, d, tg, c, source) = self.extract_metadata(dir, files).await;
             let mut title = t;
             let mut author = a;
             let mut narrator = n;
@@ -926,12 +944,24 @@ impl LibraryScanner {
                             if !detail.tags.is_empty() { 
                                 tags = Some(detail.tags.join(",")); 
                             }
-                            if detail.cover_url.is_some() { cover_url = detail.cover_url; }
-                            if detail.narrator.is_some() { narrator = detail.narrator; }
                             
-                            // For author, we update if it's Unknown OR if scraper provides one (assuming scraper is better)
+                            // Update cover if scraper has one AND local cover is missing (Prioritize ID3/Local)
+                            if detail.cover_url.is_some() && cover_url.is_none() { 
+                                cover_url = detail.cover_url; 
+                            }
+                            
+                            // Update narrator if scraper has one AND local narrator is missing/fallback
+                            if detail.narrator.is_some() { 
+                                if source == MetadataSource::Fallback || narrator.is_none() {
+                                    narrator = detail.narrator; 
+                                }
+                            }
+                            
+                            // For author, we update if it's Unknown OR if scraper provides one AND local source is fallback
                             if !detail.author.is_empty() {
-                                author = Some(detail.author);
+                                if source == MetadataSource::Fallback || author.is_none() || author.as_deref() == Some("Unknown") {
+                                    author = Some(detail.author);
+                                }
                             }
                         },
                         Err(e) => debug!("Scraper failed: {}", e),
@@ -1054,7 +1084,7 @@ impl LibraryScanner {
         Ok(final_book_id)
     }
 
-    async fn extract_metadata(&self, dir: &Path, files: &[PathBuf]) -> (String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>) {
+    async fn extract_metadata(&self, dir: &Path, files: &[PathBuf]) -> (String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, MetadataSource) {
         // Try NFO
         let nfo_path = dir.join("book.nfo");
         if let Ok(meta) = self.nfo_manager.read_book_nfo(&nfo_path) {
@@ -1064,7 +1094,8 @@ impl LibraryScanner {
                 meta.narrator,
                 meta.intro,
                 Some(meta.tags.items.join(",")),
-                meta.cover_url
+                meta.cover_url,
+                MetadataSource::Nfo
             );
         }
 
@@ -1073,6 +1104,7 @@ impl LibraryScanner {
         let mut author = None;
         let mut narrator = None;
         let mut cover_url_from_plugin = None;
+        let mut source = MetadataSource::Fallback;
 
         if !files.is_empty() {
             let file_path = &files[0];
@@ -1087,6 +1119,7 @@ impl LibraryScanner {
                     if let Some(t) = meta.album {
                         if !t.trim().is_empty() {
                             title = t;
+                            source = MetadataSource::FileMetadata;
                         }
                     }
                     
@@ -1095,6 +1128,7 @@ impl LibraryScanner {
                     if let Some(aa) = meta.album_artist {
                          if !aa.trim().is_empty() {
                              author = Some(aa);
+                             source = MetadataSource::FileMetadata;
                          }
                     }
                     
@@ -1102,6 +1136,7 @@ impl LibraryScanner {
                         if !a.trim().is_empty() {
                             if author.is_none() {
                                 author = Some(a.clone());
+                                source = MetadataSource::FileMetadata;
                             } else if author.as_ref() != Some(&a) {
                                 // If Author is already set (e.g. from AlbumArtist) and Artist is different,
                                 // Artist is likely the Narrator or Contributing Artist.
@@ -1149,6 +1184,7 @@ impl LibraryScanner {
                         if let Some(t) = result.get("album").and_then(|v| v.as_str()) {
                             if !t.trim().is_empty() {
                                 title = t.to_string();
+                                source = MetadataSource::FileMetadata;
                             }
                         }
                         
@@ -1157,6 +1193,7 @@ impl LibraryScanner {
                         if let Some(a) = result.get("artist").and_then(|v| v.as_str()) {
                             if !a.trim().is_empty() {
                                 author = Some(a.to_string());
+                                source = MetadataSource::FileMetadata;
                             }
                         }
                         
@@ -1187,6 +1224,7 @@ impl LibraryScanner {
             let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("Unknown Book");
             let (cleaned, _) = self.text_cleaner.clean_chapter_title(dir_name, None);
             title = cleaned;
+            source = MetadataSource::Fallback;
         }
 
         // Fallback Author from "Author - Title" pattern
@@ -1202,7 +1240,7 @@ impl LibraryScanner {
 
         let cover_url = self.find_cover_image(dir).or(cover_url_from_plugin);
 
-        (title, author, narrator, None, None, cover_url)
+        (title, author, narrator, None, None, cover_url, source)
     }
 
     async fn process_chapters(

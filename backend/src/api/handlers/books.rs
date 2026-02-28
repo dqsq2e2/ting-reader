@@ -134,8 +134,15 @@ pub async fn update_book(
     let book_path_str = req.path.clone().unwrap_or(existing_book.path.clone());
     let book_path = std::path::Path::new(&book_path_str);
     
-    if theme_color.is_none() {
+    let cover_changed = if let Some(ref new_url) = req.cover_url {
+        existing_book.cover_url.as_ref() != Some(new_url)
+    } else {
+        false
+    };
+    
+    if theme_color.is_none() || cover_changed {
         if let Some(ref url) = req.cover_url {
+             // If cover URL is provided, always recalculate theme color if not provided
              let cover_path = if url.starts_with("http://") || url.starts_with("https://") {
                  url.clone()
              } else {
@@ -147,10 +154,37 @@ pub async fn update_book(
                  }
              };
 
-             if let Ok(Some(color)) = crate::core::color::calculate_theme_color(&cover_path).await {
-                 theme_color = Some(color);
+             match crate::core::color::calculate_theme_color(&cover_path).await {
+                 Ok(Some(color)) => {
+                     theme_color = Some(color);
+                 },
+                 Ok(None) => {
+                     // Try WebDAV if local/http failed and it's a webdav library
+                     if let Ok(Some(library)) = state.library_repo.find_by_id(&existing_book.library_id).await {
+                         if library.library_type == "webdav" {
+                             if let Ok((mut reader, _)) = state.storage_service.get_webdav_reader(
+                                 &library, 
+                                 url, 
+                                 None, 
+                                 state.encryption_key.as_ref()
+                             ).await {
+                                 let mut buffer = Vec::new();
+                                 if tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut buffer).await.is_ok() {
+                                     if let Ok(Some(color)) = crate::core::color::calculate_theme_color_from_bytes(&buffer).await {
+                                         theme_color = Some(color);
+                                     }
+                                 }
+                             }
+                         }
+                     }
+                 },
+                 Err(e) => {
+                     tracing::warn!("Failed to calculate theme color: {}", e);
+                 }
              }
         } else {
+             // If cover URL is NOT provided in request, keep existing theme color
+             // UNLESS existing cover exists and theme color is missing
              theme_color = existing_book.theme_color.clone();
              if theme_color.is_none() {
                  if let Some(ref url) = existing_book.cover_url {
@@ -165,8 +199,31 @@ pub async fn update_book(
                          }
                      };
 
-                     if let Ok(Some(color)) = crate::core::color::calculate_theme_color(&cover_path).await {
-                         theme_color = Some(color);
+                     match crate::core::color::calculate_theme_color(&cover_path).await {
+                         Ok(Some(color)) => {
+                             theme_color = Some(color);
+                         },
+                         Ok(None) => {
+                             // Try WebDAV fallback for existing cover
+                             if let Ok(Some(library)) = state.library_repo.find_by_id(&existing_book.library_id).await {
+                                 if library.library_type == "webdav" {
+                                     if let Ok((mut reader, _)) = state.storage_service.get_webdav_reader(
+                                         &library, 
+                                         url, 
+                                         None, 
+                                         state.encryption_key.as_ref()
+                                     ).await {
+                                         let mut buffer = Vec::new();
+                                         if tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut buffer).await.is_ok() {
+                                             if let Ok(Some(color)) = crate::core::color::calculate_theme_color_from_bytes(&buffer).await {
+                                                 theme_color = Some(color);
+                                             }
+                                         }
+                                     }
+                                 }
+                             }
+                         },
+                         Err(_) => {}
                      }
                  }
              }
@@ -790,6 +847,37 @@ pub async fn apply_scrape_result(
         if !detail.tags.is_empty() { book.tags = Some(detail.tags.join(",")); }
         if let Some(url) = &detail.cover_url { 
             book.cover_url = Some(url.clone());
+            
+            // Recalculate theme color for new cover
+            match crate::core::color::calculate_theme_color(url).await {
+                Ok(Some(color)) => {
+                    tracing::info!("Updated theme color for book {}: {}", book.id, color);
+                    book.theme_color = Some(color);
+                },
+                Ok(None) => {
+                     // Try WebDAV if local/http failed and it's a webdav library
+                     if let Ok(Some(library)) = state.library_repo.find_by_id(&book.library_id).await {
+                         if library.library_type == "webdav" {
+                             if let Ok((mut reader, _)) = state.storage_service.get_webdav_reader(
+                                 &library, 
+                                 url, 
+                                 None, 
+                                 state.encryption_key.as_ref()
+                             ).await {
+                                 let mut buffer = Vec::new();
+                                 if tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut buffer).await.is_ok() {
+                                     if let Ok(Some(color)) = crate::core::color::calculate_theme_color_from_bytes(&buffer).await {
+                                         book.theme_color = Some(color);
+                                     }
+                                 }
+                             }
+                         }
+                     }
+                },
+                Err(e) => {
+                    tracing::warn!("Failed to calculate theme color: {}", e);
+                }
+            }
         }
         
         // Set manual corrected

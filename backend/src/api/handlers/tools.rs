@@ -5,9 +5,9 @@ use crate::core::error::Result;
 pub async fn generate_regex(
     Json(req): Json<GenerateRegexRequest>
 ) -> Result<impl IntoResponse> {
-    let filename = req.filename;
-    let num_str = req.chapter_number;
-    let title_str = req.chapter_title;
+    let filename = req.filename.trim().to_string();
+    let num_str = req.chapter_number.trim().to_string();
+    let title_str = req.chapter_title.trim().to_string();
     
     // 1. Find number range
     let num_val = num_str.parse::<i32>().unwrap_or(-1);
@@ -55,12 +55,7 @@ pub async fn generate_regex(
     let mut pattern = String::from("^");
     let mut current_idx = 0;
     
-    let mut ranges = Vec::new();
-    if let Some(ref r) = num_range { ranges.push((r.clone(), r"(\d+)")); }
-    if let Some(ref r) = title_range { ranges.push((r.clone(), r"(.+)")); }
-    
     // Sort ranges by start index to process sequentially
-    // We need to clone the ranges because we use them later
     let mut ranges: Vec<(std::ops::Range<usize>, &str)> = Vec::new();
     if let Some(ref r) = num_range { ranges.push((r.clone(), r"(\d+)")); }
     if let Some(ref r) = title_range { ranges.push((r.clone(), r"(.+)")); }

@@ -142,7 +142,35 @@ impl BookService {
         }
         
         if let Some(cover_url) = request.cover_url {
-            book.cover_url = Some(cover_url);
+            // Only update if changed
+            let should_update = match &book.cover_url {
+                Some(current) => current != &cover_url,
+                None => true,
+            };
+
+            if should_update {
+                book.cover_url = Some(cover_url.clone());
+                // Recalculate theme color if not explicitly provided in request
+                if request.theme_color.is_none() {
+                    use crate::core::color::calculate_theme_color;
+                    tracing::info!("Recalculating theme color for book {} from cover {}", book.id, cover_url);
+                    
+                    match calculate_theme_color(&cover_url).await {
+                        Ok(Some(color)) => {
+                            tracing::info!("Updated theme color for book {}: {}", book.id, color);
+                            book.theme_color = Some(color);
+                        }
+                        Ok(None) => {
+                            tracing::warn!("Could not extract theme color from cover {}", cover_url);
+                            book.theme_color = None;
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to calculate theme color: {}", e);
+                            book.theme_color = None;
+                        }
+                    }
+                }
+            }
         }
         
         if let Some(theme_color) = request.theme_color {
@@ -380,24 +408,37 @@ impl ScraperService {
                 "Search query cannot be empty".to_string()
             ));
         }
+
+        // Clean query: remove suffix after first "丨" or "|" or "-" if present
+        // This handles cases like "乱世书丨头陀渊工作室丨历史穿越..."
+        let clean_query = query
+            .split('丨')
+            .next()
+            .unwrap_or(query)
+            .split('|')
+            .next()
+            .unwrap_or(query)
+            .trim();
+        
+        let clean_query = if clean_query.is_empty() { query } else { clean_query };
         
         // Select scraper plugin
         let source_id = self.select_scraper(source).await?;
         
-        // Generate cache key
-        let cache_key = format!("{}:{}:{}:{}", source_id, query, page, page_size);
+        // Generate cache key (use clean_query)
+        let cache_key = format!("{}:{}:{}:{}", source_id, clean_query, page, page_size);
         
         // Check cache first
         if let Some(cached) = self.get_cached_search(&cache_key) {
-            tracing::debug!("Cache hit for search query: {}", query);
+            tracing::debug!("Cache hit for search query: {}", clean_query);
             return Ok(cached);
         }
         
-        tracing::debug!("Cache miss for search query: {}, calling plugin {}", query, source_id);
+        tracing::debug!("Cache miss for search query: {}, calling plugin {}", clean_query, source_id);
         
         // Call scraper plugin with error handling and fallback
         let params = json!({
-            "query": query,
+            "query": clean_query,
             "page": page,
         });
         
