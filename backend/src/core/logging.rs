@@ -281,30 +281,6 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     
-    #[allow(dead_code)]
-    fn test_config_stdout() -> LoggingConfig {
-        LoggingConfig {
-            level: "info".to_string(),
-            format: "json".to_string(),
-            output: "stdout".to_string(),
-            log_file: None,
-            max_file_size: 10485760,
-            max_backups: 5,
-        }
-    }
-    
-    #[allow(dead_code)]
-    fn test_config_file() -> LoggingConfig {
-        LoggingConfig {
-            level: "debug".to_string(),
-            format: "text".to_string(),
-            output: "file".to_string(),
-            log_file: Some(PathBuf::from("./test_logs/test.log")),
-            max_file_size: 1024,
-            max_backups: 3,
-        }
-    }
-    
     #[test]
     fn test_parse_log_level() {
         assert!(matches!(parse_log_level("debug"), Ok(Level::DEBUG)));

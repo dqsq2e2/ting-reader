@@ -234,33 +234,6 @@ const MIGRATION_V7: &str = r#"
 ALTER TABLE chapters ADD COLUMN manual_corrected INTEGER DEFAULT 0;
 "#;
 
-/// Eighth schema migration (version 8)
-const MIGRATION_V8: &str = r#"
--- Fix tasks table schema (missing columns in old versions)
--- We check for existence by trying to add them.
--- Since SQLite doesn't support IF NOT EXISTS for ADD COLUMN in older versions,
--- and we are in a transaction, we need to handle this carefully.
-
--- Add retries column if not exists
-SELECT CASE WHEN NOT EXISTS (
-  SELECT 1 FROM pragma_table_info('tasks') WHERE name = 'retries'
-) THEN 1 ELSE 0 END;
--- Actually we can't do conditional DDL easily in one batch string.
--- But wait, the error is "duplicate column name: retries".
--- This means the column ALREADY EXISTS but the version check thinks it doesn't.
--- This happens if someone manually added it or a previous migration failed halfway but committed?
--- Or maybe the create table definition already has it?
-
--- Let's check the CREATE TABLE definition for tasks in MIGRATION_V1.
--- It HAS retries and max_retries!
--- So for new databases, MIGRATION_V1 creates the table WITH these columns.
--- But MIGRATION_V8 tries to ADD them again.
--- This is the problem. MIGRATION_V8 should only run if the columns are MISSING.
-"#;
-
-// We will change the implementation of apply_migration_v8 to check columns first.
-
-
 /// Run all pending database migrations
 ///
 /// This function applies database schema migrations in order.

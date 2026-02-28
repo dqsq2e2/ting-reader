@@ -271,8 +271,7 @@ impl JsRuntimeWrapper {
     }
 
     /// Check CPU time limit
-    #[allow(dead_code)]
-    fn check_cpu_time_limit(&self) -> Result<()> {
+    pub fn check_cpu_time_limit(&self) -> Result<()> {
         if let (Some(sandbox), Some(start_time)) = (&self.sandbox, self.execution_start) {
             let elapsed = start_time.elapsed();
             sandbox.check_cpu_time(elapsed)?;
@@ -528,8 +527,9 @@ mod tests {
     #[tokio::test]
     async fn test_sandbox_cpu_time_tracking() {
         use std::time::Duration;
+        use super::super::sandbox::Permission;
         
-        let metadata = PluginMetadata::new(
+        let mut metadata = PluginMetadata::new(
             "test-plugin".to_string(),
             "1.0.0".to_string(),
             super::super::types::PluginType::Utility,
@@ -537,6 +537,9 @@ mod tests {
             "Test plugin".to_string(),
             "plugin.js".to_string(),
         );
+
+        // Add a permission to trigger sandbox creation
+        metadata.permissions = vec![Permission::NetworkAccess("example.com".to_string())];
 
         let temp_file = NamedTempFile::new().unwrap();
         let mut runtime = JsRuntimeWrapper::new(temp_file.path().to_path_buf(), metadata, None).unwrap();

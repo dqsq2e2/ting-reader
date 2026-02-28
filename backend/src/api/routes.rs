@@ -32,7 +32,7 @@ use crate::api::handlers::{
     stream_chapter,
     AppState,
 };
-use crate::auth::handlers::{register, login, get_me, update_me};
+use crate::auth::handlers::{get_me, update_me};
 use crate::auth::middleware::authenticate;
 use axum::{
     routing::{get, post, put, patch},
@@ -44,8 +44,6 @@ use axum::{
 pub fn build_api_routes(state: AppState) -> Router {
     // Public routes (no authentication required)
     let public_routes = Router::new()
-        .route("/api/auth/register", post(register))
-        .route("/api/auth/login", post(login))
         // Statistics endpoint (public)
         .route("/api/v1/stats", get(get_stats))
         .route("/api/stats", get(get_stats))

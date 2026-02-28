@@ -112,7 +112,7 @@ async fn ensure_admin_user(db: std::sync::Arc<db::DatabaseManager>) -> Result<()
 
     if count == 0 {
         info!("No users found, creating default admin user...");
-        let password_hash = hash_password("password")?;
+        let password_hash = hash_password("admin123")?;
         let admin_user = User {
             id: Uuid::new_v4().to_string(),
             username: "admin".to_string(),
@@ -121,7 +121,7 @@ async fn ensure_admin_user(db: std::sync::Arc<db::DatabaseManager>) -> Result<()
             created_at: chrono::Utc::now().to_rfc3339(),
         };
         user_repo.create(&admin_user).await?;
-        info!("Default admin user created: username='admin', password='password'");
+        info!("Default admin user created: username='admin', password='admin123'");
     }
 
     Ok(())

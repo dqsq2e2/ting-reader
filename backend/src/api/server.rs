@@ -181,10 +181,13 @@ impl ApiServer {
         
         // Create public routes (no authentication required)
         let public_router = Router::new()
-            .route("/health", get(health_check));
+            .route("/health", get(health_check))
+            .route("/api/auth/login", axum::routing::post(crate::auth::handlers::login))
+            .route("/api/auth/register", axum::routing::post(crate::auth::handlers::register))
+            .with_state(app_state.clone());
         
         // Create protected routes (authentication required)
-        let protected_router = build_api_routes(app_state)
+        let protected_router = build_api_routes(app_state.clone())
             .layer(middleware::from_fn(move |mut req: Request, next: Next| {
                 let api_key = api_key.clone();
                 async move {
