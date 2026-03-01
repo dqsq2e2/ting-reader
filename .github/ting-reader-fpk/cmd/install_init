@@ -14,37 +14,4 @@ mkdir -p "$DEFAULT_DATA"
 mkdir -p "$DEFAULT_PLUGINS"
 mkdir -p "$DEFAULT_TEMP"
 
-# Generate JWT secret if not provided
-if [ -z "$wizard_jwt_secret" ]; then
-    export LC_ALL=C
-    JWT_SECRET=$(head -c 512 /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 32)
-    # Fallback if empty
-    if [ -z "$JWT_SECRET" ]; then
-        if command -v openssl >/dev/null 2>&1; then
-            JWT_SECRET=$(openssl rand -hex 16)
-        else
-            JWT_SECRET="defaultsecret$(date +%s)$RANDOM"
-        fi
-    fi
-    # Export for wizard to pick up if it supports dynamic defaults, 
-    # but more importantly, we might need to inject it later.
-    # However, since wizard vars are usually user input, we might not be able to set them here for the compose file directly 
-    # unless we use a different mechanism.
-    
-    # Actually, the better way is to generate it here and save it to a temporary file that install_callback can read,
-    # OR rely on install_callback to do the heavy lifting of injection.
-    
-    # But wait, fnpack docs say: "用户在安装、配置等向导中的选择也会变成环境变量".
-    # And docker-compose.yaml will substitute variables.
-    
-    # Let's try to inject it into the install wizard's variable if possible? No, we can't change wizard vars from here easily.
-    # But we can set a default value in the wizard config itself? No, dynamic random is hard there.
-    
-    # So the plan:
-    # 1. install_init: Generate secret, write to a temp file.
-    # 2. install_callback: Read secret, replace in docker-compose.yaml.
-    
-    echo "$JWT_SECRET" > "/tmp/ting_reader_jwt_secret_init"
-fi
-
 exit 0

@@ -26,6 +26,18 @@
                 "rules": []
             },
             {
+                "type": "text",
+                "field": "wizard_jwt_secret",
+                "label": "JWT 密钥",
+                "initValue": "",
+                "rules": [
+                     {
+                        "required": true,
+                        "message": "请输入 JWT 密钥"
+                    }
+                ]
+            },
+            {
                 "type": "tips",
                 "helpText": "<strong>存储说明：</strong><br/>1. 本项为<strong>可选</strong>。如果不填写，系统将默认使用安装磁盘的 <strong>@appshare/ting-reader/storage</strong> 目录。<br/>2. 如果您填写了自定义路径，系统将自动尝试为您授权该目录的读写权限。<br/>3. 其他应用数据（如数据库、插件、缓存）将自动存储在 <strong>@appshare/ting-reader</strong> 下的对应子目录中，无需配置。"
             }

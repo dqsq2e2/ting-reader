@@ -4,14 +4,11 @@
 
 SECRET_FILE="${TRIM_PKGETC}/jwt_secret"
 
-# Check if we generated one in init
-if [ -f "/tmp/ting_reader_jwt_secret_init" ]; then
-    JWT_SECRET=$(cat "/tmp/ting_reader_jwt_secret_init")
-    rm "/tmp/ting_reader_jwt_secret_init"
-elif [ -n "$wizard_jwt_secret" ] && [ "$wizard_jwt_secret" != "" ]; then
+# Use user input from wizard
+if [ -n "$wizard_jwt_secret" ] && [ "$wizard_jwt_secret" != "" ]; then
     JWT_SECRET="$wizard_jwt_secret"
 else
-    # Generate new secret if missing
+    # Should not happen if wizard validates input, but as a fallback:
     export LC_ALL=C
     JWT_SECRET=$(head -c 512 /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 32)
     if [ -z "$JWT_SECRET" ]; then
@@ -51,8 +48,8 @@ if [ -d "$(dirname "$ENV_FILE")" ]; then
         # Escape special chars: & / \
         ESCAPED_SECRET=$(printf '%s\n' "$JWT_SECRET" | sed -e 's/[\/&]/\\&/g')
         
-        # Replace ${TING_SECURITY__JWT_SECRET} with actual secret
-        sed -i "s|\${TING_SECURITY__JWT_SECRET}|$ESCAPED_SECRET|g" "$DOCKER_COMPOSE_FILE"
+        # Replace ${wizard_jwt_secret} with actual secret
+        sed -i "s|\${wizard_jwt_secret}|$ESCAPED_SECRET|g" "$DOCKER_COMPOSE_FILE"
         
         echo "Updated docker-compose.yaml with JWT Secret directly."
     else

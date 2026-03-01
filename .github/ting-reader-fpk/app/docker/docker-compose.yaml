@@ -14,7 +14,7 @@ services:
       - RUST_LOG=info
       - TING_SERVER__HOST=0.0.0.0
       - TING_SERVER__PORT=3000
-      - TING_SECURITY__JWT_SECRET=${TING_SECURITY__JWT_SECRET}
+      - TING_SECURITY__JWT_SECRET=${wizard_jwt_secret}
       - TEMP_DIR=/app/temp
       - DATA_DIR=/app/data
       - STORAGE_DIR=/app/storage
