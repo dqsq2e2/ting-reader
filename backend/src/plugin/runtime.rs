@@ -541,6 +541,12 @@ impl Plugin for WasmPlugin {
         Ok(())
     }
     
+    async fn garbage_collect(&self) -> Result<()> {
+        let mut inner = self.inner.lock().await;
+        inner.store.gc();
+        Ok(())
+    }
+
     fn plugin_type(&self) -> crate::plugin::types::PluginType {
         self.metadata().plugin_type
     }

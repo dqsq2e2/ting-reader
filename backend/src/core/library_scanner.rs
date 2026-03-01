@@ -55,6 +55,7 @@ pub struct LibraryScanner {
     storage_service: Option<Arc<StorageService>>,
     merge_service: Option<Arc<MergeService>>,
     encryption_key: Option<Arc<[u8; 32]>>,
+    http_client: reqwest::Client,
 }
 
 impl LibraryScanner {
@@ -81,6 +82,7 @@ impl LibraryScanner {
             storage_service: None,
             merge_service: None,
             encryption_key: None,
+            http_client: reqwest::Client::new(),
         }
     }
 
@@ -293,8 +295,8 @@ impl LibraryScanner {
             
             self.update_progress(task_id, format!("Processing ({}/{}): {}", processed_count, total_groups, dir_name)).await;
 
-            // Sort files by filename for consistent chapter ordering
-            files.sort();
+            // Sort files by filename using natural sort order (e.g. 1, 2, 10 instead of 1, 10, 2)
+            files.sort_by(|a, b| natord::compare(a.to_string_lossy().as_ref(), b.to_string_lossy().as_ref()));
 
             match self.process_book_directory(library_id, &dir, &files, last_scanned, task_id, scraper_config, &manual_corrected_books).await {
                 Ok(book_id) => {
@@ -310,7 +312,14 @@ impl LibraryScanner {
                     ));
                 }
             }
+
+            // Periodic garbage collection to prevent memory buildup during large scans
+            // Force GC after every directory to help debug memory issues with native plugins
+            self.plugin_manager.garbage_collect_all().await;
         }
+
+        // Final garbage collection after scan
+        self.plugin_manager.garbage_collect_all().await;
 
         Ok(scan_result)
     }
@@ -386,7 +395,14 @@ impl LibraryScanner {
                     ));
                 }
             }
+
+            // Periodic garbage collection
+            // Force GC after every directory to help debug memory issues with native plugins
+            self.plugin_manager.garbage_collect_all().await;
         }
+
+        // Final garbage collection after scan
+        self.plugin_manager.garbage_collect_all().await;
 
         Ok(scan_result)
     }
@@ -730,7 +746,7 @@ impl LibraryScanner {
         
         // For now, if scraper provided cover_url, we try to calculate color.
         if let Some(ref url) = book.cover_url {
-            if let Ok(Some(color)) = crate::core::color::calculate_theme_color(url).await {
+            if let Ok(Some(color)) = crate::core::color::calculate_theme_color_with_client(url, &self.http_client).await {
                 book.theme_color = Some(color);
             }
         }
@@ -983,7 +999,7 @@ impl LibraryScanner {
                     dir.join(url).to_string_lossy().to_string()
                 };
 
-                match crate::core::color::calculate_theme_color(&cover_path).await {
+                match crate::core::color::calculate_theme_color_with_client(&cover_path, &self.http_client).await {
                     Ok(Some(color)) => theme_color = Some(color),
                     Ok(None) => {},
                     Err(e) => warn!("Failed to calculate theme color for {}: {}", title, e),

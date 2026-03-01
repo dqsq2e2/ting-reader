@@ -21,6 +21,9 @@ enum JsCommand {
         args: Value,
         resp: oneshot::Sender<Result<Value>>,
     },
+    GarbageCollect {
+        resp: oneshot::Sender<Result<()>>,
+    },
 }
 
 /// Wrapper for JavaScript plugins to make them Send + Sync
@@ -139,6 +142,12 @@ impl JavaScriptPluginWrapper {
                                     
                                 let _ = resp.send(result);
                             }
+                            JsCommand::GarbageCollect { resp } => {
+                                let result = executor.garbage_collect()
+                                    .map_err(|e| TingError::PluginExecutionError(e.to_string()));
+                                    
+                                let _ = resp.send(result);
+                            }
                         }
                     }
                     
@@ -186,6 +195,19 @@ impl Plugin for JavaScriptPluginWrapper {
         self.tx.send(JsCommand::Shutdown {
             resp: resp_tx,
         }).await.map_err(|e| TingError::PluginExecutionError(format!("Failed to send shutdown command: {}", e)))?;
+        
+        match resp_rx.await {
+            Ok(res) => res,
+            Err(_) => Err(TingError::PluginExecutionError("Channel closed".to_string())),
+        }
+    }
+
+    async fn garbage_collect(&self) -> Result<()> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        
+        self.tx.send(JsCommand::GarbageCollect {
+            resp: resp_tx,
+        }).await.map_err(|e| TingError::PluginExecutionError(format!("Failed to send gc command: {}", e)))?;
         
         match resp_rx.await {
             Ok(res) => res,

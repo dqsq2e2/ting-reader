@@ -408,6 +408,11 @@ impl JavaScriptPluginExecutor {
         Ok(())
     }
     
+    /// Garbage collect
+    pub fn garbage_collect(&mut self) -> Result<()> {
+        self.runtime.garbage_collect()
+    }
+    
     /// Call a JavaScript function
     pub async fn call_function<T, R>(&mut self, function_name: &str, args: T) -> Result<R>
     where

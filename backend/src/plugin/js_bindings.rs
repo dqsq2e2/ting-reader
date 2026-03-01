@@ -537,6 +537,27 @@ pub async fn op_fetch(#[string] url: String, #[serde] options: Option<Value>) ->
                 return domain === pattern;
             }}
         }}
+
+        // Helper for invoking functions from Rust without recompiling scripts
+        globalThis._ting_invoke = async function(funcName, args) {{
+            try {{
+                globalThis._ting_status = 'pending';
+                globalThis._ting_result = undefined;
+                globalThis._ting_error = undefined;
+                
+                const func = globalThis[funcName];
+                if (typeof func !== 'function') {{
+                    throw new Error(`Function ${{funcName}} not found`);
+                }}
+                
+                const result = await func(args);
+                globalThis._ting_result = JSON.stringify(result);
+                globalThis._ting_status = 'success';
+            }} catch (e) {{
+                globalThis._ting_error = e.toString();
+                globalThis._ting_status = 'error';
+            }}
+        }};
         "#,
         plugin_name,
         serde_json::to_string(&config).unwrap_or_else(|_| "{}".to_string()),

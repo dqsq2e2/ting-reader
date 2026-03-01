@@ -466,8 +466,14 @@ impl NativeLoader {
             unsafe {
                 free_fn(result_ptr);
             }
+            // Log at trace level to avoid spam, but useful for debugging leaks
+            tracing::trace!(plugin_id = %plugin_id, "Freed native plugin result using plugin_free");
         } else {
             // Fallback to libc::free (might cause issues on Windows if CRT differs)
+            tracing::warn!(
+                plugin_id = %plugin_id,
+                "plugin_free not found, falling back to libc::free. This may cause memory leaks or crashes on Windows."
+            );
             unsafe {
                 libc::free(result_ptr as *mut libc::c_void);
             }

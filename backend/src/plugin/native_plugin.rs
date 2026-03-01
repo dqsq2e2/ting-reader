@@ -191,6 +191,31 @@ impl Plugin for NativePlugin {
         Ok(())
     }
     
+    async fn garbage_collect(&self) -> Result<()> {
+        // Native plugins manage their own memory.
+        tracing::debug!(plugin_id = %self.plugin_id, "Garbage collection requested for native plugin");
+        
+        // Try to call the plugin's garbage_collect method if it exists
+        // We use spawn_blocking because this is a native call
+        let loader = self.native_loader.clone();
+        let plugin_id = self.plugin_id.clone();
+        
+        let _ = tokio::task::spawn_blocking(move || {
+            if let Ok(true) = loader.has_symbol(&plugin_id, "plugin_invoke") {
+                // We don't check if "garbage_collect" is supported by the invoke dispatch,
+                // we just try to call it. If the plugin doesn't handle it, it should return an error
+                // or ignore it.
+                let _ = loader.call_function(
+                    &plugin_id, 
+                    "garbage_collect", 
+                    serde_json::json!({})
+                );
+            }
+        }).await;
+        
+        Ok(())
+    }
+
     fn plugin_type(&self) -> PluginType {
         self.metadata.plugin_type
     }

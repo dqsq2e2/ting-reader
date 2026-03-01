@@ -32,6 +32,13 @@ pub trait Plugin: Send + Sync {
     /// Plugins should release all resources here.
     async fn shutdown(&self) -> Result<()>;
     
+    /// Perform garbage collection or resource cleanup
+    /// 
+    /// This method is called periodically or when memory pressure is detected.
+    async fn garbage_collect(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// Get the plugin type
     fn plugin_type(&self) -> PluginType;
     

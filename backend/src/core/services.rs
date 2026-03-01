@@ -410,7 +410,6 @@ impl ScraperService {
         }
 
         // Clean query: remove suffix after first "丨" or "|" or "-" if present
-        // This handles cases like "乱世书丨头陀渊工作室丨历史穿越..."
         let clean_query = query
             .split('丨')
             .next()

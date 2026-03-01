@@ -107,6 +107,26 @@ impl PluginManager {
         })
     }
 
+    /// Trigger garbage collection on all plugins
+    pub async fn garbage_collect_all(&self) {
+        info!("Triggering garbage collection for all plugins");
+        
+        // 1. Collect plugins first
+        let registry = self.registry.read().await;
+        for entry in registry.values() {
+            if let Err(e) = entry.instance.garbage_collect().await {
+                tracing::warn!("Failed to garbage collect plugin {}: {}", entry.metadata.name, e);
+            }
+        }
+        
+        // 2. Release memory to OS (Linux specific)
+        // This helps with allocator fragmentation after large allocations (like image processing)
+        // Run in blocking task since malloc_trim can be slow
+        tokio::task::spawn_blocking(|| {
+            crate::core::utils::release_memory();
+        }).await.unwrap_or_else(|e| tracing::warn!("Failed to release memory: {}", e));
+    }
+
     /// Discover and load all plugins from the plugin directory
     pub async fn discover_plugins(&self, plugin_dir: &Path) -> Result<Vec<PluginMetadata>> {
         info!("Discovering plugins in {}", plugin_dir.display());

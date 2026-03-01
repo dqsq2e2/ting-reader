@@ -5,7 +5,7 @@
 //! and sandboxing.
 
 use anyhow::{Context, Result};
-use deno_core::JsRuntime;
+use deno_core::{JsRuntime, v8};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -132,40 +132,37 @@ impl JsRuntimeWrapper {
         let args_json = serde_json::to_string(&args)
             .context("Failed to serialize function arguments")?;
 
-        // Reset status variables in JS
-        self.execute_script(
-            r#"
-            globalThis._ting_status = 'pending';
-            globalThis._ting_result = undefined;
-            globalThis._ting_error = undefined;
-            "#
-        )?;
+        // Call _ting_invoke using V8 API to avoid compiling new scripts for arguments
+        {
+            let scope = &mut self.runtime.handle_scope();
+            let context = scope.get_current_context();
+            let global = context.global(scope);
 
-        // Create JavaScript code to call the function and set global status
-        let code = format!(
-            r#"
-            (async function() {{
-                try {{
-                    const args = {};
-                    const result = await {}(args);
-                    globalThis._ting_result = JSON.stringify(result);
-                    globalThis._ting_status = 'success';
-                }} catch (e) {{
-                    globalThis._ting_error = e.toString();
-                    globalThis._ting_status = 'error';
-                }}
-            }})()
-            "#,
-            args_json, function_name
-        );
+            // Get _ting_invoke function
+            let invoke_name = v8::String::new(scope, "_ting_invoke").unwrap();
+            let invoke_val = global.get(scope, invoke_name.into())
+                .ok_or_else(|| anyhow::anyhow!("_ting_invoke not found"))?;
+            let invoke_func = v8::Local::<v8::Function>::try_from(invoke_val)
+                .map_err(|_| anyhow::anyhow!("_ting_invoke is not a function"))?;
 
-        // Execute the script - this starts the async task
-        // We ignore the return value (Promise) because we'll poll the status
-        let _ = self.runtime.execute_script("<call_wrapper>", code.into())
-            .with_context(|| format!("Failed to start function execution: {}", function_name))?;
+            // Prepare arguments: [function_name, args_value]
+            let func_name_v8 = v8::String::new(scope, function_name).unwrap();
+            
+            // Parse args JSON to V8 value
+            let args_json_v8 = v8::String::new(scope, &args_json).unwrap();
+            let args_val = v8::json::parse(scope, args_json_v8)
+                .ok_or_else(|| anyhow::anyhow!("Failed to parse arguments JSON in V8"))?;
+
+            let recv = v8::undefined(scope).into();
+            let args = [func_name_v8.into(), args_val];
+
+            // Call _ting_invoke
+            if invoke_func.call(scope, recv, &args).is_none() {
+                return Err(anyhow::anyhow!("Failed to call _ting_invoke"));
+            }
+        }
 
         // Drive the event loop until completion
-        // We run the event loop which will drive the async function we just started
         self.runtime.run_event_loop(Default::default()).await
             .context("Failed to run event loop")?;
 
@@ -316,6 +313,13 @@ impl JsRuntimeWrapper {
         if let Some(sandbox) = &self.sandbox {
             sandbox.check_memory_limit(current_bytes)?;
         }
+        Ok(())
+    }
+
+    /// Request garbage collection
+    pub fn garbage_collect(&mut self) -> Result<()> {
+        debug!("Requesting garbage collection");
+        self.runtime.v8_isolate().low_memory_notification();
         Ok(())
     }
 }
