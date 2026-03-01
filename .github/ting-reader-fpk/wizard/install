@@ -26,7 +26,7 @@
                 "rules": []
             },
             {
-                "type": "text",
+                "type": "password",
                 "field": "wizard_jwt_secret",
                 "label": "JWT 密钥",
                 "initValue": "",
