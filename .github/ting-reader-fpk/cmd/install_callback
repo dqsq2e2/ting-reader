@@ -51,10 +51,7 @@ if [ -d "$(dirname "$ENV_FILE")" ]; then
         # Escape special chars: & / \
         ESCAPED_SECRET=$(printf '%s\n' "$JWT_SECRET" | sed -e 's/[\/&]/\\&/g')
         
-        # Replace ${wizard_jwt_secret} which is now in the yaml
-        sed -i "s|\${wizard_jwt_secret}|$ESCAPED_SECRET|g" "$DOCKER_COMPOSE_FILE"
-        
-        # Also replace old variable name just in case
+        # Replace ${TING_SECURITY__JWT_SECRET} with actual secret
         sed -i "s|\${TING_SECURITY__JWT_SECRET}|$ESCAPED_SECRET|g" "$DOCKER_COMPOSE_FILE"
         
         echo "Updated docker-compose.yaml with JWT Secret directly."
