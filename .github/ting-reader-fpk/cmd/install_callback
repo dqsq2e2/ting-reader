@@ -11,16 +11,34 @@ if [ -f "$SECRET_FILE" ]; then
     echo "Found existing JWT Secret."
 else
     # Generate new secret
-    JWT_SECRET=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
+    # Ensure LC_ALL=C for tr to handle binary input correctly
+    export LC_ALL=C
+    # Use head -c to limit input reading, avoiding infinite read if tr fails
+    JWT_SECRET=$(head -c 512 /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 32)
+    
+    # Fallback if empty (e.g. minimal system)
+    if [ -z "$JWT_SECRET" ]; then
+        JWT_SECRET=$(openssl rand -hex 16 2>/dev/null || echo "defaultsecret$(date +%s)")
+    fi
+    
     echo "Generating new JWT Secret..."
     
     # Save to persistent config directory
+    mkdir -p "$(dirname "$SECRET_FILE")"
     echo "$JWT_SECRET" > "$SECRET_FILE"
 fi
 
 # Create .env file for docker-compose
-echo "TING_SECURITY__JWT_SECRET=${JWT_SECRET}" > "$ENV_FILE"
-
-echo "Environment file created at: $ENV_FILE"
+if [ -d "$(dirname "$ENV_FILE")" ]; then
+    echo "TING_SECURITY__JWT_SECRET=${JWT_SECRET}" > "$ENV_FILE"
+    echo "Environment file created at: $ENV_FILE"
+else
+    echo "Error: Docker directory not found at $(dirname "$ENV_FILE")"
+    # Try to find docker directory
+    if [ -d "${TRIM_APPDEST}/app/docker" ]; then
+         echo "TING_SECURITY__JWT_SECRET=${JWT_SECRET}" > "${TRIM_APPDEST}/app/docker/.env"
+         echo "Environment file created at: ${TRIM_APPDEST}/app/docker/.env"
+    fi
+fi
 
 exit 0
