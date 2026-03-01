@@ -329,6 +329,18 @@ impl WasmPlugin {
             func.call_async(&mut inner.store, args, &mut results)
         ).await;
         
+        // Clean up any lingering HTTP responses to prevent memory leaks
+        if !inner.store.data().http_responses.is_empty() {
+            let count = inner.store.data().http_responses.len();
+            tracing::warn!(
+                plugin_id = %self.plugin_id,
+                function = function_name,
+                count = count,
+                "Cleaning up leaked HTTP responses after function call"
+            );
+            inner.store.data_mut().http_responses.clear();
+        }
+
         match call_result {
             Ok(Ok(())) => {
                 let elapsed = start_time.elapsed();

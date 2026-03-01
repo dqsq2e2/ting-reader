@@ -277,6 +277,13 @@ impl LibraryScanner {
         let total_groups = dir_groups.len();
         let mut processed_count = 0;
 
+        // Pre-fetch manual corrected books to avoid N+1 query in process_book_directory
+        // This significantly reduces memory pressure and database load during scan
+        let all_books = self.book_repo.find_by_library(library_id).await.unwrap_or_default();
+        let manual_corrected_books: Vec<crate::db::models::Book> = all_books.into_iter()
+            .filter(|b| b.manual_corrected == 1 && b.match_pattern.is_some())
+            .collect();
+
         for (dir, mut files) in dir_groups {
             // Check cancellation
             self.check_cancellation(task_id).await?;
@@ -289,7 +296,7 @@ impl LibraryScanner {
             // Sort files by filename for consistent chapter ordering
             files.sort();
 
-            match self.process_book_directory(library_id, &dir, &files, last_scanned, task_id, scraper_config).await {
+            match self.process_book_directory(library_id, &dir, &files, last_scanned, task_id, scraper_config, &manual_corrected_books).await {
                 Ok(book_id) => {
                     scan_result.books_created += 1;
                     debug!(book_id = %book_id, path = ?dir, "Processed book directory");
@@ -801,26 +808,24 @@ impl LibraryScanner {
         last_scanned: Option<chrono::DateTime<chrono::Utc>>,
         task_id: Option<&str>,
         scraper_config: &crate::db::models::ScraperConfig,
+        manual_corrected_books: &[crate::db::models::Book],
     ) -> Result<String> {
         // 0. Check New Chapter Protection (Manual Correction)
         // If this directory matches a pattern of a manually corrected book, add chapters to that book.
         
-        let all_books = self.book_repo.find_by_library(library_id).await?;
-        for book in &all_books {
-            if book.manual_corrected == 1 {
-                if let Some(pattern) = &book.match_pattern {
-                    if !pattern.is_empty() {
-                        // Check regex match against directory name
-                        let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                        
-                        if let Ok(re) = regex::Regex::new(pattern) {
-                            if re.is_match(dir_name) {
-                                info!("New Chapter Protection: Merging {} into existing book {}", dir_name, book.title.as_deref().unwrap_or("?"));
-                                
-                                // Process chapters for this existing book
-                                self.process_chapters(&book.id, files, last_scanned, task_id).await?;
-                                return Ok(book.id.clone());
-                            }
+        for book in manual_corrected_books {
+            if let Some(pattern) = &book.match_pattern {
+                if !pattern.is_empty() {
+                    // Check regex match against directory name
+                    let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    
+                    if let Ok(re) = regex::Regex::new(pattern) {
+                        if re.is_match(dir_name) {
+                            info!("New Chapter Protection: Merging {} into existing book {}", dir_name, book.title.as_deref().unwrap_or("?"));
+                            
+                            // Process chapters for this existing book
+                            self.process_chapters(&book.id, files, last_scanned, task_id).await?;
+                            return Ok(book.id.clone());
                         }
                     }
                 }

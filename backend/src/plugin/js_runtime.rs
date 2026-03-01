@@ -175,7 +175,7 @@ impl JsRuntimeWrapper {
             let global = context.global(scope);
 
             // Helper to get string from global object
-        let get_global_string = |scope: &mut deno_core::v8::HandleScope, key: &str| -> Option<String> {
+            let get_global_string = |scope: &mut deno_core::v8::HandleScope, key: &str| -> Option<String> {
                 let key_str = deno_core::v8::String::new(scope, key)?;
                 let val = global.get(scope, key_str.into())?;
                 if val.is_undefined() || val.is_null() {
@@ -207,6 +207,17 @@ impl JsRuntimeWrapper {
             };
             (status, result)
         };
+
+        // Cleanup global variables to free memory
+        // This is crucial to prevent memory leaks as _ting_result can hold large JSON strings
+        let _ = self.runtime.execute_script(
+            "<cleanup>",
+            r#"
+            globalThis._ting_result = undefined;
+            globalThis._ting_error = undefined;
+            globalThis._ting_status = undefined;
+            "#.into()
+        );
 
         // Stop tracking execution time
         self.stop_execution();
