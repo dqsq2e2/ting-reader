@@ -35,15 +35,34 @@ else
 fi
 
 # Create .env file for docker-compose
+ENV_FILE="${TRIM_APPDEST}/docker/.env"
 if [ -d "$(dirname "$ENV_FILE")" ]; then
     echo "TING_SECURITY__JWT_SECRET=${JWT_SECRET}" > "$ENV_FILE"
     echo "Environment file created at: $ENV_FILE"
+    
+    # Also update docker-compose.yaml directly to be safe
+    DOCKER_COMPOSE_FILE="${TRIM_APPDEST}/docker/docker-compose.yaml"
+    if [ -f "$DOCKER_COMPOSE_FILE" ]; then
+        # Use simple sed replacement, assuming the placeholder is unique
+        # We need to escape special characters in the secret just in case
+        ESCAPED_SECRET=$(printf '%s\n' "$JWT_SECRET" | sed -e 's/[\/&]/\\&/g')
+        sed -i "s|\${TING_SECURITY__JWT_SECRET}|$ESCAPED_SECRET|g" "$DOCKER_COMPOSE_FILE"
+        echo "Updated docker-compose.yaml with JWT Secret directly."
+    fi
 else
     echo "Error: Docker directory not found at $(dirname "$ENV_FILE")"
-    # Try to find docker directory
+    # Try to find docker directory in alternative location
     if [ -d "${TRIM_APPDEST}/app/docker" ]; then
-         echo "TING_SECURITY__JWT_SECRET=${JWT_SECRET}" > "${TRIM_APPDEST}/app/docker/.env"
-         echo "Environment file created at: ${TRIM_APPDEST}/app/docker/.env"
+         ENV_FILE="${TRIM_APPDEST}/app/docker/.env"
+         echo "TING_SECURITY__JWT_SECRET=${JWT_SECRET}" > "$ENV_FILE"
+         echo "Environment file created at: $ENV_FILE"
+         
+         DOCKER_COMPOSE_FILE="${TRIM_APPDEST}/app/docker/docker-compose.yaml"
+         if [ -f "$DOCKER_COMPOSE_FILE" ]; then
+            ESCAPED_SECRET=$(printf '%s\n' "$JWT_SECRET" | sed -e 's/[\/&]/\\&/g')
+            sed -i "s|\${TING_SECURITY__JWT_SECRET}|$ESCAPED_SECRET|g" "$DOCKER_COMPOSE_FILE"
+            echo "Updated docker-compose.yaml with JWT Secret directly."
+         fi
     fi
 fi
 
