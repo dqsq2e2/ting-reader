@@ -216,7 +216,7 @@ impl JsRuntimeWrapper {
             globalThis._ting_result = undefined;
             globalThis._ting_error = undefined;
             globalThis._ting_status = undefined;
-            "#.into()
+            "#.to_string().into()
         );
 
         // Stop tracking execution time
