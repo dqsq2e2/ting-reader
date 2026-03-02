@@ -151,8 +151,8 @@ impl TextCleaner {
             CleaningRule {
                 name: "remove_promo_keywords".to_string(),
                 priority: 75,
-                // '请?订阅', '转发', '五星', '好评', '关注', '微信', '群', '更多', '加我', '联系', '点击', '搜新书', '新书', '推荐', '上架', '完本'
-                pattern: Regex::new(r"[（\(\[\{【](?:请?订阅|转发|五星|好评|关注|微信|群|更多|加我|联系|点击|搜新书|新书|推荐|上架|完本).*?[）\)\]\}】]").unwrap(),
+                // '请?订阅', '求订阅', '转发', '五星', '好评', '关注', '微信', '群', '更多', '加我', '联系', '点击', '搜新书', '新书', '推荐', '上架', '完本'
+                pattern: Regex::new(r"[（\(\[\{【](?:(?:请|求)?订阅|转发|五星|好评|关注|微信|群|更多|加我|联系|点击|搜新书|新书|推荐|上架|完本).*?[）\)\]\}】]").unwrap(),
                 replacement: "".to_string(),
             },
             // Rule 11: Remove common suffixes: "-ZmAudio"
@@ -179,7 +179,35 @@ impl TextCleaner {
         ]
     }
 
+    /// Extract chapter number from title
+    pub fn extract_chapter_number(&self, title: &str) -> Option<i32> {
+        let pattern = Regex::new(r"(第\s*(\d+)\s*[集回章话])|([集回章话]\s*(\d+))|(\d+)").unwrap();
+        
+        // Priority 1: "第xxx集" or "第xxx章"
+        let re1 = Regex::new(r"第\s*(\d+)\s*[集回章话]").unwrap();
+        if let Some(caps) = re1.captures(title) {
+            if let Ok(num) = caps[1].parse::<i32>() {
+                return Some(num);
+            }
+        }
+        
+        // Priority 2: "xxx集" or "xxx章"
+        let re2 = Regex::new(r"(\d+)\s*[集回章话]").unwrap();
+        if let Some(caps) = re2.captures(title) {
+            if let Ok(num) = caps[1].parse::<i32>() {
+                return Some(num);
+            }
+        }
+
+        // Priority 3: Just numbers, but be careful not to pick up dates or other numbers
+        // This is risky, so maybe only if it looks like a chapter number (at start or separated)
+        // For now, let's stick to explicit markers or if it's the only number.
+        
+        None
+    }
+
     /// Clean a chapter title
+    /// Returns: (cleaned_title, is_extra)
     pub fn clean_chapter_title(&self, title: &str, book_title: Option<&str>) -> (String, bool) {
         // Remove extension if present
         let title_no_ext = if let Some(idx) = title.rfind('.') {
@@ -260,7 +288,7 @@ impl TextCleaner {
         }
 
         // 2. Remove common promotional suffixes and advertisements
-        let promo_regex = Regex::new(r"[（\(\[\{【](?:请?订阅|转发|五星|好评|关注|微信|群|更多|加我|联系|点击|搜新书|新书|推荐|上架|完本|系统卡了).*?[）\)\]\}】]").unwrap();
+        let promo_regex = Regex::new(r"[（\(\[\{【](?:(?:请|求)?订阅|转发|五星|好评|关注|微信|群|更多|加我|联系|点击|搜新书|新书|推荐|上架|完本).*?[）\)\]\}】]").unwrap();
         result = promo_regex.replace_all(&result, "").to_string();
 
         // 3. Remove book title if present
@@ -271,15 +299,24 @@ impl TextCleaner {
                 
                 // 3a. Remove from start
                 let start_re = Regex::new(&format!(r"(?i)^{}", escaped_bt)).unwrap();
-                result = start_re.replace(&result, "").to_string();
+                let potential = start_re.replace(&result, "").to_string();
+                let is_start_empty = potential.trim().is_empty();
+                // Also check if it's just punctuation
+                let is_just_punct = Regex::new(r"^[\p{P}\p{S}\s]*$").unwrap().is_match(&potential);
+
+                if !is_start_empty && !is_just_punct {
+                    result = potential;
+                }
                 
-                // 3b. Remove from end (only if what remains is not just a number)
+                // 3b. Remove from end (only if what remains is not just a number or empty)
                 let end_re = Regex::new(&format!(r"(?i){}$", escaped_bt)).unwrap();
                 if end_re.is_match(&result) {
                     let potential = end_re.replace(&result, "").to_string();
                     let is_just_number = Regex::new(r"^[\s.\-_]*((第\s*\d+\s*[集回章话])|(\d+))[\s.\-_]*$").unwrap().is_match(&potential);
+                    let is_empty = potential.trim().is_empty();
+                    let is_just_punct = Regex::new(r"^[\p{P}\p{S}\s]*$").unwrap().is_match(&potential);
                     
-                    if !is_just_number {
+                    if !is_just_number && !is_empty && !is_just_punct {
                         result = potential;
                     }
                 }
@@ -427,5 +464,8 @@ impl TextCleaner {
         }
     }
 }
+
+impl TextCleaner {
+
 
 

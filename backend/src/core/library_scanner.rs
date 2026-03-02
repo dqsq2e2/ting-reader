@@ -1388,6 +1388,15 @@ impl LibraryScanner {
                         }
                     }
                 }
+            } else {
+                // If no regex rule, try to extract chapter number using TextCleaner heuristics
+                // Only if chapter_regex is NOT set (don't override user's manual regex)
+                // Use filename for index extraction, as title might be messy or from metadata
+                if let Some(filename) = file_path.file_stem().and_then(|s| s.to_str()) {
+                     if let Some(idx) = self.text_cleaner.extract_chapter_number(filename) {
+                         chapter_idx = idx;
+                     }
+                }
             }
             
             // Apply text cleaner to title, regardless of source
