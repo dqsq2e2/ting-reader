@@ -229,6 +229,13 @@ impl TextCleaner {
             }
         }
 
+        // 0.5 Remove leading parenthesized content (e.g. "(System Error) Book Title")
+        // Must run before book title removal
+        let leading_paren_re = Regex::new(r"^\s*[（\(\[\{【].*?[）\)\]\}】]").unwrap();
+        if leading_paren_re.is_match(&result) {
+            result = leading_paren_re.replace(&result, "").to_string();
+        }
+
         // 1. Detect and remove "Extra" markers
         // Patterns: 番外, 花絮, 特典, SP, Extra
         let extra_patterns = [
@@ -253,7 +260,7 @@ impl TextCleaner {
         }
 
         // 2. Remove common promotional suffixes and advertisements
-        let promo_regex = Regex::new(r"[（\(\[\{【](?:请?订阅|转发|五星|好评|关注|微信|群|更多|加我|联系|点击|搜新书|新书|推荐|上架|完本).*?[）\)\]\}】]").unwrap();
+        let promo_regex = Regex::new(r"[（\(\[\{【](?:请?订阅|转发|五星|好评|关注|微信|群|更多|加我|联系|点击|搜新书|新书|推荐|上架|完本|系统卡了).*?[）\)\]\}】]").unwrap();
         result = promo_regex.replace_all(&result, "").to_string();
 
         // 3. Remove book title if present
