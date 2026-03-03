@@ -25,6 +25,9 @@ pub async fn security_headers_middleware(
         .get::<SecurityHeadersConfig>()
         .cloned();
     
+    // Check if request is for widget
+    let is_widget = request.uri().path().starts_with("/widget");
+
     // Process the request
     let response = next.run(request).await;
     
@@ -37,20 +40,27 @@ pub async fn security_headers_middleware(
         HeaderValue::from_static("nosniff"),
     );
     
-    parts.headers.insert(
-        "X-Frame-Options",
-        HeaderValue::from_static("DENY"),
-    );
+    if !is_widget {
+        parts.headers.insert(
+            "X-Frame-Options",
+            HeaderValue::from_static("DENY"),
+        );
+
+        parts.headers.insert(
+            "Content-Security-Policy",
+            HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; media-src 'self'; object-src 'none'; frame-ancestors 'none';"),
+        );
+    } else {
+        // Allow framing for widget pages
+        parts.headers.insert(
+            "Content-Security-Policy",
+            HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; media-src 'self'; object-src 'none'; frame-ancestors *;"),
+        );
+    }
     
     parts.headers.insert(
         "X-XSS-Protection",
         HeaderValue::from_static("1; mode=block"),
-    );
-    
-    // Add Content-Security-Policy
-    parts.headers.insert(
-        "Content-Security-Policy",
-        HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; media-src 'self'; object-src 'none'; frame-ancestors 'none';"),
     );
     
     // Add HSTS header if HTTPS is enabled
