@@ -94,6 +94,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        // Exclude widget routes from service worker navigation fallback
+        // This ensures widget requests go to the server and get fresh headers (CSP)
+        navigateFallbackDenylist: [/^\/widget/],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
