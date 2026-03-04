@@ -22,14 +22,22 @@ fi
 IFS=':' read -r -a SHARES <<< "$TRIM_DATA_SHARE_PATHS"
 
 # Order must match config/resource
+export TING_STORAGE__DATA_DIR="${SHARES[0]}"
+export TING_STORAGE__TEMP_DIR="${SHARES[3]}"
+export TING_PLUGINS__PLUGIN_DIR="${SHARES[2]}"
+export TING_DATABASE__PATH="${SHARES[0]}/ting-reader.db"
+
 export DATA_DIR="${SHARES[0]}"
 export STORAGE_DIR="${SHARES[1]}"
 export PLUGINS_DIR="${SHARES[2]}"
 export TEMP_DIR="${SHARES[3]}"
 
+export TING_STORAGE__LOCAL_STORAGE_ROOT="${SHARES[1]}"
+
 # Override STORAGE_DIR if wizard_storage_path is set
 if [ -n "$wizard_storage_path" ]; then
     export STORAGE_DIR="$wizard_storage_path"
+    export TING_STORAGE__LOCAL_STORAGE_ROOT="$wizard_storage_path"
 fi
 
 export STATIC_DIR="${TRIM_APPDEST}/server/static"
