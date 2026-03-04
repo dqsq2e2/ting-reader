@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import apiClient from '../api/client';
 import type { Book } from '../types';
 import BookCard from '../components/BookCard';
-import { Heart, BookX } from 'lucide-react';
+import { Heart } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { usePlayerStore } from '../store/playerStore';
 

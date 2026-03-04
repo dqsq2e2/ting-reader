@@ -9,7 +9,7 @@ import ScrapeDiffModal from '../components/ScrapeDiffModal';
 import { 
   Play, 
   Heart, 
-  Share2, 
+  // Share2, 
   ChevronLeft, 
   ChevronDown, 
   ChevronUp, 
@@ -66,6 +66,7 @@ const BookDetailPage: React.FC = () => {
   const [genFilename, setGenFilename] = useState('');
   const [genNum, setGenNum] = useState('');
   const [genTitle, setGenTitle] = useState('');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [genResult, setGenResult] = useState<any>(null);
 
   const handleGenerateRegex = async () => {
@@ -77,7 +78,7 @@ const BookDetailPage: React.FC = () => {
         chapter_title: genTitle
       });
       setGenResult(res.data);
-    } catch (e) {
+    } catch {
       alert('生成失败');
     }
   };
@@ -102,6 +103,7 @@ const BookDetailPage: React.FC = () => {
     if (currentChapter?.bookId === book?.id) {
       setHighlightedChapterId(null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentChapter?.id, book?.id]);
 
   const scrollGroups = (direction: 'left' | 'right') => {
@@ -141,7 +143,7 @@ const BookDetailPage: React.FC = () => {
   // const currentChapter = usePlayerStore((state) => state.currentChapter); // Moved up
   const isPlaying = usePlayerStore((state) => state.isPlaying);
   const playChapter = usePlayerStore((state) => state.playChapter);
-  const togglePlay = usePlayerStore((state) => state.togglePlay);
+  // const togglePlay = usePlayerStore((state) => state.togglePlay);
 
 
 
@@ -149,6 +151,7 @@ const BookDetailPage: React.FC = () => {
     if (book) {
       setThemeColor(book.themeColor || null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book?.themeColor]);
 
   useEffect(() => {
@@ -187,9 +190,11 @@ const BookDetailPage: React.FC = () => {
       } 
       // 2. Fallback: Most recently played chapter from history
       else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const playedChapters = [...chapters].filter(c => (c as any).progressUpdatedAt);
         if (playedChapters.length > 0) {
           playedChapters.sort((a, b) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             return new Date((b as any).progressUpdatedAt).getTime() - new Date((a as any).progressUpdatedAt).getTime();
           });
           targetChapter = playedChapters[0];
@@ -253,6 +258,7 @@ const BookDetailPage: React.FC = () => {
         }
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book?.id, currentChapter?.id, chapters, mainChapters, extraChapters, activeTab, currentGroupIndex, currentChapters, chaptersPerGroup]);
 
   useEffect(() => {
@@ -313,7 +319,8 @@ const BookDetailPage: React.FC = () => {
       }
       
       // The API expects camelCase for updates (client will convert to snake_case)
-      const payload: any = { ...dataToSave };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload: Record<string, any> = { ...dataToSave };
       
       const res = await apiClient.patch(`/api/books/${id}`, payload);
       const updatedBookData = res.data;
@@ -357,7 +364,7 @@ const BookDetailPage: React.FC = () => {
       }
 
       setIsEditModalOpen(false);
-    } catch (err) {
+    } catch {
       alert('保存失败');
     }
   };
@@ -397,12 +404,10 @@ const BookDetailPage: React.FC = () => {
     return `已播${percent}%`;
   };
 
-  const getTitleFontSize = (title: string) => {
-    // Responsive font size: subtle scaling from mobile to desktop
-    return 'text-xl sm:text-2xl md:text-3xl';
-  };
-
-
+  // const getTitleFontSize = (title: string) => {
+  //   // Responsive font size: subtle scaling from mobile to desktop
+  //   return 'text-xl sm:text-2xl md:text-3xl';
+  // };
 
   const displayThemeColor = book ? (book.themeColor || themeColor) : themeColor;
   const displayCoverUrl = book ? book.coverUrl : undefined;
@@ -466,7 +471,7 @@ const BookDetailPage: React.FC = () => {
             <div className="space-y-3 min-w-0">
               <ExpandableTitle 
                 title={book.title} 
-                className={`font-bold text-slate-900 dark:text-white leading-tight transition-all duration-300 ${getTitleFontSize(book.title || '')}`}
+                className={`font-bold text-slate-900 dark:text-white leading-tight transition-all duration-300 text-xl sm:text-2xl md:text-3xl`}
                 maxLines={2}
               />
               <div className="flex flex-wrap justify-center md:justify-start gap-x-4 gap-y-2 mt-4 text-sm">

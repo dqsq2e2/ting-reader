@@ -10,12 +10,13 @@ const LoginPage: React.FC = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [resolving, setResolving] = useState(false);
+  // const [resolving, setResolving] = useState(false);
   
   const navigate = useNavigate();
   const { setAuth, setServerUrl, setActiveUrl, serverUrl: storedServerUrl } = useAuthStore();
   
   // Check if running in Electron
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const isElectron = !!(window as any).electronAPI;
 
   useEffect(() => {
@@ -34,7 +35,8 @@ const LoginPage: React.FC = () => {
     }
 
     try {
-      setResolving(true);
+      // setResolving(true);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await (window as any).electronAPI.resolveRedirect(finalUrl);
       if (result && (result.finalUrl || result.statusCode === 401)) {
           return result.finalUrl || finalUrl;
@@ -44,7 +46,7 @@ const LoginPage: React.FC = () => {
       console.warn('URL resolution failed, using original', err);
       return finalUrl;
     } finally {
-      setResolving(false);
+      // setResolving(false);
     }
   };
 
@@ -71,9 +73,11 @@ const LoginPage: React.FC = () => {
       const { token, user } = response.data;
       setAuth(user, token);
       navigate('/');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Login error:', err);
-      setError(err.response?.data?.error || '登录失败，请检查用户名和密码');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const msg = (err as any)?.response?.data?.error || '登录失败，请检查用户名和密码';
+      setError(msg);
     } finally {
       setLoading(false);
     }

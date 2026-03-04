@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Book } from '../types';
-import { Play, Clock, User } from 'lucide-react';
+import { Play, User } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import { getCoverUrl } from '../utils/image';

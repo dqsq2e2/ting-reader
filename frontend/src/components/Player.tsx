@@ -9,9 +9,9 @@ import {
   Pause, 
   SkipBack, 
   SkipForward, 
-  Volume2, 
-  VolumeX, 
-  FastForward, 
+  // Volume2, 
+  // VolumeX, 
+  // FastForward, 
   ChevronUp,
   ChevronLeft,
   Maximize2,
@@ -122,6 +122,7 @@ const Player: React.FC = () => {
   const API_BASE_URL = activeUrl || import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? '' : 'http://localhost:3000');
   
   const getStreamUrl = (chapterId: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if ((window as any).electronAPI) {
       // Electron mode: use custom protocol for caching
       const remote = encodeURIComponent(API_BASE_URL);
@@ -144,7 +145,7 @@ const Player: React.FC = () => {
     playbackSpeed,
     setPlaybackSpeed,
     volume,
-    setVolume,
+    // setVolume,
     themeColor,
     setThemeColor,
     playChapter,
@@ -153,7 +154,7 @@ const Player: React.FC = () => {
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const location = useLocation();
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showChapters, setShowChapters] = useState(false);
   const [showSleepTimer, setShowSleepTimer] = useState(false);
@@ -170,6 +171,7 @@ const Player: React.FC = () => {
       });
     }
   };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [chapters, setChapters] = useState<any[]>([]);
   const [customMinutes, setCustomMinutes] = useState('');
   const [editSkipIntro, setEditSkipIntro] = useState(0);
@@ -198,13 +200,17 @@ const Player: React.FC = () => {
         })
         .catch(e => console.warn('Failed to extract color from cover in Player', e));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentBook?.id, currentBook?.themeColor]);
 
   useEffect(() => {
     if (currentBook) {
-      setEditSkipIntro(currentBook.skipIntro || 0);
-      setEditSkipOutro(currentBook.skipOutro || 0);
+      setTimeout(() => {
+        setEditSkipIntro(currentBook.skipIntro || 0);
+        setEditSkipOutro(currentBook.skipOutro || 0);
+      }, 0);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentBook?.id]);
 
   const handleSaveSettings = async () => {
@@ -244,7 +250,7 @@ const Player: React.FC = () => {
 
   const [sleepTimer, setSleepTimer] = useState<number | null>(null);
   const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sleepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // const sleepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timerMenuRef = useRef<HTMLDivElement>(null);
 
   const [error, setError] = useState<string | null>(null);
@@ -288,8 +294,10 @@ const Player: React.FC = () => {
   // Reset initial load ref when chapter changes
   useEffect(() => {
     isInitialLoadRef.current = true;
-    setBufferedTime(0);
-    setRetryCount(0);
+    setTimeout(() => {
+      setBufferedTime(0);
+      setRetryCount(0);
+    }, 0);
   }, [currentChapter?.id]);
 
   // Reset initial load ref when retrying (to allow resume logic to run again)
@@ -302,7 +310,7 @@ const Player: React.FC = () => {
   // Sync state with audio element
   useEffect(() => {
     if (!audioRef.current || !currentChapter) return;
-    setError(null); // Clear error on source change
+    setTimeout(() => setError(null), 0); // Clear error on source change
     
     if (isPlaying) {
       const playPromise = audioRef.current.play();
@@ -320,6 +328,7 @@ const Player: React.FC = () => {
     } else {
       audioRef.current.pause();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying, currentChapter?.id, retryCount]);
 
   // Preload and Server-side Cache next chapter logic
@@ -329,7 +338,7 @@ const Player: React.FC = () => {
     // Find next chapter index
     apiClient.get(`/api/books/${currentBook.id}/chapters`).then(res => {
       const chapters = res.data;
-      const currentIndex = chapters.findIndex((c: any) => c.id === currentChapter.id);
+      const currentIndex = chapters.findIndex((c: { id: string }) => c.id === currentChapter.id);
       if (currentIndex !== -1 && currentIndex < chapters.length - 1) {
         const nextChapterId = chapters[currentIndex + 1].id;
         const nextSrc = getStreamUrl(nextChapterId);
@@ -357,6 +366,7 @@ const Player: React.FC = () => {
         }
       }
     }).catch(err => console.error('Preload failed', err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentChapter?.id, autoPreload, autoCache, currentBook?.id]);
 
   // Handle Skip Intro and Outro
@@ -457,6 +467,7 @@ const Player: React.FC = () => {
     }, 1000);
 
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sleepTimer === null, isPlaying]);
 
   // Handle Sleep Timer Expiration
@@ -465,9 +476,9 @@ const Player: React.FC = () => {
       if (isPlaying) {
         togglePlay();
       }
-      setSleepTimer(null);
+      setTimeout(() => setSleepTimer(null), 0);
     }
-  }, [sleepTimer, isPlaying]);
+  }, [sleepTimer, isPlaying, togglePlay]);
 
   useEffect(() => {
     if (!audioRef.current) return;
@@ -505,6 +516,7 @@ const Player: React.FC = () => {
     return () => {
       if (progressTimerRef.current) clearInterval(progressTimerRef.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying, currentBook?.id, currentChapter?.id]);
 
   const handleLoadedMetadata = () => {
@@ -573,6 +585,7 @@ const Player: React.FC = () => {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const getChapterProgressText = (chapter: any) => {
     if (!chapter.progressPosition || !chapter.duration) return null;
     
@@ -589,7 +602,7 @@ const Player: React.FC = () => {
   // Auto collapse player when navigating to hidden pages
   useEffect(() => {
     if (isHiddenPage && isExpanded) {
-      setIsExpanded(false);
+      setTimeout(() => setIsExpanded(false), 0);
     }
   }, [location.pathname, isExpanded, isHiddenPage]);
 

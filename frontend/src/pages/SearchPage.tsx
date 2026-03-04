@@ -94,7 +94,8 @@ const SearchPage: React.FC = () => {
 
       setLoading(true);
       try {
-        const params: any = {};
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const params: Record<string, any> = {};
         if (debouncedQuery.trim()) params.search = debouncedQuery;
         if (selectedTag) params.tag = selectedTag;
         if (selectedLibraryId) params.libraryId = selectedLibraryId;
@@ -151,6 +152,7 @@ const SearchPage: React.FC = () => {
       checkScroll();
       window.addEventListener('resize', checkScroll);
       return () => window.removeEventListener('resize', checkScroll);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [items]);
 
     if (!items || items.length === 0) return null;

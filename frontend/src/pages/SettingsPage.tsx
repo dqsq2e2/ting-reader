@@ -7,13 +7,13 @@ import {
   Sun, 
   Monitor, 
   Zap, 
-  FastForward, 
-  Timer,
+  // FastForward, 
+  // Timer,
   CheckCircle2,
   User,
   Key,
   Code,
-  ExternalLink,
+  // ExternalLink,
   Copy,
   Download,
   ChevronRight
@@ -46,6 +46,7 @@ const SettingsPage: React.FC = () => {
 
   useEffect(() => {
     fetchSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchSettings = async () => {
@@ -75,10 +76,12 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleSave = async (newSettings: any) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleSave = async (newSettings: Record<string, any>) => {
     try {
       // Create a clean copy without system fields to avoid recursion
       // The settingsJson field causes recursion if sent back to the server
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { settingsJson, userId, updatedAt, ...cleanSettings } = newSettings;
       
       // client interceptor handles camelCase -> snake_case conversion for request body
@@ -97,7 +100,7 @@ const SettingsPage: React.FC = () => {
 
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    } catch (err) {
+    } catch {
       alert('保存失败');
     }
   };
@@ -105,7 +108,8 @@ const SettingsPage: React.FC = () => {
   const handleAccountUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const updateData: any = {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const updateData: Record<string, any> = {};
       if (accountData.username !== user?.username) {
         updateData.username = accountData.username;
       }
@@ -129,8 +133,10 @@ const SettingsPage: React.FC = () => {
       setAccountData({ ...accountData, password: '' });
       setAccountSaved(true);
       setTimeout(() => setAccountSaved(false), 2000);
-    } catch (err: any) {
-      alert(err.response?.data?.error || '更新失败');
+    } catch (err: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const msg = (err as any)?.response?.data?.error || '更新失败';
+      alert(msg);
     }
   };
 

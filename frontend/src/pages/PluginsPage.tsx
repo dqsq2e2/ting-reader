@@ -9,7 +9,7 @@ import {
   CheckCircle, 
   XCircle, 
   AlertCircle,
-  MoreVertical
+  // MoreVertical
 } from 'lucide-react';
 
 const PluginsPage: React.FC = () => {
@@ -49,9 +49,11 @@ const PluginsPage: React.FC = () => {
       });
       fetchPlugins();
       alert('Plugin installed successfully!');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to install plugin', err);
-      alert(`Failed to install plugin: ${err.response?.data?.error || err.message}`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const msg = (err as any)?.response?.data?.error || (err as Error)?.message || 'Unknown error';
+      alert(`Failed to install plugin: ${msg}`);
     } finally {
       setUploading(false);
       if (fileInputRef.current) {
@@ -65,9 +67,11 @@ const PluginsPage: React.FC = () => {
       await apiClient.post(`/api/v1/plugins/${id}/reload`);
       fetchPlugins();
       alert('Plugin reloaded successfully!');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to reload plugin', err);
-      alert(`Failed to reload plugin: ${err.response?.data?.error || err.message}`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const msg = (err as any)?.response?.data?.error || (err as Error)?.message || 'Unknown error';
+      alert(`Failed to reload plugin: ${msg}`);
     }
   };
 
@@ -78,9 +82,11 @@ const PluginsPage: React.FC = () => {
       await apiClient.delete(`/api/v1/plugins/${id}`);
       fetchPlugins();
       alert('Plugin uninstalled successfully!');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to uninstall plugin', err);
-      alert(`Failed to uninstall plugin: ${err.response?.data?.error || err.message}`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const msg = (err as any)?.response?.data?.error || (err as Error)?.message || 'Unknown error';
+      alert(`Failed to uninstall plugin: ${msg}`);
     }
   };
 

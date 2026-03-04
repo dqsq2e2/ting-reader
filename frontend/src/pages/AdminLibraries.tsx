@@ -39,10 +39,11 @@ const ScraperConfigurator = ({
     { id: 'tags', label: '标签', key: 'tagsSources' },
   ];
 
-  let config: any = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let config: Record<string, any> = {};
   try {
     config = configStr ? JSON.parse(configStr) : {};
-  } catch (e) {
+  } catch {
     config = {};
   }
 
@@ -306,7 +307,8 @@ const AdminLibraries: React.FC = () => {
   const handleSaveLibrary = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const payload: any = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload: Record<string, any> = {
         name: formData.name,
         libraryType: formData.type,
       };
@@ -325,20 +327,23 @@ const AdminLibraries: React.FC = () => {
       if (formData.scraperConfig) {
         try {
           payload.scraperConfig = JSON.parse(formData.scraperConfig);
-        } catch (e) {
+        } catch {
           alert('刮削源配置 JSON 格式错误');
           return;
         }
       }
 
-      let savedLibId = editingId;
+      // let savedLibId = editingId;
       if (editingId) {
         await apiClient.patch(`/api/libraries/${editingId}`, payload);
       } else {
+        await apiClient.post('/api/libraries', payload);
+        /*
         const res = await apiClient.post('/api/libraries', payload);
         if (res.data && res.data.id) {
             savedLibId = res.data.id;
         }
+        */
       }
       setIsModalOpen(false);
       setEditingId(null);
@@ -361,7 +366,7 @@ const AdminLibraries: React.FC = () => {
       if (!silent) {
         alert('扫描任务已启动');
       }
-    } catch (err) {
+    } catch {
       if (!silent) {
         alert('扫描启动失败');
       }
@@ -375,7 +380,7 @@ const AdminLibraries: React.FC = () => {
       await apiClient.delete(`/api/libraries/${id}`);
       setDeleteConfirmId(null);
       fetchLibraries();
-    } catch (err) {
+    } catch {
       alert('删除失败');
     }
   };

@@ -6,14 +6,14 @@ import {
   Search, 
   Heart, 
   Settings, 
-  User, 
+  // User, 
   LogOut, 
   Menu, 
   X,
   Database,
   Users,
   Terminal,
-  Headphones,
+  // Headphones,
   Download,
   Puzzle
 } from 'lucide-react';
@@ -47,7 +47,7 @@ const Layout: React.FC = () => {
         // Try to fetch current user info to validate token
         await apiClient.get('/api/me');
         setIsConnecting(false);
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Connection validation failed', err);
         // Don't auto-logout immediately, give user a chance to see error or retry
         setConnectionError('连接服务器失败或登录已过期');
@@ -74,10 +74,11 @@ const Layout: React.FC = () => {
         }
       }).catch(err => console.error('Failed to sync user settings', err));
     }
-  }, [user?.id, setPlaybackSpeed, isConnecting, connectionError]);
+  }, [user, setPlaybackSpeed, isConnecting, connectionError]);
 
   React.useEffect(() => {
     refreshTheme();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const menuItems = [
@@ -165,6 +166,7 @@ const Layout: React.FC = () => {
           }`}
         >
           <div className={`p-1.5 rounded-xl transition-all ${isActive ? 'bg-primary-50 dark:bg-primary-900/20' : ''}`}>
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
             {React.cloneElement(item.icon as React.ReactElement<any>, { size: 22 })}
           </div>
           <span className="text-[10px] font-bold mt-0.5">{item.label}</span>

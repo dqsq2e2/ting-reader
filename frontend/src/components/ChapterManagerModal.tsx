@@ -121,7 +121,7 @@ const ChapterManagerModal: React.FC<Props> = ({ bookId, initialChapters, onClose
   const safeDecode = (str: string) => {
     try {
       return decodeURIComponent(str);
-    } catch (e) {
+    } catch {
       return str;
     }
   };

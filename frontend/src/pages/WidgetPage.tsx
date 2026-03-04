@@ -14,6 +14,7 @@ const WidgetPage: React.FC = () => {
   const { setToken, setAuth, isAuthenticated } = useAuthStore();
   const { playChapter } = usePlayerStore();
   
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [books, setBooks] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -95,12 +96,13 @@ const WidgetPage: React.FC = () => {
           try {
              const progressRes = await apiClient.get(`/api/progress/${id}`);
              progress = progressRes.data;
-          } catch (e) {
+          } catch {
             // Ignore progress fetch error, maybe new book
           }
           
           let targetChapter = chapters[0];
           if (progress?.chapter_id) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             targetChapter = chapters.find((c: any) => c.id === progress.chapter_id) || chapters[0];
           }
           
@@ -112,6 +114,7 @@ const WidgetPage: React.FC = () => {
       };
       loadBook();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isAuthenticated]);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -124,8 +127,11 @@ const WidgetPage: React.FC = () => {
       const { token, user } = response.data;
       setAuth(user, token);
       // Login successful, state updates will trigger re-renders
-    } catch (err: any) {
-      setLoginError(err.response?.data?.error || '登录失败');
+    } catch (err: unknown) {
+      console.error('Login failed', err);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const msg = (err as any)?.response?.data?.error || (err as any)?.response?.data?.message || '登录失败';
+      setLoginError(msg);
     } finally {
       setIsLoggingIn(false);
     }

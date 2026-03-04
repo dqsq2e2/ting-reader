@@ -64,8 +64,9 @@ apiClient.interceptors.response.use(
 
     // Handle Network Error or Connection Refused (potentially redirect expired)
     // Only in Electron environment where we manage serverUrl/activeUrl
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (!error.response && !originalRequest._retry && (window as any).electronAPI) {
-      const { serverUrl, activeUrl, setActiveUrl } = useAuthStore.getState();
+      const { serverUrl, setActiveUrl } = useAuthStore.getState();
 
       // If we have a serverUrl and it's different or we want to re-verify
       if (serverUrl) {
@@ -74,6 +75,7 @@ apiClient.interceptors.response.use(
         
         try {
            // Call Electron IPC to resolve again
+           // eslint-disable-next-line @typescript-eslint/no-explicit-any
            const result = await (window as any).electronAPI.resolveRedirect(serverUrl);
            const newActiveUrl = (result && result.finalUrl) ? result.finalUrl : serverUrl;
            

@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import apiClient from '../api/client';
 import type { ScrapeDiff, ChapterChange } from '../types';
-import { X, Save, ArrowRight, Check, AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
-import { getCoverUrl } from '../utils/image';
+import { X, Save, AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
 
 interface Props {
   bookId: string;
@@ -19,22 +18,18 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
   // We need to know the libraryId to use the proxy correctly if needed.
   // Ideally, this should be passed as a prop, but for now we can try to infer it 
   // or fetch it. Since we only have bookId, we might need to fetch the book details first.
-  const [libraryId, setLibraryId] = useState<string>("");
+  // const [libraryId, setLibraryId] = useState<string>("");
 
-  useEffect(() => {
-    fetchDiff();
-  }, [bookId]);
-
-  const fetchDiff = async () => {
+  const fetchDiff = useCallback(async () => {
     try {
       setLoading(true);
       
       // Fetch current book details to get the title AND library_id
       const bookRes = await apiClient.get(`/api/books/${bookId}`);
       const bookTitle = bookRes.data.title;
-      if (bookRes.data.library_id) {
-          setLibraryId(bookRes.data.library_id);
-      }
+      // if (bookRes.data.library_id) {
+      //    setLibraryId(bookRes.data.library_id);
+      // }
       
       const res = await apiClient.post(`/api/books/${bookId}/scrape-diff`, {
         query: bookTitle
@@ -74,9 +69,13 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [bookId]);
 
-  const [imageError, setImageError] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    fetchDiff();
+  }, [fetchDiff]);
+
+  // const [imageError, setImageError] = useState<Record<string, boolean>>({});
 
   const cleanUrl = (url?: string) => {
     if (!url) return '';
@@ -101,14 +100,18 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
     return cleaned.trim();
   };
 
+  /*
   const handleImageError = (type: 'current' | 'scraped') => {
     setImageError(prev => ({ ...prev, [type]: true }));
   };
+  */
 
+  /*
   useEffect(() => {
     // Reset image errors when diff changes
     setImageError({});
   }, [diff]);
+  */
 
   const handleApply = async () => {
     if (!diff) return;
@@ -143,6 +146,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
     }
   };
 
+  /*
   const toggleChange = (index: number) => {
     const newSelected = new Set(selectedChanges);
     if (newSelected.has(index)) {
@@ -152,6 +156,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
     }
     setSelectedChanges(newSelected);
   };
+  */
 
   if (loading) {
     return (

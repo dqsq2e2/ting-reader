@@ -8,7 +8,7 @@ export const useTheme = () => {
     return (localStorage.getItem('theme') as Theme) || 'system';
   });
 
-  const applyTheme = (t: Theme) => {
+  const syncThemeToDom = (t: Theme) => {
     const root = window.document.documentElement;
     root.classList.remove('light', 'dark');
 
@@ -19,18 +19,22 @@ export const useTheme = () => {
 
     root.classList.add(effectiveTheme);
     localStorage.setItem('theme', t);
+  };
+
+  const applyTheme = (t: Theme) => {
+    syncThemeToDom(t);
     setTheme(t);
   };
 
   useEffect(() => {
     // Initial apply
-    applyTheme(theme);
+    syncThemeToDom(theme);
 
     // Listen for system theme changes if set to system
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = () => {
       if (theme === 'system') {
-        applyTheme('system');
+        syncThemeToDom('system');
       }
     };
 

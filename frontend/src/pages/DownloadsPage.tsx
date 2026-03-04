@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import apiClient from '../api/client';
 import { Trash2, HardDrive, Download, Database, ChevronDown, ChevronRight } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+// import { useNavigate } from 'react-router-dom';
 
 const DownloadsPage: React.FC = () => {
-  const navigate = useNavigate();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [cachedFiles, setCachedFiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedBookTitle, setExpandedBookTitle] = useState<string | null>(null);

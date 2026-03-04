@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import apiClient from '../api/client';
 import type { Book, Library } from '../types';
 import BookCard from '../components/BookCard';
@@ -7,7 +7,6 @@ import { Search, Filter, Database, Plus, Library as LibraryIcon } from 'lucide-r
 import { usePlayerStore } from '../store/playerStore';
 
 const BookshelfPage: React.FC = () => {
-  const navigate = useNavigate();
   const currentChapter = usePlayerStore((state) => state.currentChapter);
   const [books, setBooks] = useState<Book[]>([]);
   const [libraries, setLibraries] = useState<Library[]>([]);
