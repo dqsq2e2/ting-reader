@@ -49,12 +49,20 @@ jobs:
         run: |
           mkdir -p .github/ting-reader-fpk-native/app/server
           echo "Listing target directory:"
-          ls -R backend/target
-          find backend/target -type f -name ting-reader -exec cp {} .github/ting-reader-fpk-native/app/server/ \;
-          if [ ! -f .github/ting-reader-fpk-native/app/server/ting-reader ]; then
+          find backend/target -name "ting-reader" -type f
+          # Ensure we copy the release binary, not build artifacts or deps
+          # The binary should be in .../release/ting-reader
+          # We pick the one that is executable and in a release folder
+          BINARY_PATH=$(find backend/target -type f -name ting-reader | grep "release/ting-reader$" | head -n 1)
+          
+          if [ -z "$BINARY_PATH" ]; then
             echo "Error: ting-reader binary not found in target directory!"
             exit 1
           fi
+          
+          echo "Found binary at: $BINARY_PATH"
+          cp "$BINARY_PATH" .github/ting-reader-fpk-native/app/server/
+          
           cp backend/config.toml .github/ting-reader-fpk-native/app/server/
           cp -r frontend/dist .github/ting-reader-fpk-native/app/server/static
           chmod +x .github/ting-reader-fpk-native/app/server/ting-reader
