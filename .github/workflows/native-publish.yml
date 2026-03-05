@@ -8,6 +8,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            arch: x86
+            fpk_suffix: x86_64
+          - target: aarch64-unknown-linux-gnu
+            arch: arm
+            fpk_suffix: arm64
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -28,10 +37,14 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-gnu
+          targets: ${{ matrix.target }}
 
       - name: Install Dependencies
         run: |
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            sudo apt-get update
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+          fi
           cd frontend
           npm install
 
@@ -43,7 +56,10 @@ jobs:
       - name: Build Backend
         run: |
           cd backend
-          cargo build --release --target x86_64-unknown-linux-gnu
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          fi
+          cargo build --release --target ${{ matrix.target }}
 
       - name: Prepare App Directory
         run: |
@@ -53,7 +69,7 @@ jobs:
           find backend/target -type f | grep "ting-reader" || true
           
           # Try to find binary with underscore (default for cargo) or hyphen
-          BINARY_PATH=$(find backend/target -type f \( -name "ting_reader" -o -name "ting-reader" \) | grep "release/ting[-_]reader$" | head -n 1)
+          BINARY_PATH=$(find backend/target -type f \( -name "ting_reader" -o -name "ting-reader" \) | grep "${{ matrix.target }}/release/ting[-_]reader$" | head -n 1)
           
           if [ -z "$BINARY_PATH" ]; then
             echo "Error: ting-reader binary not found in target directory!"
@@ -71,21 +87,41 @@ jobs:
 
       - name: Prepare fnpack
         run: |
-          chmod +x .github/workflows/fnpack
-          sudo mv .github/workflows/fnpack /usr/local/bin/fnpack
+          # Use local fnpack if available, otherwise assume it's in PATH or download it
+          # Since this job runs multiple times, we need to handle fnpack setup carefully or just reuse the logic
+          # The original logic moved it to /usr/local/bin, which persists for the runner? 
+          # No, runner is clean for each job usually, but matrix jobs might run in parallel on different runners.
+          if [ ! -f /usr/local/bin/fnpack ]; then
+            chmod +x .github/workflows/fnpack
+            sudo cp .github/workflows/fnpack /usr/local/bin/fnpack
+          fi
 
       - name: Build FPK
         run: |
           VERSION="${{ env.VERSION }}"
+          # Update manifest with version and platform
           sed -i "s/^version[[:space:]]*=.*/version = $VERSION/" .github/ting-reader-fpk-native/manifest
+          
+          # Update arch/platform in manifest
+          # Remove existing arch/platform lines to avoid duplication
+          sed -i "/^arch[[:space:]]*=/d" .github/ting-reader-fpk-native/manifest
+          sed -i "/^platform[[:space:]]*=/d" .github/ting-reader-fpk-native/manifest
+          
+          # Add new platform config
+          # Using platform for new format, arch for compatibility if needed?
+          # Doc says: "arch - 架构类型，目前固定为 x86_64废弃"
+          # "platform - 架构类型... 声明为 x86 时... 声明为 arm 时..."
+          # Let's use platform since it's the new standard
+          echo "platform = ${{ matrix.arch }}" >> .github/ting-reader-fpk-native/manifest
+          
           fnpack build --directory .github/ting-reader-fpk-native
-          mv ting-reader.fpk ting-reader-native-${VERSION}.fpk
+          mv ting-reader.fpk ting-reader-native-${{ matrix.fpk_suffix }}-${VERSION}.fpk
 
       - name: Release Native FPK
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ env.VERSION }}
-          files: ting-reader-native-${{ env.VERSION }}.fpk
+          files: ting-reader-native-${{ matrix.fpk_suffix }}-${{ env.VERSION }}.fpk
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
