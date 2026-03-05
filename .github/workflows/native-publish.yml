@@ -55,6 +55,19 @@ jobs:
           cd frontend
           npm run build
 
+      - name: Inject OpenSSL Vendored Dependency
+        run: |
+          cd backend
+          # Inject openssl vendored dependency for static linking to avoid shared library issues
+          if ! grep -q "^openssl" Cargo.toml; then
+            sed -i '/^\[dependencies\]/a openssl = { version = "0.10", features = ["vendored"] }' Cargo.toml
+            echo "Injected OpenSSL vendored dependency."
+          else
+            echo "OpenSSL dependency found, assuming it's correct."
+          fi
+          # Print first 20 lines to verify
+          head -n 20 Cargo.toml
+
       - name: Build Backend
         run: |
           cd backend
