@@ -61,12 +61,12 @@ jobs:
           if [ "${{ matrix.use_cross }}" = "true" ]; then
             # Create Cross.toml to install openssl dependencies in the container
             cat > Cross.toml <<EOF
-            [target.aarch64-unknown-linux-gnu]
-            pre-build = [
-                "dpkg --add-architecture arm64",
-                "apt-get update && apt-get install -y libssl-dev:arm64"
-            ]
-            EOF
+[target.aarch64-unknown-linux-gnu]
+pre-build = [
+    "dpkg --add-architecture arm64",
+    "apt-get update && apt-get install -y libssl-dev:arm64"
+]
+EOF
             cross build --release --target ${{ matrix.target }}
           else
             cargo build --release --target ${{ matrix.target }}
