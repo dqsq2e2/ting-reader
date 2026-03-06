@@ -138,6 +138,7 @@ pub async fn health_check(State(state): State<AppState>) -> Result<impl IntoResp
             plugin_system: plugin_health,
         },
         timestamp: Utc::now().to_rfc3339(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
     };
 
     Ok(Json(response))
