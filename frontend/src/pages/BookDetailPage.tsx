@@ -9,7 +9,6 @@ import ScrapeDiffModal from '../components/ScrapeDiffModal';
 import { 
   Play, 
   Heart, 
-  // Share2, 
   ChevronLeft, 
   ChevronDown, 
   ChevronUp, 
@@ -140,12 +139,8 @@ const BookDetailPage: React.FC = () => {
   }, [currentChapters]);
 
   const playBook = usePlayerStore((state) => state.playBook);
-  // const currentChapter = usePlayerStore((state) => state.currentChapter); // Moved up
   const isPlaying = usePlayerStore((state) => state.isPlaying);
   const playChapter = usePlayerStore((state) => state.playChapter);
-  // const togglePlay = usePlayerStore((state) => state.togglePlay);
-
-
 
   useEffect(() => {
     if (book) {
@@ -326,7 +321,6 @@ const BookDetailPage: React.FC = () => {
       const updatedBookData = res.data;
       
       // Update local state - merge the changes
-      // Backend response doesn't include libraryType/isFavorite, so we merge
       const updatedBook = { ...book!, ...updatedBookData };
       // Preserve existing auxiliary fields if not in response
       if (book!.libraryType) updatedBook.libraryType = book!.libraryType;
@@ -347,18 +341,6 @@ const BookDetailPage: React.FC = () => {
       
       // If chapterRegex changed, trigger a re-scan of this book
       if (payload.chapterRegex) {
-          // Trigger scan for the library of this book
-          // Ideally we scan ONLY this book, but current API scans whole library.
-          // But `scan_library` is heavy.
-          // The backend `process_book_directory` logic handles re-scanning files if we force it?
-          // Or we can assume user will manually click "Scan" if they want immediate update.
-          // But user said "Modify... and afterwards syncs... re-clean".
-          // "修改之后，之后的同步..." implies future syncs.
-          // "用户可以在元数据修改界面设置... 会从该书籍所在子目录里面根据新的正则规则重新清洗章节名"
-          // This implies immediate action?
-          // Since I didn't implement a "re-clean only this book" API yet, 
-          // I'll rely on the user triggering a scan or I can trigger a library scan in background.
-          // For better UX, let's trigger a library scan (it's async).
           apiClient.post(`/api/libraries/${book!.libraryId}/scan`);
           alert('规则已保存。正在后台重新扫描该库以应用新规则...');
       }
@@ -404,14 +386,10 @@ const BookDetailPage: React.FC = () => {
     return `已播${percent}%`;
   };
 
-  // const getTitleFontSize = (title: string) => {
-  //   // Responsive font size: subtle scaling from mobile to desktop
-  //   return 'text-xl sm:text-2xl md:text-3xl';
-  // };
-
   const displayThemeColor = book ? (book.themeColor || themeColor) : themeColor;
   const displayCoverUrl = book ? book.coverUrl : undefined;
-  const displayLibraryId = book ? book.libraryId : undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const displayLibraryId = book ? (book.libraryId || (book as any).library_id) : undefined;
   const displayLibraryType = book ? book.libraryType : undefined;
 
   useEffect(() => {
@@ -526,10 +504,11 @@ const BookDetailPage: React.FC = () => {
               )}
             </div>
 
-            <div className="flex gap-3 max-w-md mx-auto md:mx-0">
+            {/* Responsive Buttons Layout */}
+            <div className="flex flex-col sm:flex-row gap-3 max-w-md mx-auto md:mx-0 w-full">
               <button 
                 onClick={() => playBook(book, currentChapters)}
-                className="flex-1 flex items-center justify-center gap-2 px-8 py-4 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-2xl shadow-xl shadow-primary-500/30 transition-all active:scale-95 group"
+                className="flex-1 flex items-center justify-center gap-2 px-8 py-3.5 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-2xl shadow-xl shadow-primary-500/30 transition-all active:scale-95 group min-w-[140px]"
                 style={displayThemeColor ? { 
                   backgroundColor: toSolidColor(displayThemeColor),
                   boxShadow: `0 10px 20px -5px ${setAlpha(displayThemeColor, 0.3)}`
@@ -538,44 +517,48 @@ const BookDetailPage: React.FC = () => {
                 <Play size={20} fill="currentColor" />
                 立即播放
               </button>
-              <button 
-                onClick={toggleFavorite}
-                className={`p-3.5 rounded-2xl border transition-all active:scale-95 ${
-                  isFavorite 
-                    ? 'bg-red-50 border-red-100 text-red-500 dark:bg-red-900/20 dark:border-red-900/30' 
-                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:text-red-500'
-                }`}
-              >
-                <Heart size={24} fill={isFavorite ? "currentColor" : "none"} />
-              </button>
-              {user?.role === 'admin' && (
-                <>
+              
+              <div className="flex gap-3 flex-1 sm:flex-none">
                   <button 
-                    onClick={() => setIsScrapeDiffOpen(true)}
-                    className="p-3.5 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:text-primary-600 transition-all active:scale-95"
-                    title="同步元数据"
+                    onClick={toggleFavorite}
+                    className={`flex-1 sm:flex-none p-3.5 rounded-2xl border transition-all active:scale-95 flex items-center justify-center ${
+                      isFavorite 
+                        ? 'bg-red-50 border-red-100 text-red-500 dark:bg-red-900/20 dark:border-red-900/30' 
+                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:text-red-500'
+                    }`}
                   >
-                    <RefreshCw size={24} />
+                    <Heart size={24} fill={isFavorite ? "currentColor" : "none"} />
                   </button>
-                  <button 
-                    onClick={() => {
-                      setEditData({ 
-                        ...book,
-                        // Ensure we populate the form with canonical values
-                        coverUrl: displayCoverUrl,
-                        themeColor: displayThemeColor,
-                        libraryType: displayLibraryType,
-                        skipIntro: book.skipIntro,
-                        skipOutro: book.skipOutro
-                      });
-                      setIsEditModalOpen(true);
-                    }}
-                    className="p-3.5 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:text-primary-600 transition-all active:scale-95"
-                  >
-                    <Edit size={24} />
-                  </button>
-                </>
-              )}
+                  
+                  {user?.role === 'admin' && (
+                    <>
+                      <button 
+                        onClick={() => setIsScrapeDiffOpen(true)}
+                        className="flex-1 sm:flex-none p-3.5 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center"
+                        title="同步元数据"
+                      >
+                        <RefreshCw size={24} />
+                      </button>
+                      <button 
+                        onClick={() => {
+                          setEditData({ 
+                            ...book,
+                            // Ensure we populate the form with canonical values
+                            coverUrl: displayCoverUrl,
+                            themeColor: displayThemeColor,
+                            libraryType: displayLibraryType,
+                            skipIntro: book.skipIntro,
+                            skipOutro: book.skipOutro
+                          });
+                          setIsEditModalOpen(true);
+                        }}
+                        className="flex-1 sm:flex-none p-3.5 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center"
+                      >
+                        <Edit size={24} />
+                      </button>
+                    </>
+                  )}
+              </div>
             </div>
 
             <div 

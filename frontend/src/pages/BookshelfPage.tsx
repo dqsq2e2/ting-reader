@@ -144,13 +144,16 @@ const BookshelfPage: React.FC = () => {
       <div className="flex-1 space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-2">
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white">我的书架</h1>
+            <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
+              <LibraryIcon className="text-primary-600" />
+              我的书架
+            </h1>
             <p className="text-sm md:text-base text-slate-500 dark:text-slate-400 mt-1">发现您收藏的所有有声读物。</p>
           </div>
           
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap min-[550px]:flex-nowrap items-center gap-2 sm:gap-3 w-full md:w-auto justify-end">
             {isSelectionMode ? (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 order-1">
                 <span className="text-sm font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap hidden sm:inline">
                   已选 {selectedBookIds.length}
                 </span>
@@ -160,8 +163,7 @@ const BookshelfPage: React.FC = () => {
                   className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-primary-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-primary-500/30 disabled:opacity-50 whitespace-nowrap shrink-0"
                 >
                   <Layers size={18} />
-                  <span className="hidden sm:inline">创建系列</span>
-                  <span className="inline sm:hidden">创建</span>
+                  <span>创建系列</span>
                 </button>
                 <button
                   onClick={() => { setIsSelectionMode(false); setSelectedBookIds([]); }}
@@ -173,17 +175,16 @@ const BookshelfPage: React.FC = () => {
             ) : (
               <button
                 onClick={() => setIsSelectionMode(true)}
-                className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-sm font-medium shrink-0"
+                className="flex items-center gap-2 px-3 sm:px-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-sm font-medium shrink-0 order-1"
               >
                 <Layers size={18} />
-                <span className="hidden min-[425px]:inline">选择模式</span>
-                <span className="inline min-[425px]:hidden">选择</span>
+                <span>选择模式</span>
               </button>
             )}
 
             {/* Library Selector */}
             {libraries.length > 0 && (
-              <div className={`relative ${isSelectionMode ? 'hidden sm:block' : ''}`}>
+              <div className={`relative order-2 ${isSelectionMode ? 'hidden sm:block' : ''}`}>
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                   <LibraryIcon size={16} />
                 </div>
@@ -205,7 +206,7 @@ const BookshelfPage: React.FC = () => {
               </div>
             )}
 
-            <div className="relative flex-1 md:w-64">
+            <div className="relative w-full min-[550px]:flex-1 md:w-64 order-first min-[550px]:order-none">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input 
                 type="text"
@@ -215,7 +216,7 @@ const BookshelfPage: React.FC = () => {
                 className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 transition-all dark:text-white"
               />
             </div>
-            <div className="relative">
+            <div className="relative min-w-0 order-3">
               <button 
                 onClick={() => setShowFilterMenu(!showFilterMenu)}
                 className={`p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors ${showFilterMenu ? 'ring-2 ring-primary-500' : ''}`}
