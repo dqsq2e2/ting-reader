@@ -883,7 +883,7 @@ impl LibraryScanner {
                             info!("New Chapter Protection: Merging {} into existing book {}", dir_name, book.title.as_deref().unwrap_or("?"));
                             
                             // Process chapters for this existing book
-                            self.process_chapters(&book.id, files, last_scanned, task_id).await?;
+                            self.process_chapters(&book.id, files, last_scanned, task_id, scraper_config.prefer_audio_title).await?;
                             return Ok(book.id.clone());
                         }
                     }
@@ -964,17 +964,25 @@ impl LibraryScanner {
                 if existing_book_id.is_none() {
                      if let Some(ref a) = author {
                         if let Ok(Some(existing_book)) = self.book_repo.find_by_title_and_author(&title, a).await {
-                            existing_book_id = Some(existing_book.id.clone());
-                            if existing_book.manual_corrected == 1 {
-                                // Found it, and it's corrected! Abort scraping.
-                                // Use existing metadata.
-                                title = existing_book.title.unwrap_or(title);
-                                author = existing_book.author;
-                                narrator = existing_book.narrator;
-                                description = existing_book.description;
-                                tags = existing_book.tags;
-                                cover_url = existing_book.cover_url;
-                                // Skip scraping
+                            // Check if paths match or if it's a move
+                            let existing_path = std::path::Path::new(&existing_book.path);
+                            // If paths are different AND existing path still exists, assume it's a different book (duplicate)
+                            // User requirement: Different folders should be treated as different books
+                            if existing_book.path != dir.to_string_lossy() && existing_path.exists() {
+                                info!("Found book with same metadata but different path. Treating as new book to avoid merging: {} vs {}", existing_book.path, dir.display());
+                            } else {
+                                existing_book_id = Some(existing_book.id.clone());
+                                if existing_book.manual_corrected == 1 {
+                                    // Found it, and it's corrected! Abort scraping.
+                                    // Use existing metadata.
+                                    title = existing_book.title.unwrap_or(title);
+                                    author = existing_book.author;
+                                    narrator = existing_book.narrator;
+                                    description = existing_book.description;
+                                    tags = existing_book.tags;
+                                    cover_url = existing_book.cover_url;
+                                    // Skip scraping
+                                }
                             }
                         }
                     }
@@ -1159,7 +1167,7 @@ impl LibraryScanner {
         }
 
         // 4. Process Chapters (Incremental & Deduplication)
-        self.process_chapters(&final_book_id, files, last_scanned, task_id).await?;
+        self.process_chapters(&final_book_id, files, last_scanned, task_id, scraper_config.prefer_audio_title).await?;
 
         Ok(final_book_id)
     }
@@ -1426,7 +1434,8 @@ impl LibraryScanner {
         book_id: &str, 
         files: &[PathBuf], 
         last_scanned: Option<chrono::DateTime<chrono::Utc>>,
-        task_id: Option<&str>
+        task_id: Option<&str>,
+        prefer_audio_title: bool
     ) -> Result<()> {
         let total_files = files.len();
         
@@ -1550,7 +1559,15 @@ impl LibraryScanner {
             }
 
             // Extract metadata
-            let (_, mut title, _, _, _, duration) = self.extract_chapter_metadata(file_path).await;
+            let (_, extracted_title, _, _, _, duration) = self.extract_chapter_metadata(file_path).await;
+            
+            // Determine initial title based on preference
+            let mut title = if prefer_audio_title && !extracted_title.is_empty() {
+                extracted_title
+            } else {
+                file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("Unknown").to_string()
+            };
+
             // Check Regex for Title and Index
             let mut regex_idx = None;
             if let Some(re) = &chapter_regex {
@@ -1568,13 +1585,8 @@ impl LibraryScanner {
                 }
             }
             
-            // Apply text cleaner to title, regardless of source
-            // If title is empty, use filename stem
-            let raw_title = if title.is_empty() {
-                file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("Unknown").to_string()
-            } else {
-                title
-            };
+            // Apply text cleaner to title
+            let raw_title = title;
             
             let (final_title, is_extra) = self.text_cleaner.clean_chapter_title(&raw_title, book.title.as_deref());
 

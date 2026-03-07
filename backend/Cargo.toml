@@ -1,6 +1,6 @@
 [package]
 name = "ting_reader"
-version = "1.1.7"
+version = "1.1.8"
 edition = "2021"
 rust-version = "1.70"
 
@@ -97,6 +97,7 @@ image = { version = "0.25.6", default-features = false, features = ["jpeg", "png
 color-thief = "0.2.2"
 urlencoding = "2.1"
 natord = "1.0.9"
+mp4 = "0.14"
 
 [dev-dependencies]
 # Testing

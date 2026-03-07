@@ -319,31 +319,42 @@ impl AudioStreamer {
         let mut album_artist = None;
         let mut composer = None;
 
-        if let Some(metadata_rev) = format_reader.metadata().current() {
+        // Iterate through all metadata revisions
+        // Symphonia might provide multiple metadata blocks (e.g. ID3v2 and ID3v1, or iTunes metadata)
+        // We process them all, preferring values found later (or earlier? usually header metadata comes first)
+        // We'll fill in missing values.
+        
+        // Note: metadata() returns a MetadataLog. pop() returns the oldest? 
+        // Actually Symphonia documentation says pop() "Removes the oldest metadata from the log".
+        // So we should probably process them in order.
+        
+        while let Some(metadata_rev) = format_reader.metadata().pop() {
             for tag in metadata_rev.tags() {
                 match tag.std_key {
                     Some(symphonia::core::meta::StandardTagKey::TrackTitle) => {
-                        title = Some(tag.value.to_string());
+                        if title.is_none() { title = Some(tag.value.to_string()); }
                     }
                     Some(symphonia::core::meta::StandardTagKey::Artist) => {
-                        artist = Some(tag.value.to_string());
+                         if artist.is_none() { artist = Some(tag.value.to_string()); }
                     }
                     Some(symphonia::core::meta::StandardTagKey::Album) => {
-                        album = Some(tag.value.to_string());
+                         if album.is_none() { album = Some(tag.value.to_string()); }
                     }
                     Some(symphonia::core::meta::StandardTagKey::AlbumArtist) => {
-                        album_artist = Some(tag.value.to_string());
+                         if album_artist.is_none() { album_artist = Some(tag.value.to_string()); }
                     }
                     Some(symphonia::core::meta::StandardTagKey::Composer) => {
-                        composer = Some(tag.value.to_string());
+                         if composer.is_none() { composer = Some(tag.value.to_string()); }
                     }
                     _ => {}
                 }
             }
         }
 
-        // Try to use id3 crate for MP3 files as fallback if metadata is missing
-        if format == AudioFormat::Mp3 && (title.is_none() || artist.is_none() || album.is_none()) {
+        // Try to use id3 crate for MP3 AND M4A files as fallback if metadata is missing
+        // Some M4A files might contain ID3v2 tags (non-standard but common)
+        // Or the file might be an MP3 renamed as M4A
+        if (format == AudioFormat::Mp3 || format == AudioFormat::M4a) && (title.is_none() || artist.is_none() || album.is_none()) {
             debug!("Using id3 crate fallback for {:?}", file_path);
             if let Ok(tag) = id3::Tag::read_from_path(file_path) {
                 if title.is_none() {
