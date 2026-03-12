@@ -344,7 +344,7 @@ impl PluginManager {
             // Load library
             loader.load_library(metadata.instance_id(), &lib_path, metadata.clone())?;
             
-            let plugin = NativePlugin::new(metadata.instance_id(), metadata.clone(), loader);
+            let plugin = NativePlugin::new(metadata.instance_id(), metadata.clone(), loader, plugin_path.to_path_buf());
             Ok(Arc::new(plugin))
         } else {
             Err(TingError::PluginLoadError(format!("Unsupported entry point: {}", metadata.entry_point)))

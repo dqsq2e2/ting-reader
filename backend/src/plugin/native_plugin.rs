@@ -22,6 +22,9 @@ pub struct NativePlugin {
     
     /// Initialization state
     initialized: RwLock<bool>,
+    
+    /// Plugin installation directory
+    plugin_path: std::path::PathBuf,
 }
 
 impl NativePlugin {
@@ -31,16 +34,19 @@ impl NativePlugin {
     /// * `plugin_id` - Unique plugin ID (name@version)
     /// * `metadata` - Plugin metadata
     /// * `native_loader` - Reference to the native loader that loaded this plugin
+    /// * `plugin_path` - Path to the plugin installation directory
     pub fn new(
         plugin_id: String,
         metadata: PluginMetadata,
         native_loader: Arc<NativeLoader>,
+        plugin_path: std::path::PathBuf,
     ) -> Self {
         Self {
             metadata,
             plugin_id,
             native_loader,
             initialized: RwLock::new(false),
+            plugin_path,
         }
     }
     
@@ -53,12 +59,25 @@ impl NativePlugin {
     /// # Returns
     /// JSON result from the plugin
     pub async fn call_method(&self, method: &str, params: Value) -> Result<Value> {
+        // Initialization check logic...
+        // For utility plugins (like ffmpeg-utils), we might need to allow calls before full initialization
+        // or ensure they are initialized quickly.
+        // Actually, NativePlugin::initialize calls "initialize" method on the plugin.
+        // But get_ffmpeg_path might be called very early.
+        // Let's keep the check but ensure initialize() is called.
+        
         // Check if initialized
         let is_initialized = *self.initialized.read().map_err(|e| {
             TingError::PluginExecutionError(format!("Failed to check initialization state: {}", e))
         })?;
         
+        // Allow utility methods to be called even if not fully initialized?
+        // No, we should ensure initialization first.
+        
         if !is_initialized {
+             // If not initialized, maybe we can try to initialize it implicitly?
+             // Or just warn.
+             // For now, strict check.
             return Err(TingError::PluginExecutionError(
                 format!("Plugin {} is not initialized", self.plugin_id)
             ));
@@ -94,6 +113,7 @@ impl Plugin for NativePlugin {
         let init_params = serde_json::json!({
             "config": context.config,
             "data_dir": context.data_dir.to_string_lossy(),
+            "plugin_path": self.plugin_path.to_string_lossy(),
         });
         
         // Try to call initialize method (optional for plugins)
@@ -245,7 +265,12 @@ mod tests {
         );
         
         let loader = Arc::new(NativeLoader::new());
-        let plugin = NativePlugin::new("test-plugin@1.0.0".to_string(), metadata, loader);
+        let plugin = NativePlugin::new(
+            "test-plugin@1.0.0".to_string(), 
+            metadata, 
+            loader,
+            std::path::PathBuf::from("/tmp/test-plugin")
+        );
         
         assert_eq!(plugin.metadata().name, "test-plugin");
     }
