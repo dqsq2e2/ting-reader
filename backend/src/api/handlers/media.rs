@@ -281,8 +281,7 @@ use tokio::process::Command;
 pub struct StreamQuery {
     pub token: Option<String>,
     pub transcode: Option<String>,
-    #[serde(alias = "startTime")]
-    pub start_time: Option<f64>,
+    pub seek: Option<String>,
 }
 
 /// Handler for GET /api/stream/:chapterId - Stream chapter audio
@@ -332,7 +331,8 @@ pub async fn stream_chapter(
                 FormatMethod::GetStreamUrl,
                 serde_json::json!({
                     "file_path": chapter.path,
-                    "transcode": format
+                    "transcode": format,
+                    "seek": params.seek
                 })
             ).await;
             
@@ -367,16 +367,17 @@ pub async fn stream_chapter(
             cmd
                 .arg("-y")
                 .arg("-loglevel")
-                .arg("error")
-                .arg("-i");
+                .arg("error");
+
+            // Add seek if requested (before input for faster seeking on local files)
+            if let Some(seek_time) = &params.seek {
+                cmd.arg("-ss").arg(seek_time);
+            }
+
+            cmd.arg("-i");
                 
             // Input Source
             let _use_pipe_fallback = !cache_path.exists() && library.library_type != "local";
-
-            // Add seek parameter if present
-            if let Some(start) = params.start_time {
-                 cmd.arg("-ss").arg(format!("{}", start));
-            }
             
             if cache_path.exists() {
                 cmd.arg(cache_path.to_string_lossy().as_ref());
