@@ -754,7 +754,7 @@ impl PluginManager {
         
         // Fallback: Check system path
         // We assume ffmpeg might be in PATH
-        Some("ffmpeg".to_string())
+        None
     }
 
     // Lifecycle methods

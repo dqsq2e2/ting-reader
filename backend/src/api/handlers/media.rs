@@ -316,7 +316,8 @@ pub async fn stream_chapter(
             _ => return Err(TingError::InvalidRequest("Unsupported transcode format".to_string())),
         };
 
-        let ffmpeg_path = state.plugin_manager.get_ffmpeg_path().await.unwrap_or("ffmpeg".to_string());
+        let ffmpeg_path = state.plugin_manager.get_ffmpeg_path().await
+            .ok_or_else(|| TingError::IoError(std::io::Error::new(std::io::ErrorKind::NotFound, "FFmpeg plugin binary not found")))?;
         let cache_path = state.cache_manager.get_cache_path(&chapter_id);
         
         // 1. Try to get transcode command from plugin
