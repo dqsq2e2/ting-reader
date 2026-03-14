@@ -201,6 +201,18 @@ pub struct ScraperConfig {
     /// Whether to prefer ID3 title over directory name for book title
     #[serde(default)]
     pub prefer_audio_title: bool,
+    /// Priority order for metadata sources
+    /// Values: "local_metadata" (nfo/json), "audio_metadata" (id3 tags), "scraper"
+    #[serde(default = "default_metadata_priority")]
+    pub metadata_priority: Vec<String>,
+}
+
+fn default_metadata_priority() -> Vec<String> {
+    vec![
+        "local_metadata".to_string(),
+        "audio_metadata".to_string(),
+        "scraper".to_string(),
+    ]
 }
 
 /// Series record in the database

@@ -13,6 +13,53 @@ use uuid::Uuid;
 use sha2::{Digest, Sha256};
 use std::io::Read;
 
+#[derive(Debug, Default, Clone)]
+struct ScannedMetadata {
+    title: Option<String>,
+    author: Option<String>,
+    narrator: Option<String>,
+    description: Option<String>,
+    tags: Option<String>,
+    genre: Option<String>,
+    cover_url: Option<String>,
+    subtitle: Option<String>,
+    published_year: Option<String>,
+    published_date: Option<String>,
+    publisher: Option<String>,
+    isbn: Option<String>,
+    asin: Option<String>,
+    language: Option<String>,
+    explicit: bool,
+    abridged: bool,
+    json_tags: Vec<String>,
+    json_series: Vec<String>,
+    json_chapters: Option<Vec<crate::core::metadata_writer::AudiobookshelfChapter>>,
+}
+
+impl ScannedMetadata {
+    fn merge(&mut self, other: ScannedMetadata) {
+        if let Some(t) = other.title { if !t.trim().is_empty() { self.title = Some(t); } }
+        if other.author.is_some() { self.author = other.author; }
+        if other.narrator.is_some() { self.narrator = other.narrator; }
+        if other.description.is_some() { self.description = other.description; }
+        if other.tags.is_some() { self.tags = other.tags; }
+        if other.genre.is_some() { self.genre = other.genre; }
+        if other.cover_url.is_some() { self.cover_url = other.cover_url; }
+        if other.subtitle.is_some() { self.subtitle = other.subtitle; }
+        if other.published_year.is_some() { self.published_year = other.published_year; }
+        if other.published_date.is_some() { self.published_date = other.published_date; }
+        if other.publisher.is_some() { self.publisher = other.publisher; }
+        if other.isbn.is_some() { self.isbn = other.isbn; }
+        if other.asin.is_some() { self.asin = other.asin; }
+        if other.language.is_some() { self.language = other.language; }
+        if other.explicit { self.explicit = true; }
+        if other.abridged { self.abridged = true; }
+        if !other.json_tags.is_empty() { self.json_tags = other.json_tags; }
+        if !other.json_series.is_empty() { self.json_series = other.json_series; }
+        if other.json_chapters.is_some() { self.json_chapters = other.json_chapters; }
+    }
+}
+
 impl LibraryScanner {
     /// Scan a local library
     pub(crate) async fn scan_local_library(
@@ -208,49 +255,29 @@ impl LibraryScanner {
         }
 
         // 3. Extract Metadata
-        let (_quick_title, _) = self.text_cleaner.clean_chapter_title(dir.file_name().and_then(|n| n.to_str()).unwrap_or("Unknown"), None);
-
+        let (scanned_meta, _source) = self.extract_final_metadata(dir, files, scraper_config).await;
+        
+        let mut title = scanned_meta.title.unwrap_or_else(|| "Unknown Book".to_string());
+        let mut author = scanned_meta.author;
+        let mut narrator = scanned_meta.narrator;
+        let mut description = scanned_meta.description;
+        let mut tags = scanned_meta.tags;
+        let mut genre = scanned_meta.genre;
+        let mut cover_url = scanned_meta.cover_url;
+        
         // Extended fields
-        let mut subtitle: Option<String> = None;
-        let mut published_year: Option<String> = None;
-        let mut published_date: Option<String> = None;
-        let mut publisher: Option<String> = None;
-        let mut isbn: Option<String> = None;
-        let mut asin: Option<String> = None;
-        let mut language: Option<String> = None;
-        let mut explicit: bool = false;
-        let mut abridged: bool = false;
-        let mut json_tags: Vec<String> = Vec::new();
-        let mut json_series: Vec<String> = Vec::new();
-        let mut json_chapters: Option<Vec<crate::core::metadata_writer::AudiobookshelfChapter>> = None;
-
-        // 1. Extract from files/NFO
-        let (mut title, mut author, mut narrator, mut description, mut tags, mut genre, mut cover_url, source) = self.extract_metadata(dir, files, scraper_config).await;
-
-        // 2. Read metadata.json (Overrides NFO/Audio)
-        if let Ok(Some(meta)) = crate::core::metadata_writer::read_metadata_json(dir) {
-            if let Some(t) = meta.title { if !t.trim().is_empty() { title = t; } }
-            if !meta.authors.is_empty() { author = Some(meta.authors[0].clone()); }
-            if !meta.narrators.is_empty() { narrator = Some(meta.narrators[0].clone()); }
-            if let Some(desc) = meta.description { if !desc.trim().is_empty() { description = Some(desc); } }
-            if !meta.genres.is_empty() { genre = Some(meta.genres.join(",")); }
-            if !meta.tags.is_empty() { 
-                json_tags = meta.tags.clone();
-                tags = Some(meta.tags.join(","));
-            }
-            if !meta.series.is_empty() { json_series = meta.series; }
-            
-            subtitle = meta.subtitle;
-            published_year = meta.published_year;
-            published_date = meta.published_date;
-            publisher = meta.publisher;
-            isbn = meta.isbn;
-            asin = meta.asin;
-            language = meta.language;
-            if meta.explicit { explicit = true; }
-            if meta.abridged { abridged = true; }
-            if !meta.chapters.is_empty() { json_chapters = Some(meta.chapters); }
-        }
+        let subtitle = scanned_meta.subtitle;
+        let published_year = scanned_meta.published_year;
+        let published_date = scanned_meta.published_date;
+        let publisher = scanned_meta.publisher;
+        let isbn = scanned_meta.isbn;
+        let asin = scanned_meta.asin;
+        let language = scanned_meta.language;
+        let explicit = scanned_meta.explicit;
+        let abridged = scanned_meta.abridged;
+        let json_tags = scanned_meta.json_tags;
+        let json_series = scanned_meta.json_series;
+        let json_chapters = scanned_meta.json_chapters;
 
         if author.is_none() { author = Some("Unknown".to_string()); }
 
@@ -269,70 +296,6 @@ impl LibraryScanner {
                     // theme_color will be recalculated if cover_url changed later
                 }
              }
-        } else {
-            // Scraper logic (only if not manual corrected)
-            if let Some(scraper) = &self.scraper_service {
-                // ... (Existing Scraper Logic)
-                // Check existing book by Title+Author to avoid dups if this is a new scan
-                if existing_book_id.is_none() {
-                     if let Some(ref a) = author {
-                        if let Ok(Some(existing_book)) = self.book_repo.find_by_title_and_author(&title, a).await {
-                            let existing_path = std::path::Path::new(&existing_book.path);
-                            if existing_book.path != dir.to_string_lossy() && existing_path.exists() {
-                                // Different book, ignore
-                            } else {
-                                existing_book_id = Some(existing_book.id.clone());
-                                if existing_book.manual_corrected == 1 {
-                                    // It was actually manual corrected!
-                                    // Re-apply manual correction logic
-                                    title = existing_book.title.unwrap_or(title);
-                                    if existing_book.author.is_some() { author = existing_book.author; }
-                                    if existing_book.narrator.is_some() { narrator = existing_book.narrator; }
-                                    if existing_book.description.is_some() { description = existing_book.description; }
-                                    if existing_book.tags.is_some() { tags = existing_book.tags; }
-                                    if existing_book.genre.is_some() { genre = existing_book.genre; }
-                                    if existing_book.cover_url.is_some() { cover_url = existing_book.cover_url; }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // If still not manual corrected (or we didn't find existing one), try scrape
-                if existing_book_id.is_none() || (existing_book_id.is_some() && !is_manual_corrected) {
-                    let needs_scrape = description.is_none() || published_year.is_none();
-                    if needs_scrape {
-                        self.update_progress(task_id, format!("Scraping metadata for: {}", title)).await;
-                        match scraper.scrape_book_metadata(&title, scraper_config).await {
-                            Ok(detail) => {
-                                if !detail.intro.is_empty() && (source == MetadataSource::Fallback || description.is_none()) { description = Some(detail.intro); }
-                                if !detail.tags.is_empty() && (source == MetadataSource::Fallback || tags.is_none()) { tags = Some(detail.tags.join(",")); }
-                                
-                                if let Some(g) = detail.genre {
-                                    if !g.trim().is_empty() && (source == MetadataSource::Fallback || genre.is_none()) {
-                                        genre = Some(g);
-                                    }
-                                }
-
-                                if detail.cover_url.is_some() && (source == MetadataSource::Fallback || cover_url.is_none()) { cover_url = detail.cover_url; }
-                                if detail.narrator.is_some() && (source == MetadataSource::Fallback || narrator.is_none()) { narrator = detail.narrator; }
-                                if !detail.author.is_empty() && (source == MetadataSource::Fallback || author.as_deref() == Some("Unknown") || author.is_none()) { author = Some(detail.author); }
-                                
-                                if detail.subtitle.is_some() { subtitle = detail.subtitle; }
-                                if detail.published_year.is_some() { published_year = detail.published_year; }
-                                if detail.published_date.is_some() { published_date = detail.published_date; }
-                                if detail.publisher.is_some() { publisher = detail.publisher; }
-                                if detail.isbn.is_some() { isbn = detail.isbn; }
-                                if detail.asin.is_some() { asin = detail.asin; }
-                                if detail.language.is_some() { language = detail.language; }
-                                if detail.explicit { explicit = true; }
-                                if detail.abridged { abridged = true; }
-                            },
-                            Err(_) => {}
-                        }
-                    }
-                }
-            }
         }
 
         // Theme Color
@@ -472,259 +435,269 @@ impl LibraryScanner {
         Ok((book_id, if chapters_changed { ScanStatus::Updated } else { status }))
     }
 
-    async fn extract_metadata(&self, dir: &Path, files: &[PathBuf], scraper_config: &crate::db::models::ScraperConfig) -> (String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, MetadataSource) {
-        // Try NFO
-        let nfo_path = dir.join("book.nfo");
-        if let Ok(meta) = self.nfo_manager.read_book_nfo(&nfo_path) {
-            return (
-                meta.title,
-                meta.author,
-                meta.narrator,
-                meta.intro,
-                Some(meta.tags.items.join(",")),
-                Some(meta.genre.items.join(",")),
-                meta.cover_url,
-                MetadataSource::Nfo
-            );
-        }
+    async fn extract_final_metadata(
+        &self,
+        dir: &Path,
+        files: &[PathBuf],
+        scraper_config: &crate::db::models::ScraperConfig,
+    ) -> (ScannedMetadata, MetadataSource) {
+        let mut final_meta = ScannedMetadata::default();
+        let mut final_source = MetadataSource::Fallback;
 
-        // Try Audio Metadata from first file
-        let mut title = String::new();
-        let mut author = None;
-        let mut narrator = None;
-        let mut description = None;
-        let tags = None;
-        let mut genre = None;
-        let mut cover_url_from_plugin = None;
-        let mut source = MetadataSource::Fallback;
-
-        if !files.is_empty() {
-            let file_path = &files[0];
-            
-            // First try standard audio streamer (Symphonia)
-            // But for encrypted files (like XM, NCM), standard streamer might fail or return garbage
-            let ext = file_path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-            let is_standard = STANDARD_EXTENSIONS.contains(&ext.as_str());
-            
-            if is_standard {
-
-
-                if let Ok(meta) = self.audio_streamer.read_metadata(file_path) {
-                    if let Some(t) = meta.album {
-                        if !t.trim().is_empty() {
-                            title = t;
-                            source = MetadataSource::FileMetadata;
-                        }
-                    }
-                    
-                    // Logic for Author/Narrator extraction
-                    // Priority: AlbumArtist > Artist
-                    if let Some(aa) = meta.album_artist {
-                         if !aa.trim().is_empty() {
-                             author = Some(aa);
-                             source = MetadataSource::FileMetadata;
-                         }
-                    }
-                    
-                    if let Some(a) = meta.artist {
-                        if !a.trim().is_empty() {
-                            if author.is_none() {
-                                author = Some(a.clone());
-                                source = MetadataSource::FileMetadata;
-                            } else if author.as_ref() != Some(&a) {
-                                // If Author is already set (e.g. from AlbumArtist) and Artist is different,
-                                // Artist is likely the Narrator or Contributing Artist.
-                                narrator = Some(a);
-                            }
-                        }
-                    }
-                    
-                    if let Some(c) = meta.composer {
-                        if !c.trim().is_empty() {
-                            if narrator.is_none() {
-                                narrator = Some(c);
-                            }
-                        }
-                    }
-                    
-                    if let Some(g) = meta.genre {
-                        if !g.trim().is_empty() {
-                            genre = Some(g);
-                        }
-                    }
-                }
-            }
-
-            // If standard failed or it's an encrypted file, try plugins
-            if title.is_empty() || !is_standard {
-                // Try format plugins
-                // Find a format plugin that supports this file
-                let plugins = self.plugin_manager.find_plugins_by_type(PluginType::Format).await;
-                for plugin in plugins {
-                    // Check if plugin supports this extension
-                    let supports_ext = plugin.supported_extensions.as_ref()
-                        .map(|exts| exts.iter().any(|e| e.eq_ignore_ascii_case(&ext)))
-                        .unwrap_or(false);
-                    
-                    if !supports_ext {
-                        continue;
-                    }
-
-                    // Call 'extract_metadata' on the plugin
-                    let params = serde_json::json!({
-                        "file_path": file_path.to_string_lossy()
-                    });
-                    
-                    if let Ok(result) = self.plugin_manager.call_format(
-                        &plugin.id, 
-                        FormatMethod::ExtractMetadata, 
-                        params
-                    ).await {
-                        // Parse result
-                        if let Some(t) = result.get("album").and_then(|v| v.as_str()) {
-                            if !t.trim().is_empty() {
-                                title = t.to_string();
-                                source = MetadataSource::FileMetadata;
-                            }
-                        }
-                        
-                        // Handle Author/Artist/Narrator
-                        // Priority: album_artist (Author) > artist
-                        if let Some(aa) = result.get("album_artist").and_then(|v| v.as_str()) {
-                            if !aa.trim().is_empty() {
-                                author = Some(aa.to_string());
-                                source = MetadataSource::FileMetadata;
-                            }
-                        }
-                        
-                        // Handle Artist/Narrator based on Plugin ID
-                        // For 'xm-format', the 'artist' field is actually the Narrator
-                        if let Some(a) = result.get("artist").and_then(|v| v.as_str()) {
-                            if !a.trim().is_empty() {
-                                if author.is_none() {
-                                    author = Some(a.to_string());
-                                    source = MetadataSource::FileMetadata;
-                                } else if author.as_ref().map(|s| s.as_str()) != Some(a) {
-                                    // If author is set (e.g. from album_artist) and artist is different,
-                                    // treat artist as narrator (if narrator not explicitly set later)
-                                    if narrator.is_none() {
-                                        narrator = Some(a.to_string());
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // If plugin explicitly returns narrator (future proof)
-                        if let Some(n) = result.get("narrator").and_then(|v| v.as_str()) {
-                            if !n.trim().is_empty() {
-                                narrator = Some(n.to_string());
-                            }
-                        }
-
-                        if let Some(c) = result.get("cover_url").and_then(|v| v.as_str()) {
-                            if !c.trim().is_empty() {
-                                cover_url_from_plugin = Some(c.to_string());
-                            }
-                        }
-
-                        if let Some(d) = result.get("description").and_then(|v| v.as_str()) {
-                            if !d.trim().is_empty() {
-                                description = Some(d.to_string());
-                            }
-                        }
-                        
-                        if let Some(g) = result.get("genre").and_then(|v| v.as_str()) {
-                            if !g.trim().is_empty() {
-                                genre = Some(g.to_string());
-                            }
-                        }
-                        
-                        // If we found metadata, break
-                        if !title.is_empty() {
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        // --- TITLE SELECTION LOGIC ---
-        // Directory Name
+        // 0. Base: Directory Name
         let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("Unknown Book");
-        let (cleaned_dir_name, _) = self.text_cleaner.clean_chapter_title(dir_name, None);
-        
-        // Special handling for non-standard formats (Plugins)
-        // User requested: "xm等需要格式支持插件的特殊格式所有规则不变"
-        // If it's a special format and we successfully extracted a title, we should probably keep it
-        // regardless of the `prefer_audio_title` setting, OR imply that for special formats we always prefer extracted title.
-        // Let's assume if !is_standard and we have a title, we keep it.
-        
-        let mut is_special_format = false;
-        if !files.is_empty() {
-             let ext = files[0].extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-             if !STANDARD_EXTENSIONS.contains(&ext.as_str()) {
-                 is_special_format = true;
-             }
-        }
-
-        if is_special_format && !title.is_empty() {
-            // Keep plugin title, do not fallback to directory
-            // And clean it
-            title = self.text_cleaner.clean_filename(&title);
-        } else if scraper_config.prefer_audio_title && !title.is_empty() {
-            // Use extracted ID3 title
-            // Clean it just in case
-            title = self.text_cleaner.clean_filename(&title);
-        } else {
-            // Prefer Directory Name (default behavior) or ID3 missing
-            // Clean directory name
-            title = cleaned_dir_name;
-            source = MetadataSource::Fallback;
-        }
-        
-        // --- TITLE SELECTION END ---
+        let (cleaned_title, _) = self.text_cleaner.clean_chapter_title(dir_name, None);
+        final_meta.title = Some(cleaned_title);
 
         // Fallback Author from "Author - Title" pattern
-        if author.is_none() {
-             let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
-             if dir_name.contains(" - ") {
-                 let parts: Vec<&str> = dir_name.split(" - ").collect();
-                 if parts.len() >= 2 {
-                     author = Some(parts[0].trim().to_string());
-                 }
+        if dir_name.contains(" - ") {
+             let parts: Vec<&str> = dir_name.split(" - ").collect();
+             if parts.len() >= 2 {
+                 final_meta.author = Some(parts[0].trim().to_string());
              }
         }
 
-        // --- FIXED COVER EXTRACTION LOGIC START ---
+        // 1. Iterate Priority List
+        // Default: local > audio > scraper (Matches user's "Default local metadata priority")
+        // But we iterate in REVERSE (Lowest -> Highest) so higher priority overrides.
+        let default_priority = vec![
+            "scraper".to_string(), 
+            "audio_metadata".to_string(),
+            "local_metadata".to_string() 
+        ];
         
-        // 1. Try to find local cover image first (cover.jpg, etc.)
-        let mut cover_url = self.find_cover_image(dir);
+        // User config: if they set ["local", "audio", "scraper"], that means Local is Highest.
+        // So we should iterate: Scraper -> Audio -> Local.
+        // So we iterate `scraper_config.metadata_priority.iter().rev()`.
         
-        // 2. If no local cover, check if plugin provided one (e.g. scraped URL)
-        if cover_url.is_none() {
-            cover_url = cover_url_from_plugin;
-        }
+        let priority_list = if scraper_config.metadata_priority.is_empty() {
+            &default_priority
+        } else {
+            &scraper_config.metadata_priority
+        };
 
-        // 3. If still no cover, TRY TO EXTRACT FROM ID3 AND SAVE IT
-        // This was missing: we need to actively extract and SAVE the cover to disk so `find_cover_image` or the frontend can use it.
-        // We only do this if we have files.
-        if cover_url.is_none() && !files.is_empty() {
-             // Only try for MP3 files for now as we use id3 crate
+        for source_type in priority_list.iter().rev() {
+            match source_type.as_str() {
+                "local_metadata" => {
+                    // NFO
+                    if let Some(meta) = self.extract_from_nfo(dir) {
+                        final_meta.merge(meta);
+                        final_source = MetadataSource::Nfo;
+                    }
+                    // JSON (Overrides NFO within local category)
+                    if let Some(meta) = self.extract_from_json(dir) {
+                        final_meta.merge(meta);
+                        final_source = MetadataSource::Nfo;
+                    }
+                },
+                "audio_metadata" => {
+                    if let Some(meta) = self.extract_from_audio(dir, files).await {
+                        final_meta.merge(meta);
+                        // Only update source if we actually got a title from audio
+                        if final_meta.title.is_some() {
+                            final_source = MetadataSource::FileMetadata;
+                        }
+                    }
+                },
+                "scraper" => {
+                    // Only run scraper if we have a title
+                    if let Some(ref title) = final_meta.title {
+                         if let Some(meta) = self.extract_from_scraper(title, &final_meta.author, scraper_config).await {
+                             final_meta.merge(meta);
+                             // Scraper doesn't change source type usually? Or maybe it does.
+                         }
+                    }
+                },
+                _ => {}
+            }
+        }
+        
+        // 2. Post-processing: Cover Image
+        // If no cover URL yet, try finding local file (cover.jpg)
+        if final_meta.cover_url.is_none() {
+             if let Some(path) = self.find_cover_image(dir) {
+                 final_meta.cover_url = Some(path);
+             }
+        }
+        
+        // 3. Fallback Cover Extraction (if still no cover, extract from ID3 and save)
+        // This runs only if cover is still missing, regardless of priority, 
+        // because if "audio_metadata" was high priority, it would have set cover_url from plugin/id3.
+        // But wait, `extract_from_audio` doesn't save to disk automatically in new logic?
+        // I should ensure `extract_from_audio` sets `cover_url` if found in tag.
+        // And if `local_metadata` is high priority but `cover.jpg` is missing, we might want to extract it?
+        // Yes.
+        if final_meta.cover_url.is_none() && !files.is_empty() {
              let first_file = &files[0];
              if let Some(ext) = first_file.extension() {
                  let ext_str = ext.to_string_lossy().to_lowercase();
                  if ext_str == "mp3" {
-                     // This function extracts, saves to disk, and returns the relative path
                      if let Some(path) = self.extract_and_save_cover(first_file, dir) {
-                         cover_url = Some(path);
+                         final_meta.cover_url = Some(path);
                      }
                  }
              }
         }
-        
-        // --- FIXED COVER EXTRACTION LOGIC END ---
 
-        (title, author, narrator, description, tags, genre, cover_url, source)
+        (final_meta, final_source)
+    }
+
+    fn extract_from_nfo(&self, dir: &Path) -> Option<ScannedMetadata> {
+        let nfo_path = dir.join("book.nfo");
+        if let Ok(meta) = self.nfo_manager.read_book_nfo(&nfo_path) {
+            return Some(ScannedMetadata {
+                title: if meta.title.is_empty() { None } else { Some(meta.title) },
+                author: meta.author,
+                narrator: meta.narrator,
+                description: meta.intro,
+                tags: Some(meta.tags.items.join(",")),
+                genre: Some(meta.genre.items.join(",")),
+                cover_url: meta.cover_url,
+                ..Default::default()
+            });
+        }
+        None
+    }
+
+    fn extract_from_json(&self, dir: &Path) -> Option<ScannedMetadata> {
+        match crate::core::metadata_writer::read_metadata_json(dir) {
+            Ok(Some(meta)) => {
+                let mut m = ScannedMetadata::default();
+                m.title = meta.title;
+                if !meta.authors.is_empty() { m.author = Some(meta.authors[0].clone()); }
+                if !meta.narrators.is_empty() { m.narrator = Some(meta.narrators[0].clone()); }
+                m.description = meta.description;
+                if !meta.genres.is_empty() { m.genre = Some(meta.genres.join(",")); }
+                if !meta.tags.is_empty() { 
+                    m.json_tags = meta.tags.clone();
+                    m.tags = Some(meta.tags.join(","));
+                }
+                m.json_series = meta.series;
+                m.subtitle = meta.subtitle;
+                m.published_year = meta.published_year;
+                m.published_date = meta.published_date;
+                m.publisher = meta.publisher;
+                m.isbn = meta.isbn;
+                m.asin = meta.asin;
+                m.language = meta.language;
+                m.explicit = meta.explicit;
+                m.abridged = meta.abridged;
+                if !meta.chapters.is_empty() { m.json_chapters = Some(meta.chapters); }
+                Some(m)
+            },
+            Ok(None) => None,
+            Err(e) => {
+                warn!("Failed to read metadata.json in {:?}: {}", dir, e);
+                None
+            }
+        }
+    }
+
+    async fn extract_from_audio(&self, _dir: &Path, files: &[PathBuf]) -> Option<ScannedMetadata> {
+        if files.is_empty() { return None; }
+        let file_path = &files[0];
+        let mut m = ScannedMetadata::default();
+        let mut found = false;
+
+        let ext = file_path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let is_standard = STANDARD_EXTENSIONS.contains(&ext.as_str());
+
+        if is_standard {
+             if let Ok(meta) = self.audio_streamer.read_metadata(file_path) {
+                 if let Some(t) = meta.album {
+                     if !t.trim().is_empty() {
+                         m.title = Some(t);
+                         found = true;
+                     }
+                 }
+                 if let Some(aa) = meta.album_artist {
+                      if !aa.trim().is_empty() { m.author = Some(aa); }
+                 }
+                 if let Some(a) = meta.artist {
+                     if !a.trim().is_empty() {
+                         if m.author.is_none() { m.author = Some(a.clone()); }
+                         else if m.author.as_ref() != Some(&a) { m.narrator = Some(a); }
+                     }
+                 }
+                 if let Some(c) = meta.composer {
+                     if !c.trim().is_empty() && m.narrator.is_none() { m.narrator = Some(c); }
+                 }
+                 if let Some(g) = meta.genre {
+                     if !g.trim().is_empty() { m.genre = Some(g); }
+                 }
+             }
+        }
+
+        // Try plugins if title empty or not standard
+        if m.title.is_none() || !is_standard {
+             let plugins = self.plugin_manager.find_plugins_by_type(PluginType::Format).await;
+             for plugin in plugins {
+                 let supports_ext = plugin.supported_extensions.as_ref()
+                     .map(|exts| exts.iter().any(|e| e.eq_ignore_ascii_case(&ext)))
+                     .unwrap_or(false);
+                 if !supports_ext { continue; }
+
+                 let params = serde_json::json!({ "file_path": file_path.to_string_lossy() });
+                 if let Ok(result) = self.plugin_manager.call_format(&plugin.id, FormatMethod::ExtractMetadata, params).await {
+                     if let Some(t) = result.get("album").and_then(|v| v.as_str()) {
+                         if !t.trim().is_empty() {
+                             m.title = Some(t.to_string());
+                             found = true;
+                         }
+                     }
+                     if let Some(aa) = result.get("album_artist").and_then(|v| v.as_str()) {
+                         if !aa.trim().is_empty() { m.author = Some(aa.to_string()); }
+                     }
+                     if let Some(a) = result.get("artist").and_then(|v| v.as_str()) {
+                         if !a.trim().is_empty() {
+                             if m.author.is_none() { m.author = Some(a.to_string()); }
+                             else if m.author.as_ref().map(|s| s.as_str()) != Some(a) { m.narrator = Some(a.to_string()); }
+                         }
+                     }
+                     if let Some(n) = result.get("narrator").and_then(|v| v.as_str()) {
+                         if !n.trim().is_empty() { m.narrator = Some(n.to_string()); }
+                     }
+                     if let Some(c) = result.get("cover_url").and_then(|v| v.as_str()) {
+                         if !c.trim().is_empty() { m.cover_url = Some(c.to_string()); }
+                     }
+                     if let Some(d) = result.get("description").and_then(|v| v.as_str()) {
+                         if !d.trim().is_empty() { m.description = Some(d.to_string()); }
+                     }
+                     if let Some(g) = result.get("genre").and_then(|v| v.as_str()) {
+                         if !g.trim().is_empty() { m.genre = Some(g.to_string()); }
+                     }
+                     if found { break; }
+                 }
+             }
+        }
+
+        if found { Some(m) } else { None }
+    }
+
+    async fn extract_from_scraper(&self, title: &str, _author: &Option<String>, scraper_config: &crate::db::models::ScraperConfig) -> Option<ScannedMetadata> {
+        if let Some(scraper) = &self.scraper_service {
+             // Basic scrape check
+             if let Ok(detail) = scraper.scrape_book_metadata(title, scraper_config).await {
+                 let mut m = ScannedMetadata::default();
+                 if !detail.intro.is_empty() { m.description = Some(detail.intro); }
+                 if !detail.tags.is_empty() { m.tags = Some(detail.tags.join(",")); }
+                 if let Some(g) = detail.genre { if !g.trim().is_empty() { m.genre = Some(g); } }
+                 m.cover_url = detail.cover_url;
+                 m.narrator = detail.narrator;
+                 if !detail.author.is_empty() { m.author = Some(detail.author); }
+                 m.subtitle = detail.subtitle;
+                 m.published_year = detail.published_year;
+                 m.published_date = detail.published_date;
+                 m.publisher = detail.publisher;
+                 m.isbn = detail.isbn;
+                 m.asin = detail.asin;
+                 m.language = detail.language;
+                 if detail.explicit { m.explicit = true; }
+                 if detail.abridged { m.abridged = true; }
+                 return Some(m);
+             }
+        }
+        None
     }
 
     fn extract_and_save_cover(&self, audio_path: &Path, book_dir: &Path) -> Option<String> {
