@@ -25,7 +25,8 @@ import {
   AlertTriangle,
   Settings,
   RefreshCw,
-  Wand2
+  Wand2,
+  FileSignature
 } from 'lucide-react';
 import { getCoverUrl } from '../utils/image';
 import { useAuthStore } from '../store/authStore';
@@ -305,6 +306,19 @@ const BookDetailPage: React.FC = () => {
     }
   };
 
+  const handleWriteMetadata = async () => {
+    try {
+      if (!confirm('确定要将当前元数据写入到音频文件吗？这可能需要一些时间。')) {
+        return;
+      }
+      await apiClient.post(`/api/books/${id}/write-metadata`);
+      alert('已开始后台写入元数据，请稍候查看任务进度。');
+    } catch (err) {
+      console.error('Failed to write metadata', err);
+      alert('写入失败');
+    }
+  };
+
   const handleEditSave = async () => {
     try {
       const dataToSave = { ...editData };
@@ -504,60 +518,61 @@ const BookDetailPage: React.FC = () => {
               )}
             </div>
 
-            {/* Responsive Buttons Layout */}
-            <div className="flex flex-col sm:flex-row gap-3 max-w-md mx-auto md:mx-0 w-full">
+            <div className="w-full flex flex-col gap-3 md:max-w-md mx-auto md:mx-0">
               <button 
                 onClick={() => playBook(book, currentChapters)}
-                className="flex-1 flex items-center justify-center gap-2 px-8 py-3.5 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-2xl shadow-xl shadow-primary-500/30 transition-all active:scale-95 group min-w-[140px]"
+                className="w-full flex items-center justify-center gap-2 px-5 sm:px-8 py-3.5 sm:py-4 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-2xl shadow-xl shadow-primary-500/30 transition-all active:scale-95 group"
                 style={displayThemeColor ? { 
                   backgroundColor: toSolidColor(displayThemeColor),
                   boxShadow: `0 10px 20px -5px ${setAlpha(displayThemeColor, 0.3)}`
                 } : {}}
               >
-                <Play size={20} fill="currentColor" />
+                <Play size={18} fill="currentColor" />
                 立即播放
               </button>
-              
-              <div className="flex gap-3 flex-1 sm:flex-none">
-                  <button 
-                    onClick={toggleFavorite}
-                    className={`flex-1 sm:flex-none p-3.5 rounded-2xl border transition-all active:scale-95 flex items-center justify-center ${
-                      isFavorite 
-                        ? 'bg-red-50 border-red-100 text-red-500 dark:bg-red-900/20 dark:border-red-900/30' 
-                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:text-red-500'
-                    }`}
-                  >
-                    <Heart size={24} fill={isFavorite ? "currentColor" : "none"} />
-                  </button>
-                  
-                  {user?.role === 'admin' && (
-                    <>
-                      <button 
-                        onClick={() => setIsScrapeDiffOpen(true)}
-                        className="flex-1 sm:flex-none p-3.5 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center"
-                        title="同步元数据"
-                      >
-                        <RefreshCw size={24} />
-                      </button>
-                      <button 
-                        onClick={() => {
-                          setEditData({ 
-                            ...book,
-                            // Ensure we populate the form with canonical values
-                            coverUrl: displayCoverUrl,
-                            themeColor: displayThemeColor,
-                            libraryType: displayLibraryType,
-                            skipIntro: book.skipIntro,
-                            skipOutro: book.skipOutro
-                          });
-                          setIsEditModalOpen(true);
-                        }}
-                        className="flex-1 sm:flex-none p-3.5 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center"
-                      >
-                        <Edit size={24} />
-                      </button>
-                    </>
-                  )}
+
+              <div className="w-full flex gap-2 sm:gap-3">
+                <button 
+                  onClick={toggleFavorite}
+                  className={`flex-1 min-w-0 px-3 sm:px-4 py-3 rounded-2xl border transition-all active:scale-95 flex items-center justify-center gap-2 font-bold text-sm ${
+                    isFavorite 
+                      ? 'bg-red-50 border-red-100 text-red-500 dark:bg-red-900/20 dark:border-red-900/30' 
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-red-500'
+                  }`}
+                >
+                  <Heart size={20} fill={isFavorite ? "currentColor" : "none"} />
+                  收藏
+                </button>
+                
+                {user?.role === 'admin' && (
+                  <>
+                    <button 
+                      onClick={() => setIsScrapeDiffOpen(true)}
+                      className="flex-1 min-w-0 px-3 sm:px-4 py-3 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center gap-2 font-bold text-sm"
+                      title="刮削元数据"
+                    >
+                      <RefreshCw size={20} />
+                      刮削
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setEditData({ 
+                          ...book,
+                          coverUrl: displayCoverUrl,
+                          themeColor: displayThemeColor,
+                          libraryType: displayLibraryType,
+                          skipIntro: book.skipIntro,
+                          skipOutro: book.skipOutro
+                        });
+                        setIsEditModalOpen(true);
+                      }}
+                      className="flex-1 min-w-0 px-3 sm:px-4 py-3 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center gap-2 font-bold text-sm"
+                    >
+                      <Edit size={20} />
+                      编辑
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
@@ -927,6 +942,16 @@ const BookDetailPage: React.FC = () => {
                       className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                     />
                   </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">流派</label>
+                    <input 
+                      type="text" 
+                      value={editData.genre || ''}
+                      onChange={e => setEditData({...editData, genre: e.target.value})}
+                      className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                    />
+                  </div>
                   
                   <div className="space-y-1">
                     <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider flex justify-between items-center">
@@ -1005,6 +1030,14 @@ const BookDetailPage: React.FC = () => {
                 </button>
                 <div className="flex-1" />
                 <div className="flex gap-3">
+                  <button 
+                    onClick={handleWriteMetadata}
+                    className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 sm:py-3 font-bold text-primary-600 bg-primary-50 hover:bg-primary-100 dark:bg-primary-900/20 dark:hover:bg-primary-900/30 rounded-xl transition-all flex items-center justify-center gap-2 text-sm sm:text-base"
+                    title="将元数据写入音频文件"
+                  >
+                    <FileSignature size={18} className="sm:w-5 sm:h-5" />
+                    写入文件
+                  </button>
                   <button 
                     onClick={() => setIsEditModalOpen(false)}
                     className="flex-1 sm:flex-none px-4 sm:px-6 py-2.5 sm:py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all text-sm sm:text-base"

@@ -50,6 +50,7 @@ export interface Book {
   skipIntro?: number;
   skipOutro?: number;
   tags?: string;
+  genre?: string;
   chapterRegex?: string;
 }
 
@@ -131,6 +132,7 @@ export interface BookMetadata {
   description: string;
   cover_url: string;
   tags?: string[];
+  genre?: string;
 }
 
 export interface ChapterChange {

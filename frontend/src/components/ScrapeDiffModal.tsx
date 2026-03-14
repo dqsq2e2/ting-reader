@@ -129,6 +129,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
         cover_url: cleanUrl(diff.scraped.cover_url) || null,
         intro: diff.scraped.description,
         tags: diff.scraped.tags || [],
+        genre: diff.scraped.genre || null,
         chapter_count: 0, // Not used for update
         duration: 0
       };

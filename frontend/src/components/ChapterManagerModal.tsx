@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import type { Chapter, Book } from '../types';
 import apiClient from '../api/client';
-import { X, Save, Loader2, Search, ArrowRight, Folder, CheckSquare, Square, ListOrdered } from 'lucide-react';
+import { X, Save, Loader2, Search, ArrowRight, Folder, CheckSquare, Square, ListOrdered, ListTodo } from 'lucide-react';
 import FixedSizeList from './VirtualList';
 const List = FixedSizeList;
 import AutoSizer from './AutoSizer';
@@ -19,6 +19,7 @@ const ChapterManagerModal: React.FC<Props> = ({ bookId, initialChapters, onClose
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [changedIds, setChangedIds] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBookSelector, setShowBookSelector] = useState(false);
   const [moving, setMoving] = useState(false);
@@ -47,6 +48,7 @@ const ChapterManagerModal: React.FC<Props> = ({ bookId, initialChapters, onClose
   };
 
   const toggleSelection = (id: string) => {
+    if (!selectionMode) return;
     const newSet = new Set(selectedIds);
     if (newSet.has(id)) newSet.delete(id);
     else newSet.add(id);
@@ -54,6 +56,7 @@ const ChapterManagerModal: React.FC<Props> = ({ bookId, initialChapters, onClose
   };
 
   const toggleAll = () => {
+    if (!selectionMode) return;
     if (selectedIds.size === filteredChapters.length) {
       setSelectedIds(new Set());
     } else {
@@ -141,9 +144,11 @@ const ChapterManagerModal: React.FC<Props> = ({ bookId, initialChapters, onClose
                 : 'bg-white dark:bg-slate-800/50 border-slate-100 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-600'
         }`}>
           {/* Checkbox */}
-          <button onClick={() => toggleSelection(chapter.id)} className="shrink-0 text-slate-400 hover:text-primary-600">
-            {isSelected ? <CheckSquare size={20} className="text-primary-600" /> : <Square size={20} />}
-          </button>
+          {selectionMode && (
+            <button onClick={() => toggleSelection(chapter.id)} className="shrink-0 text-slate-400 hover:text-primary-600">
+              {isSelected ? <CheckSquare size={20} className="text-primary-600" /> : <Square size={20} />}
+            </button>
+          )}
 
           {/* Index */}
           <input
@@ -198,62 +203,87 @@ const ChapterManagerModal: React.FC<Props> = ({ bookId, initialChapters, onClose
       <div className="relative w-full max-w-5xl h-[90vh] bg-white dark:bg-slate-900 rounded-3xl shadow-2xl flex flex-col animate-in zoom-in-95 duration-200">
         
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-slate-100 dark:border-slate-800 shrink-0">
-          <div className="flex items-center gap-4">
-            <h2 className="text-2xl font-bold dark:text-white">章节管理</h2>
-            <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl">
-              <Search size={18} className="text-slate-400" />
+        <div className="flex items-start sm:items-center justify-between p-4 sm:p-6 border-b border-slate-100 dark:border-slate-800 shrink-0 gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 flex-1 min-w-0">
+            <h2 className="text-xl sm:text-2xl font-bold dark:text-white shrink-0">章节管理</h2>
+            <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl w-full sm:w-auto">
+              <Search size={16} className="text-slate-400 shrink-0" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="搜索章节..."
-                className="bg-transparent border-none p-0 text-sm w-40 focus:ring-0 text-slate-900 dark:text-white"
+                className="bg-transparent border-none p-0 text-sm w-full sm:w-40 focus:ring-0 text-slate-900 dark:text-white"
               />
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
-            <X size={24} className="text-slate-500" />
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors shrink-0">
+            <X size={22} className="text-slate-500" />
           </button>
         </div>
 
         {/* Toolbar */}
-        <div className="px-6 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50 shrink-0">
-            <div className="flex items-center gap-4">
+        <div className="px-4 sm:px-6 py-2 sm:py-3 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between bg-slate-50/50 dark:bg-slate-900/50 shrink-0 gap-2">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => {
+                setSelectionMode(prev => {
+                  const next = !prev;
+                  if (!next) setSelectedIds(new Set());
+                  return next;
+                });
+              }}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl border font-bold text-sm transition-all shadow-sm ${
+                selectionMode
+                  ? 'bg-primary-600 text-white border-primary-600'
+                  : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+              }`}
+            >
+              {selectionMode ? <CheckSquare size={18} /> : <ListTodo size={18} />}
+              {selectionMode ? '完成' : '选择'}
+            </button>
+
+            {selectionMode && (
+              <>
                 <button 
-                    onClick={toggleAll}
-                    className="flex items-center gap-2 text-sm font-bold text-slate-600 dark:text-slate-400 hover:text-primary-600 transition-colors"
+                  onClick={toggleAll}
+                  className="flex items-center gap-2 text-sm font-bold text-slate-600 dark:text-slate-400 hover:text-primary-600 transition-colors"
                 >
-                    {selectedIds.size > 0 && selectedIds.size === filteredChapters.length ? <CheckSquare size={18} /> : <Square size={18} />}
-                    全选 ({filteredChapters.length})
+                  {selectedIds.size > 0 && selectedIds.size === filteredChapters.length ? <CheckSquare size={18} /> : <Square size={18} />}
+                  <span>全选</span>
+                  <span className="text-slate-400">({filteredChapters.length})</span>
                 </button>
                 
                 {selectedIds.size > 0 && (
-                    <span className="text-sm text-slate-500">
-                        已选 {selectedIds.size} 项
-                    </span>
+                  <span className="text-sm text-slate-500">
+                    已选 {selectedIds.size}
+                  </span>
                 )}
-            </div>
+              </>
+            )}
+          </div>
 
-            <div className="flex gap-2">
+          <div className="flex gap-2">
             <button
               onClick={handleRenumber}
-              className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-600 dark:text-slate-300 font-bold text-sm hover:border-primary-500 hover:text-primary-600 transition-all shadow-sm"
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-600 dark:text-slate-300 font-bold text-sm hover:border-primary-500 hover:text-primary-600 transition-all shadow-sm"
               title="按列表顺序重排（从1开始）"
             >
-              <ListOrdered size={16} />
-              重排序号
+              <ListOrdered size={18} />
+              <span className="sm:hidden">重排</span>
+              <span className="hidden sm:inline">重排序号</span>
             </button>
 
             <button
               onClick={() => setShowBookSelector(true)}
-                    disabled={selectedIds.size === 0 || moving}
-                    className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-600 dark:text-slate-300 font-bold text-sm hover:border-primary-500 hover:text-primary-600 disabled:opacity-50 disabled:hover:border-slate-200 transition-all shadow-sm"
-                >
-                    {moving ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
-                    移动到...
-                </button>
-            </div>
+              disabled={!selectionMode || selectedIds.size === 0 || moving}
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-600 dark:text-slate-300 font-bold text-sm hover:border-primary-500 hover:text-primary-600 disabled:opacity-50 disabled:hover:border-slate-200 transition-all shadow-sm"
+            >
+              {moving ? <Loader2 size={18} className="animate-spin" /> : <ArrowRight size={18} />}
+              <span className="sm:hidden">移动</span>
+              <span className="hidden sm:inline">移动到...</span>
+            </button>
+          </div>
         </div>
 
         {/* List Content */}
@@ -273,17 +303,17 @@ const ChapterManagerModal: React.FC<Props> = ({ bookId, initialChapters, onClose
         </div>
 
         {/* Footer */}
-        <div className="p-6 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-3 shrink-0">
+        <div className="p-4 sm:p-6 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2 sm:gap-3 shrink-0">
           <button 
             onClick={onClose}
-            className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all"
+            className="px-4 sm:px-6 py-2.5 sm:py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all text-sm sm:text-base"
           >
             取消
           </button>
           <button 
             onClick={handleSave}
             disabled={saving || changedIds.size === 0}
-            className="px-8 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 flex items-center gap-2 transition-all disabled:opacity-50 disabled:shadow-none"
+            className="px-5 sm:px-8 py-2.5 sm:py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 flex items-center gap-2 transition-all disabled:opacity-50 disabled:shadow-none text-sm sm:text-base"
           >
             {saving ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
             保存更改 ({changedIds.size})

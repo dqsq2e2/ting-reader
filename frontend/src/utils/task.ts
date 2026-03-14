@@ -28,6 +28,8 @@ export const formatTaskPayload = (payloadString: string): string => {
                     return `插件调用: ${data.plugin_id} - ${data.method}`;
                 case 'format_convert':
                     return `格式转换: ${data.input} -> ${data.output}`;
+                case 'write_metadata':
+                    return `写入元数据: ${data.book_id}`;
                 default:
                     return `任务: ${task_type}`;
             }
