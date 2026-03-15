@@ -50,6 +50,17 @@ const ScraperConfigurator = ({
   const currentTab = tabs.find(t => t.id === activeTab) || tabs[0];
   const currentKey = currentTab.key;
   
+  // Handle snake_case vs camelCase from legacy data
+  const snakeCaseMap: Record<string, string> = {
+    'metadataPriority': 'metadata_priority',
+    'defaultSources': 'default_sources',
+    'coverSources': 'cover_sources',
+    'introSources': 'intro_sources',
+    'authorSources': 'author_sources',
+    'narratorSources': 'narrator_sources',
+    'tagsSources': 'tags_sources',
+  };
+  
   // Special handling for priority tab
   const PRIORITY_SOURCES = [
     { id: 'local_metadata', name: '本地元数据 (JSON/NFO)' },
@@ -57,41 +68,44 @@ const ScraperConfigurator = ({
     { id: 'scraper', name: '刮削器 (Plugins)' }
   ];
 
-  let activeIds: string[] = config[currentKey] || [];
+  let activeIds: string[] = config[currentKey] ?? config[snakeCaseMap[currentKey]] ?? [];
   
   // Initialize default priority if empty
   if (activeTab === 'priority' && activeIds.length === 0) {
       activeIds = ['local_metadata', 'audio_metadata', 'scraper'];
-      // Update config immediately? No, wait for user interaction or let backend handle default.
-      // But for UI rendering we need values.
   }
 
-  const nfoEnabled = config.nfoWritingEnabled || false;
-  const metadataWritingEnabled = config.metadataWritingEnabled || false;
-  const preferAudioTitle = config.preferAudioTitle || false;
+  const nfoEnabled = config.nfoWritingEnabled ?? config.nfo_writing_enabled ?? false;
+  const metadataWritingEnabled = config.metadataWritingEnabled ?? config.metadata_writing_enabled ?? false;
+  const preferAudioTitle = config.preferAudioTitle ?? config.prefer_audio_title ?? false;
 
   const handleNfoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newConfig = { ...config, nfoWritingEnabled: e.target.checked };
+      delete newConfig.nfo_writing_enabled;
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handleMetadataWritingChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newConfig = { ...config, metadataWritingEnabled: e.target.checked };
+      delete newConfig.metadata_writing_enabled;
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handlePreferAudioTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newConfig = { ...config, preferAudioTitle: e.target.checked };
+      delete newConfig.prefer_audio_title;
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handleAdd = (sourceId: string) => {
     const newConfig = { ...config, [currentKey]: [...activeIds, sourceId] };
+    delete newConfig[snakeCaseMap[currentKey]];
     onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handleRemove = (sourceId: string) => {
     const newConfig = { ...config, [currentKey]: activeIds.filter(id => id !== sourceId) };
+    delete newConfig[snakeCaseMap[currentKey]];
     onChange(JSON.stringify(newConfig, null, 2));
   };
 
@@ -103,6 +117,7 @@ const ScraperConfigurator = ({
       [newList[index], newList[index + 1]] = [newList[index + 1], newList[index]];
     }
     const newConfig = { ...config, [currentKey]: newList };
+    delete newConfig[snakeCaseMap[currentKey]];
     onChange(JSON.stringify(newConfig, null, 2));
   };
 
@@ -169,10 +184,10 @@ const ScraperConfigurator = ({
           />
           <div className="flex flex-col">
             <label htmlFor="prefer-audio-title" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
-              优先使用音频 ID3 标题
+              优先使用文件/文件夹名作为标题
             </label>
             <span className="text-[10px] text-slate-400">
-              开启后，扫描时将优先使用音频文件的 Title 标签作为书名
+              开启后，忽略优先级配置，强制使用文件夹名作为书名、文件名作为章节名
             </span>
           </div>
         </div>

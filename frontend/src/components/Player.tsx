@@ -26,7 +26,7 @@ import {
   Check
 } from 'lucide-react';
 import { getCoverUrl } from '../utils/image';
-import { setAlpha, toSolidColor } from '../utils/color';
+import { setAlpha, toSolidColor, isLight } from '../utils/color';
 
 interface ProgressBarProps {
   isMini?: boolean;
@@ -869,14 +869,14 @@ const Player: React.FC = () => {
                 <button 
                   onClick={prevChapter} 
                   className="text-slate-400 hover:scale-110 transition-all"
-                  style={{ color: themeColor ? setAlpha(themeColor, 0.6) : undefined }}
+                  style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : setAlpha(themeColor, 0.6)) : undefined }}
                 >
                   <SkipBack size={20} fill="currentColor" />
                 </button>
                 <button 
                   onClick={() => { if (audioRef.current) audioRef.current.currentTime -= 15; }}
                   className="text-slate-400 hover:scale-110 transition-all"
-                  style={{ color: themeColor ? setAlpha(themeColor, 0.6) : undefined }}
+                  style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : setAlpha(themeColor, 0.6)) : undefined }}
                 >
                   <RotateCcw size={18} />
                 </button>
@@ -893,14 +893,14 @@ const Player: React.FC = () => {
                 <button 
                   onClick={() => { if (audioRef.current) audioRef.current.currentTime += 30; }}
                   className="text-slate-400 hover:scale-110 transition-all"
-                  style={{ color: themeColor ? setAlpha(themeColor, 0.6) : undefined }}
+                  style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : setAlpha(themeColor, 0.6)) : undefined }}
                 >
                   <RotateCw size={18} />
                 </button>
                 <button 
                   onClick={nextChapter} 
                   className="text-slate-400 hover:scale-110 transition-all"
-                  style={{ color: themeColor ? setAlpha(themeColor, 0.6) : undefined }}
+                  style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : setAlpha(themeColor, 0.6)) : undefined }}
                 >
                   <SkipForward size={20} fill="currentColor" />
                 </button>
@@ -946,14 +946,14 @@ const Player: React.FC = () => {
                     <button 
                       onClick={() => { if (audioRef.current) audioRef.current.currentTime -= 15; }}
                       className="p-1.5 text-slate-400 transition-colors hover:text-primary-500"
-                      style={{ color: themeColor ? setAlpha(themeColor, 0.6) : undefined }}
+                      style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : setAlpha(themeColor, 0.6)) : undefined }}
                     >
                       <RotateCcw size={16} />
                     </button>
                     <button 
                       onClick={prevChapter}
                       className="p-1.5 text-slate-400 transition-colors hover:text-primary-500"
-                      style={{ color: themeColor ? setAlpha(themeColor, 0.6) : undefined }}
+                      style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : setAlpha(themeColor, 0.6)) : undefined }}
                     >
                       <SkipBack size={16} fill="currentColor" />
                     </button>
@@ -972,14 +972,14 @@ const Player: React.FC = () => {
                     <button 
                       onClick={nextChapter}
                       className="p-1.5 text-slate-400 transition-colors hover:text-primary-500"
-                      style={{ color: themeColor ? setAlpha(themeColor, 0.6) : undefined }}
+                      style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : setAlpha(themeColor, 0.6)) : undefined }}
                     >
                       <SkipForward size={16} fill="currentColor" />
                     </button>
                     <button 
                       onClick={() => { if (audioRef.current) audioRef.current.currentTime += 30; }}
                       className="p-1.5 text-slate-400 transition-colors hover:text-primary-500"
-                      style={{ color: themeColor ? setAlpha(themeColor, 0.6) : undefined }}
+                      style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : setAlpha(themeColor, 0.6)) : undefined }}
                     >
                       <RotateCw size={16} />
                     </button>
@@ -989,7 +989,7 @@ const Player: React.FC = () => {
                   <button 
                     onClick={() => setIsExpanded(true)}
                     className="p-2 text-slate-400 transition-colors"
-                    style={{ color: themeColor ? setAlpha(themeColor, 0.6) : undefined }}
+                    style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : setAlpha(themeColor, 0.6)) : undefined }}
                   >
                     <ChevronUp size={24} />
                   </button>
@@ -1007,7 +1007,7 @@ const Player: React.FC = () => {
                     setShowVolumeControl(!showVolumeControl);
                   }}
                   className="text-slate-400 transition-colors p-1 hover:scale-110 flex items-center gap-1"
-                  style={{ color: themeColor ? setAlpha(themeColor, 0.6) : undefined }}
+                  style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : setAlpha(themeColor, 0.6)) : undefined }}
                   title="音量"
                 >
                   {isMuted || volume === 0 ? (
@@ -1061,7 +1061,7 @@ const Player: React.FC = () => {
                 className="text-[10px] font-bold px-2 py-1 rounded transition-colors"
                 style={{ 
                   backgroundColor: themeColor ? setAlpha(themeColor, 0.1) : undefined,
-                  color: themeColor ? setAlpha(themeColor, 0.8) : undefined
+                  color: themeColor ? (isLight(themeColor) ? '#475569' : setAlpha(themeColor, 0.8)) : undefined
                 }}
               >
                 {playbackSpeed}x
@@ -1069,7 +1069,7 @@ const Player: React.FC = () => {
               <button 
                 onClick={() => setIsExpanded(true)} 
                 className="text-slate-400 transition-colors p-1 hover:scale-110"
-                style={{ color: themeColor ? setAlpha(themeColor, 0.6) : undefined }}
+                style={{ color: themeColor ? (isLight(themeColor) ? '#475569' : setAlpha(themeColor, 0.6)) : undefined }}
                 title="展开播放器"
               >
                 <Maximize2 size={20} />
