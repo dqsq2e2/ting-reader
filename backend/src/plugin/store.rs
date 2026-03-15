@@ -77,14 +77,11 @@ fn get_platform_key() -> &'static str {
     
     #[cfg(target_os = "linux")]
     {
-        #[cfg(target_arch = "x86_64")]
-        return "linux-x86_64";
-        
         #[cfg(target_arch = "aarch64")]
         return "linux-aarch64";
         
-        // Default fallback for linux
-        "linux-x86_64" 
+        #[cfg(not(target_arch = "aarch64"))]
+        return "linux-x86_64";
     }
     
     #[cfg(target_os = "macos")]
@@ -92,10 +89,8 @@ fn get_platform_key() -> &'static str {
         #[cfg(target_arch = "aarch64")]
         return "macos-aarch64";
         
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(not(target_arch = "aarch64"))]
         return "macos-x86_64";
-
-        "macos-x86_64"
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
