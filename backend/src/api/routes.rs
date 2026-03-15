@@ -6,8 +6,9 @@ use crate::api::handlers::{
     list_plugins, get_plugin_detail, install_plugin, reload_plugin, uninstall_plugin,
     get_plugin_config, update_plugin_config, get_store_plugins, install_store_plugin,
     list_tasks, get_task, cancel_task, delete_task, clear_tasks, batch_delete_tasks,
+    // System management endpoints
     health_check, get_metrics,
-    get_config, update_config,
+    get_config, update_config, check_update,
     get_book_chapters, update_chapter,
     batch_update_chapters, scrape_book_diff, apply_scrape_result,
     merge_books, move_chapters, write_book_metadata_to_files,
@@ -117,8 +118,9 @@ pub fn build_api_routes(state: AppState) -> Router {
         .route("/api/v1/tasks/:id/cancel", post(cancel_task))
         .route("/api/v1/tasks/batch-delete", post(batch_delete_tasks))
         // System management endpoints
-        .route("/api/v1/metrics", get(get_metrics))
-        .route("/api/v1/config", get(get_config).put(update_config))
+        .route("/api/v1/system/metrics", get(get_metrics))
+        .route("/api/v1/system/config", get(get_config).put(update_config))
+        .route("/api/v1/system/check-update", get(check_update))
         // Book CRUD endpoints (without /v1 prefix for frontend compatibility)
         .route("/api/books", get(list_books).post(create_book))
         .route(
@@ -159,8 +161,9 @@ pub fn build_api_routes(state: AppState) -> Router {
         .route("/api/tasks/:id/cancel", post(cancel_task))
         .route("/api/tasks/batch-delete", post(batch_delete_tasks))
         // System management endpoints (without /v1)
-        .route("/api/metrics", get(get_metrics))
-        .route("/api/config", get(get_config).put(update_config))
+        .route("/api/system/metrics", get(get_metrics))
+        .route("/api/system/config", get(get_config).put(update_config))
+        .route("/api/system/check-update", get(check_update))
         // Cache management endpoints
         .route("/api/cache/:chapterId", post(cache_chapter).delete(delete_chapter_cache))
         .route("/api/cache", get(get_cache_list).delete(clear_all_caches))

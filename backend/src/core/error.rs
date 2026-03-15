@@ -92,6 +92,9 @@ pub enum TingError {
 
     #[error("External tool error: {0}")]
     ExternalError(String),
+
+    #[error("External service error: {0}")]
+    ExternalServiceError(String),
 }
 
 impl TingError {
@@ -134,7 +137,8 @@ impl TingError {
             | TingError::NetworkError(_)
             | TingError::TaskError(_)
             | TingError::EventError(_)
-            | TingError::ExternalError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            | TingError::ExternalError(_) 
+            | TingError::ExternalServiceError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
@@ -163,6 +167,7 @@ impl TingError {
             TingError::TaskError(_) => "TaskError",
             TingError::EventError(_) => "EventError",
             TingError::ExternalError(_) => "ExternalError",
+            TingError::ExternalServiceError(_) => "ExternalServiceError",
         }
     }
 

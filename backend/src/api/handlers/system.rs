@@ -19,6 +19,27 @@ use axum::{
 use chrono::Utc;
 use std::path::PathBuf;
 use super::AppState;
+use serde_json::Value;
+
+/// Handler for GET /api/v1/system/check-update - Check for updates via backend proxy
+pub async fn check_update(
+    State(_state): State<AppState>,
+) -> Result<impl IntoResponse> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get("https://www.tingreader.cn/api/fpk/docker")
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| TingError::ExternalServiceError(format!("Failed to check update: {}", e)))?;
+
+    let update_info: Value = response
+        .json()
+        .await
+        .map_err(|e| TingError::ExternalServiceError(format!("Failed to parse update info: {}", e)))?;
+
+    Ok(Json(update_info))
+}
 
 /// Handler for GET /api/v1/tasks - List all tasks
 pub async fn list_tasks(
