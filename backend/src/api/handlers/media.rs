@@ -958,11 +958,11 @@ pub async fn stream_chapter(
         total_size
     };
     
-    let content_length = end.saturating_sub(start);
+    let _content_length = end.saturating_sub(start);
     
     // For local files, we need to limit the reader if a specific end was requested
-    if library.library_type == "local" && content_length < (total_size - start) {
-        reader = Box::new(reader.take(content_length));
+    if library.library_type == "local" && _content_length < (total_size - start) {
+        reader = Box::new(reader.take(_content_length));
     }
 
     // Convert AsyncRead to Stream
@@ -978,7 +978,7 @@ pub async fn stream_chapter(
             StatusCode::PARTIAL_CONTENT,
             [
                 (header::CONTENT_TYPE, mime_type),
-                (header::CONTENT_LENGTH, content_length.to_string()),
+                // (header::CONTENT_LENGTH, content_length.to_string()),
                 (header::CONTENT_RANGE, content_range),
                 (header::ACCEPT_RANGES, "bytes".to_string()),
                 (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".to_string()),
@@ -991,7 +991,7 @@ pub async fn stream_chapter(
             StatusCode::OK,
             [
                 (header::CONTENT_TYPE, mime_type),
-                (header::CONTENT_LENGTH, total_size.to_string()),
+                // (header::CONTENT_LENGTH, total_size.to_string()),
                 (header::ACCEPT_RANGES, "bytes".to_string()),
                 (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".to_string()),
                 ("Cross-Origin-Resource-Policy".parse().unwrap(), "cross-origin".to_string()),
