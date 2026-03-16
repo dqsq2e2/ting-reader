@@ -70,6 +70,8 @@ pub struct PluginInfo {
     pub failed_calls: u64,
     #[serde(default)]
     pub supported_extensions: Option<Vec<String>>,
+    #[serde(default)]
+    pub dependencies: Vec<PluginDependency>,
     pub error: Option<String>,
 }
 
@@ -265,6 +267,7 @@ impl PluginManager {
                 successful_calls: 0,
                 failed_calls: 0,
                 supported_extensions: entry.metadata.supported_extensions.clone(),
+                dependencies: entry.metadata.dependencies.clone(),
                 error,
             }
         }).collect()
@@ -851,6 +854,7 @@ impl PluginManager {
                     successful_calls: 0,
                     failed_calls: 0,
                     supported_extensions: entry.metadata.supported_extensions.clone(),
+                    dependencies: entry.metadata.dependencies.clone(),
                     error,
                 }
             })
@@ -899,6 +903,7 @@ impl PluginManager {
                     successful_calls: 0,
                     failed_calls: 0,
                     supported_extensions: entry.metadata.supported_extensions.clone(),
+                    dependencies: entry.metadata.dependencies.clone(),
                     error,
                 }
             })
