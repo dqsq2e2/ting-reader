@@ -100,12 +100,21 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       setThemeColor: (color) => set({ themeColor: color }),
 
       nextChapter: () => {
-        const { currentChapter, chapters } = get();
-        if (!currentChapter) return;
+        const { currentChapter, chapters, currentBook } = get();
+        if (!currentChapter || !currentBook) return;
+        
+        // 确保 chapters 数组不为空且包含当前章节
+        if (chapters.length === 0 || !chapters.some(c => c.id === currentChapter.id)) {
+          // 如果 chapters 数组为空或不包含当前章节，直接返回
+          // 这种情况通常发生在 PWA 恢复时，需要等待章节数据加载
+          console.warn('Chapters array is empty or does not contain current chapter, cannot proceed to next chapter');
+          return;
+        }
+        
         const index = chapters.findIndex(c => c.id === currentChapter.id);
         if (index < chapters.length - 1) {
           const nextChapter = chapters[index + 1];
-          get().playChapter(get().currentBook!, chapters, nextChapter);
+          get().playChapter(currentBook, chapters, nextChapter);
         }
       },
 

@@ -4,6 +4,7 @@ import { usePlayerStore } from '../store/playerStore';
 import { useAuthStore } from '../store/authStore';
 import apiClient from '../api/client';
 import { FastAverageColor } from 'fast-average-color';
+import type { Chapter } from '../types';
 import { 
   Play, 
   Pause, 
@@ -317,12 +318,32 @@ const Player: React.FC = () => {
     }).catch(err => console.error('获取设置失败', err));
   }, [setPlaybackSpeed, setVolume]);
 
+  // 对章节数据按 chapterIndex 排序的辅助函数
+  const sortChaptersByIndex = (chapters: Chapter[]) => {
+    return [...chapters].sort((a, b) => (a.chapterIndex || 0) - (b.chapterIndex || 0));
+  };
+
   // Fetch chapters for the current book
   useEffect(() => {
     if (currentBook?.id) {
       apiClient.get(`/api/books/${currentBook.id}/chapters`).then(res => {
-        setChapters(res.data);
+        const sortedChapters = sortChaptersByIndex(res.data);
+        setChapters(sortedChapters);
         setCurrentGroupIndex(0); // Reset group index when book changes
+        // 更新 store 中的 chapters 数据，确保 nextChapter 函数能正确工作
+        usePlayerStore.setState({ chapters: sortedChapters });
+      }).catch(err => console.error('获取章节失败', err));
+    }
+  }, [currentBook?.id]);
+
+  // 当组件加载时，如果 currentBook 存在但 store 中的 chapters 数组为空，主动获取章节数据
+  useEffect(() => {
+    const storeChapters = usePlayerStore.getState().chapters;
+    if (currentBook?.id && storeChapters.length === 0) {
+      apiClient.get(`/api/books/${currentBook.id}/chapters`).then(res => {
+        const sortedChapters = sortChaptersByIndex(res.data);
+        setChapters(sortedChapters);
+        usePlayerStore.setState({ chapters: sortedChapters });
       }).catch(err => console.error('获取章节失败', err));
     }
   }, [currentBook?.id]);
