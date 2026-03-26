@@ -282,8 +282,9 @@ const Player: React.FC = () => {
   }, [currentChapters]);
 
   const [sleepTimer, setSleepTimer] = useState<number | null>(null);
+  const sleepTimerEndTimeRef = useRef<number | null>(null);
   const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // const sleepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sleepTimerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerMenuRef = useRef<HTMLDivElement>(null);
 
   const [error, setError] = useState<string | null>(null);
@@ -513,16 +514,29 @@ const Player: React.FC = () => {
 
   // Handle Sleep Timer Countdown
   useEffect(() => {
-    if (sleepTimer === null || sleepTimer <= 0 || !isPlaying) return;
+    if (sleepTimer === null || sleepTimer <= 0 || !isPlaying || !sleepTimerEndTimeRef.current) return;
 
+    // Clear any existing interval
+    if (sleepTimerIntervalRef.current) {
+      clearInterval(sleepTimerIntervalRef.current);
+    }
+
+    // Set up new interval to update remaining time based on end time
     const interval = setInterval(() => {
-      setSleepTimer(prev => {
-        if (prev === null || prev <= 1) return 0;
-        return prev - 1;
-      });
+      if (sleepTimerEndTimeRef.current) {
+        const remaining = Math.max(0, Math.floor((sleepTimerEndTimeRef.current - Date.now()) / 1000));
+        setSleepTimer(remaining);
+      }
     }, 1000);
 
-    return () => clearInterval(interval);
+    sleepTimerIntervalRef.current = interval;
+
+    return () => {
+      if (sleepTimerIntervalRef.current) {
+        clearInterval(sleepTimerIntervalRef.current);
+        sleepTimerIntervalRef.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sleepTimer === null, isPlaying]);
 
@@ -531,6 +545,12 @@ const Player: React.FC = () => {
     if (sleepTimer === 0) {
       if (isPlaying) {
         togglePlay();
+      }
+      // Reset sleep timer references
+      sleepTimerEndTimeRef.current = null;
+      if (sleepTimerIntervalRef.current) {
+        clearInterval(sleepTimerIntervalRef.current);
+        sleepTimerIntervalRef.current = null;
       }
       setTimeout(() => setSleepTimer(null), 0);
     }
@@ -1408,7 +1428,10 @@ const Player: React.FC = () => {
                           <button
                             key={mins}
                             onClick={() => {
-                              setSleepTimer(mins * 60);
+                              const duration = mins * 60;
+                              const endTime = Date.now() + duration * 1000;
+                              sleepTimerEndTimeRef.current = endTime;
+                              setSleepTimer(duration);
                               setShowSleepTimer(false);
                             }}
                             className="px-3 py-2 text-xs sm:text-sm rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-600"
@@ -1436,7 +1459,10 @@ const Player: React.FC = () => {
                           onClick={() => {
                             const mins = parseInt(customMinutes);
                             if (mins > 0) {
-                              setSleepTimer(mins * 60);
+                              const duration = mins * 60;
+                              const endTime = Date.now() + duration * 1000;
+                              sleepTimerEndTimeRef.current = endTime;
+                              setSleepTimer(duration);
                               setShowSleepTimer(false);
                               setCustomMinutes('');
                             }
@@ -1450,6 +1476,11 @@ const Player: React.FC = () => {
                       <button
                         onClick={() => {
                           setSleepTimer(null);
+                          sleepTimerEndTimeRef.current = null;
+                          if (sleepTimerIntervalRef.current) {
+                            clearInterval(sleepTimerIntervalRef.current);
+                            sleepTimerIntervalRef.current = null;
+                          }
                           setShowSleepTimer(false);
                         }}
                         className="mt-2 px-4 py-2 text-xs sm:text-sm font-bold rounded-xl bg-red-50 dark:bg-red-900/20 text-red-500 transition-colors"
