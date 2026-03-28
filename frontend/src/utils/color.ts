@@ -61,3 +61,8 @@ export const isLight = (color: string | undefined): boolean => {
   if (!color) return false;
   return getLuminance(color) > 0.65;
 };
+
+export const isTooLight = (color: string | undefined): boolean => {
+  if (!color) return false;
+  return getLuminance(color) > 0.9;
+};

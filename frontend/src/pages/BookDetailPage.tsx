@@ -31,7 +31,7 @@ import {
 import { getCoverUrl } from '../utils/image';
 import { useAuthStore } from '../store/authStore';
 import ExpandableTitle from '../components/ExpandableTitle';
-import { setAlpha, toSolidColor, isLight } from '../utils/color';
+import { setAlpha, toSolidColor, isLight, isTooLight } from '../utils/color';
 
 const BookDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -431,7 +431,7 @@ const BookDetailPage: React.FC = () => {
 
   const displayThemeColor = book ? (book.themeColor || themeColor) : themeColor;
   // If the color is too light (close to white), we ignore it and use default to ensure text readability
-  const effectiveThemeColor = displayThemeColor && !isLight(displayThemeColor) ? displayThemeColor : undefined;
+  const effectiveThemeColor = displayThemeColor && !isTooLight(displayThemeColor) ? displayThemeColor : undefined;
 
   const displayCoverUrl = book ? book.coverUrl : undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -556,7 +556,8 @@ const BookDetailPage: React.FC = () => {
                 className="w-full flex items-center justify-center gap-2 px-5 sm:px-8 py-3.5 sm:py-4 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-2xl shadow-xl shadow-primary-500/30 transition-all active:scale-95 group"
                 style={effectiveThemeColor ? { 
                   backgroundColor: toSolidColor(effectiveThemeColor),
-                  boxShadow: `0 10px 20px -5px ${setAlpha(effectiveThemeColor, 0.3)}`
+                  boxShadow: `0 10px 20px -5px ${setAlpha(effectiveThemeColor, 0.3)}`,
+                  color: isLight(effectiveThemeColor) ? '#475569' : '#ffffff'
                 } : {}}
               >
                 <Play size={18} fill="currentColor" />
@@ -714,7 +715,8 @@ const BookDetailPage: React.FC = () => {
                 }`}
                 style={currentGroupIndex === index && effectiveThemeColor ? { 
                   backgroundColor: toSolidColor(effectiveThemeColor),
-                  borderColor: toSolidColor(effectiveThemeColor)
+                  borderColor: toSolidColor(effectiveThemeColor),
+                  color: isLight(effectiveThemeColor) ? '#475569' : '#ffffff'
                 } : {}}
               >
                 第 {group.start}-{group.end} 章
@@ -758,7 +760,10 @@ const BookDetailPage: React.FC = () => {
                     className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center font-bold text-base sm:text-lg shrink-0 ${
                       isActive ? `text-white ${!effectiveThemeColor ? 'bg-primary-600' : ''}` : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
                     }`}
-                    style={isActive && effectiveThemeColor ? { backgroundColor: toSolidColor(effectiveThemeColor) } : {}}
+                    style={isActive && effectiveThemeColor ? { 
+                      backgroundColor: toSolidColor(effectiveThemeColor),
+                      color: isLight(effectiveThemeColor) ? '#475569' : '#ffffff'
+                    } : {}}
                   >
                     {chapter.chapter_index || (actualIndex + 1)}
                   </div>

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Book, Chapter } from '../types';
-import { isLight } from '../utils/color';
+import { isTooLight } from '../utils/color';
 
 interface PlayerState {
   currentBook: Book | null;
@@ -78,7 +78,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           currentTime: chapter.progressPosition || 0
         };
 
-        if (book.themeColor && !isLight(book.themeColor)) {
+        if (book.themeColor && !isTooLight(book.themeColor)) {
           newState.themeColor = book.themeColor;
         } else {
           newState.themeColor = '#F2EDE4'; // Reset to default
@@ -100,12 +100,21 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       setThemeColor: (color) => set({ themeColor: color }),
 
       nextChapter: () => {
-        const { currentChapter, chapters } = get();
-        if (!currentChapter) return;
+        const { currentChapter, chapters, currentBook } = get();
+        if (!currentChapter || !currentBook) return;
+        
+        // 确保 chapters 数组不为空且包含当前章节
+        if (chapters.length === 0 || !chapters.some(c => c.id === currentChapter.id)) {
+          // 如果 chapters 数组为空或不包含当前章节，直接返回
+          // 这种情况通常发生在 PWA 恢复时，需要等待章节数据加载
+          console.warn('Chapters array is empty or does not contain current chapter, cannot proceed to next chapter');
+          return;
+        }
+        
         const index = chapters.findIndex(c => c.id === currentChapter.id);
-        if (index < chapters.length - 1) {
+        if (index !== -1 && index < chapters.length - 1) {
           const nextChapter = chapters[index + 1];
-          get().playChapter(get().currentBook!, chapters, nextChapter);
+          get().playChapter(currentBook, chapters, nextChapter);
         }
       },
 
@@ -128,7 +137,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           currentTime: resumePosition ?? (chapter.progressPosition || 0)
         };
         
-        if (book.themeColor && !isLight(book.themeColor)) {
+        if (book.themeColor && !isTooLight(book.themeColor)) {
           newState.themeColor = book.themeColor;
         } else {
           newState.themeColor = '#F2EDE4'; // Reset to default
