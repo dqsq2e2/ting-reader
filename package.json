@@ -8,8 +8,5 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/coolsjc/ting-reader"
-  },
-  "workspaces": [
-    "frontend"
-  ]
+  }
 }
