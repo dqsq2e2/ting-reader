@@ -413,6 +413,13 @@ const Player: React.FC = () => {
             console.log('播放承诺已中止 (正常)');
             return;
           }
+          if (err.name === 'NotAllowedError') {
+            // Safari/iOS may reject play() when it isn't treated as a direct user gesture.
+            setIsPlaying(false);
+            setError('浏览器阻止了自动播放，请再次点击播放按钮');
+            console.warn('播放被浏览器策略阻止', err);
+            return;
+          }
           console.error('播放失败', err);
           // Don't set user-visible error yet, let onError handler try to recover first
           // setError('播放失败，可能是文件格式不支持或网络错误');
@@ -832,12 +839,15 @@ const Player: React.FC = () => {
         ref={audioRef}
         src={getStreamUrl(currentChapter.id)}
         crossOrigin="anonymous"
+        playsInline
+        preload="metadata"
         onTimeUpdate={handleTimeUpdate}
         onProgress={handleProgress}
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleEnded}
         onPlay={() => {
           setIsPlaying(true);
+          setError(null);
           if (audioRef.current) {
             audioRef.current.playbackRate = playbackSpeed;
           }

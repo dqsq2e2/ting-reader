@@ -28,6 +28,26 @@ pub struct StreamQuery {
     pub seek: Option<String>,
 }
 
+fn stream_mime_type_from_path(path: &str) -> String {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    match ext.as_str() {
+        // WebKit prefers audio/mp4 for m4a/mp4 audio streams.
+        "m4a" | "mp4" => "audio/mp4".to_string(),
+        "mp3" => "audio/mpeg".to_string(),
+        "aac" => "audio/aac".to_string(),
+        "flac" => "audio/flac".to_string(),
+        "ogg" => "audio/ogg".to_string(),
+        "opus" => "audio/opus".to_string(),
+        "wav" => "audio/wav".to_string(),
+        _ => mime_guess::from_path(path).first_or_octet_stream().to_string(),
+    }
+}
+
 /// Handler for POST /api/cache/:chapterId - Cache a chapter
 pub async fn cache_chapter(
     State(state): State<AppState>,
@@ -710,7 +730,7 @@ pub async fn stream_chapter(
                 drop(cache);
                 
                 let file_size = data.len() as u64;
-                let mime_type = mime_guess::from_path(&chapter.path).first_or_octet_stream().to_string();
+                let mime_type = stream_mime_type_from_path(&chapter.path);
                 
                 let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
                 
@@ -769,7 +789,7 @@ pub async fn stream_chapter(
                 // This is handled by the `if cache_path.exists()` checks in the plugin block
             } else {
                 let file_size = tokio::fs::metadata(&cache_path).await?.len();
-                let mime_type = mime_guess::from_path(&chapter.path).first_or_octet_stream().to_string();
+                let mime_type = stream_mime_type_from_path(&chapter.path);
                 
                 let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
                 if let Some(range_str) = range_header {
@@ -907,7 +927,7 @@ pub async fn stream_chapter(
     let stream = ReaderStream::new(reader);
     let body = Body::from_stream(stream);
 
-    let mime_type = mime_guess::from_path(&chapter.path).first_or_octet_stream().to_string();
+    let mime_type = stream_mime_type_from_path(&chapter.path);
 
     if range_header.is_some() {
         let content_range = format!("bytes {}-{}/{}", start, end.saturating_sub(1), total_size);
