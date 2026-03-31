@@ -312,6 +312,14 @@ const Player: React.FC = () => {
   const isInitialLoadRef = useRef(true);
   const preloadAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  const tryTranscodeFallback = () => {
+    if (shouldTranscode || retryCount >= 3) return;
+    setError('检测到浏览器兼容性问题，正在切换兼容音频流...');
+    setShouldTranscode(true);
+    setRetryCount(prev => prev + 1);
+    isInitialLoadRef.current = true;
+  };
+
   // Fetch settings for auto_preload and user preferences
   useEffect(() => {
     apiClient.get('/api/settings').then(res => {
@@ -430,6 +438,35 @@ const Player: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying, currentChapter?.id, retryCount, shouldTranscode]);
+
+  // Some browsers may report "playing" while decode hasn't actually advanced.
+  // Detect "stuck at start" by checking that currentTime does not move after a delay,
+  // while enough data is already buffered and media is in a playable readyState.
+  useEffect(() => {
+    if (!isPlaying || !currentChapter || !audioRef.current) return;
+
+    const initialTime = audioRef.current.currentTime || 0;
+    const timer = setTimeout(() => {
+      const audio = audioRef.current;
+      if (!audio || audio.paused || audio.seeking || audio.ended) return;
+      if (audio.error) return;
+
+      const time = audio.currentTime || 0;
+      const progressed = time - initialTime;
+      let bufferedEnd = 0;
+      if (audio.buffered.length > 0) {
+        bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
+      }
+
+      const readyForDecode = audio.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA;
+      const decodeStuck = time < 0.05 && progressed < 0.03 && bufferedEnd > 1.5 && readyForDecode;
+      if (decodeStuck) {
+        tryTranscodeFallback();
+      }
+    }, 4500);
+
+    return () => clearTimeout(timer);
+  }, [isPlaying, currentChapter?.id, shouldTranscode, retryCount]);
 
   // Preload and Server-side Cache next chapter logic
   useEffect(() => {
@@ -876,9 +913,7 @@ const Player: React.FC = () => {
             // Auto retry on network (2), decode error (3) or source not supported (4)
             // We include network error (2) in retry logic just in case, but transcode mainly fixes 3 & 4
             if (retryCount < 3) {
-                 console.log(`Playback error ${audio.error.code}, 使用转码重试 (${retryCount + 1}/3)...`);
-                 setShouldTranscode(true);
-                 setRetryCount(prev => prev + 1);
+                 tryTranscodeFallback();
                  return;
             }
             console.error('音频元素错误', audio.error);
@@ -886,9 +921,7 @@ const Player: React.FC = () => {
             // Even if audio.error is null, if we have an error event and haven't retried max times, try transcoding
             // This handles edge cases where browser doesn't populate error object properly
             if (retryCount < 3) {
-                console.log('未知的音频错误，尝试转码重试...');
-                setShouldTranscode(true);
-                setRetryCount(prev => prev + 1);
+                tryTranscodeFallback();
                 return;
             }
             console.error('音频元素错误 (未知)', e);
