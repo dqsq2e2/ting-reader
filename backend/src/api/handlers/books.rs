@@ -1200,8 +1200,14 @@ pub async fn apply_scrape_result(
         if let Some(url) = &detail.cover_url { 
             book.cover_url = Some(url.clone());
             
+            // Handle referer for internal processing if present
+            let mut internal_url = url.clone();
+            if let Some(idx) = internal_url.find("#referer=") {
+                internal_url = internal_url[..idx].to_string();
+            }
+
             // Recalculate theme color for new cover
-            match crate::core::color::calculate_theme_color(url).await {
+            match crate::core::color::calculate_theme_color(&url).await {
                 Ok(Some(color)) => {
                     tracing::info!("更新了书籍 {} 的主题颜色: {}", book.id, color);
                     book.theme_color = Some(color);
@@ -1212,7 +1218,7 @@ pub async fn apply_scrape_result(
                          if library.library_type == "webdav" {
                              if let Ok((mut reader, _)) = state.storage_service.get_webdav_reader(
                                  &library, 
-                                 url, 
+                                 &internal_url, 
                                  None, 
                                  state.encryption_key.as_ref()
                              ).await {

@@ -66,16 +66,33 @@ pub async fn calculate_theme_color(url_or_path: &str) -> Result<Option<String>> 
     if url_or_path.starts_with("embedded://") {
         return Ok(None);
     }
+    
+    // Check if we need to remove hash referer (since this might be called with the original url from DB)
+    let mut clean_url_or_path = url_or_path.to_string();
+    let mut referer = "".to_string();
+    if let Some(idx) = clean_url_or_path.find("#referer=") {
+        referer = clean_url_or_path[idx + 9..].to_string();
+        clean_url_or_path = clean_url_or_path[..idx].to_string();
+    }
 
     // 1. Get image bytes
-    let bytes = if url_or_path.starts_with("http://") || url_or_path.starts_with("https://") || url_or_path.starts_with("//") {
-        let fetch_url = if url_or_path.starts_with("//") {
-            format!("https:{}", url_or_path)
+    let bytes = if clean_url_or_path.starts_with("http://") || clean_url_or_path.starts_with("https://") || clean_url_or_path.starts_with("//") {
+        let fetch_url = if clean_url_or_path.starts_with("//") {
+            format!("https:{}", clean_url_or_path)
         } else {
-            url_or_path.to_string()
+            clean_url_or_path.to_string()
         };
+
         // Fetch from URL
-        match reqwest::get(&fetch_url).await {
+        let client = reqwest::Client::new();
+        let mut req = client.get(&fetch_url)
+            .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+            
+        if !referer.is_empty() {
+            req = req.header(reqwest::header::REFERER, referer);
+        }
+
+        match req.send().await {
             Ok(response) => {
                 match response.bytes().await {
                     Ok(b) => b.to_vec(),
@@ -118,15 +135,30 @@ pub async fn calculate_theme_color_with_client(url_or_path: &str, client: &reqwe
         return Ok(None);
     }
 
+    let mut clean_url_or_path = url_or_path.to_string();
+    let mut referer = "".to_string();
+    if let Some(idx) = clean_url_or_path.find("#referer=") {
+        referer = clean_url_or_path[idx + 9..].to_string();
+        clean_url_or_path = clean_url_or_path[..idx].to_string();
+    }
+
     // 1. Get image bytes
-    let bytes = if url_or_path.starts_with("http://") || url_or_path.starts_with("https://") || url_or_path.starts_with("//") {
-        let fetch_url = if url_or_path.starts_with("//") {
-            format!("https:{}", url_or_path)
+    let bytes = if clean_url_or_path.starts_with("http://") || clean_url_or_path.starts_with("https://") || clean_url_or_path.starts_with("//") {
+        let fetch_url = if clean_url_or_path.starts_with("//") {
+            format!("https:{}", clean_url_or_path)
         } else {
-            url_or_path.to_string()
+            clean_url_or_path.to_string()
         };
+
         // Fetch from URL using provided client
-        match client.get(&fetch_url).send().await {
+        let mut req = client.get(&fetch_url)
+            .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+
+        if !referer.is_empty() {
+            req = req.header(reqwest::header::REFERER, referer);
+        }
+
+        match req.send().await {
             Ok(response) => {
                 match response.bytes().await {
                     Ok(b) => b.to_vec(),

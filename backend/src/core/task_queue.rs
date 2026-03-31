@@ -1077,17 +1077,36 @@ impl TaskQueue {
                 let temp_dir = self.temp_dir.join("ting-reader-covers");
                 if !temp_dir.exists() { tokio::fs::create_dir_all(&temp_dir).await.map_err(crate::core::error::TingError::IoError)?; }
                 
-                let ext = std::path::Path::new(url).extension().and_then(|e| e.to_str()).unwrap_or("jpg");
+                let mut fetch_url = url.clone();
+                let mut referer = "".to_string();
+                if let Some(idx) = fetch_url.find("#referer=") {
+                    referer = fetch_url[idx + 9..].to_string();
+                    fetch_url = fetch_url[..idx].to_string();
+                }
+
+                let ext = std::path::Path::new(&fetch_url).extension().and_then(|e| e.to_str()).unwrap_or("jpg");
                 let file_name = format!("{}.{}", Uuid::new_v4(), ext);
                 let path = temp_dir.join(file_name);
                 
                 // Download
-                let bytes = reqwest::get(url).await.map_err(|e| crate::core::error::TingError::NetworkError(e.to_string()))?
-                    .bytes().await.map_err(|e| crate::core::error::TingError::NetworkError(e.to_string()))?;
-                
-                tokio::fs::write(&path, bytes).await.map_err(crate::core::error::TingError::IoError)?;
-                temp_cover_path = Some(path.clone());
-                cover_path_str = Some(path.to_string_lossy().to_string());
+                let client = reqwest::Client::new();
+                let mut req = client.get(&fetch_url)
+                    .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+                if !referer.is_empty() {
+                    req = req.header(reqwest::header::REFERER, referer);
+                }
+
+                match req.send().await {
+                    Ok(resp) => {
+                        if let Ok(bytes) = resp.bytes().await {
+                            if tokio::fs::write(&path, bytes).await.is_ok() {
+                                temp_cover_path = Some(path.clone());
+                                cover_path_str = Some(path.to_string_lossy().to_string());
+                            }
+                        }
+                    },
+                    Err(e) => warn!("Failed to download cover for metadata writing: {}", e),
+                }
             } else {
                 // Local path
                 let path = std::path::Path::new(url);
