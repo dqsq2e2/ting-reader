@@ -251,6 +251,57 @@ pub async fn proxy_cover(
     if params.path == "embedded://first-chapter" {
         return Err(TingError::NotFound("Embedded cover extraction not yet implemented".to_string()));
     }
+
+    // 如果是外部 URL（包含 http），并且带有 hash referer (由前端编码后传递过来的)
+    if params.path.starts_with("http") {
+        let mut target_url = params.path.clone();
+        let mut referer = "".to_string();
+
+        // 尝试解析 #referer=
+        if let Some(idx) = target_url.find("#referer=") {
+            referer = target_url[idx + 9..].to_string();
+            target_url = target_url[..idx].to_string();
+        }
+
+        tracing::info!("代理外部图片请求: {}, referer: {}", target_url, referer);
+
+        let client = reqwest::Client::new();
+        let mut req = client.get(&target_url)
+            .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+
+        if !referer.is_empty() {
+            req = req.header(reqwest::header::REFERER, referer);
+        }
+
+        match req.send().await {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    let content_type = resp.headers().get(reqwest::header::CONTENT_TYPE)
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("application/octet-stream")
+                        .to_string();
+                    
+                    let bytes = resp.bytes().await.map_err(|e| TingError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+                    
+                    return Ok((
+                        StatusCode::OK,
+                        [
+                            (header::CONTENT_TYPE, content_type),
+                            (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".to_string()),
+                            (header::CACHE_CONTROL, "public, max-age=31536000".to_string()),
+                            ("Cross-Origin-Resource-Policy".parse().unwrap(), "cross-origin".to_string()),
+                        ],
+                        bytes.to_vec(),
+                    ).into_response());
+                } else {
+                    return Err(TingError::NotFound(format!("Failed to fetch external cover: HTTP {}", resp.status())));
+                }
+            }
+            Err(e) => {
+                return Err(TingError::NotFound(format!("Failed to fetch external cover: {}", e)));
+            }
+        }
+    }
     
     // Normalize path separators (Windows compatibility)
     let normalized_path = params.path.replace('\\', "/");
