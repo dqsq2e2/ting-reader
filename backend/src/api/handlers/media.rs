@@ -351,7 +351,7 @@ pub async fn proxy_cover(
             ("Cross-Origin-Resource-Policy".parse().unwrap(), "cross-origin".to_string()),
         ],
         image_data,
-    ))
+    ).into_response())
 }
 
 /// Handler for GET /api/stream/:chapterId - Stream chapter audio
