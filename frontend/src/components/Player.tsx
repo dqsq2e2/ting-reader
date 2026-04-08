@@ -715,7 +715,8 @@ const Player: React.FC = () => {
         const diff = Math.abs(browserDuration - (currentChapter.duration || 0));
         if (diff > 2) {
           console.log(`同步准确的持续时间: ${currentChapter.title}: ${browserDuration}s`);
-          apiClient.patch(`/api/chapters/${currentChapter.id}`, { duration: browserDuration })
+          // Convert to integer (round to nearest second)
+          apiClient.patch(`/api/chapters/${currentChapter.id}`, { duration: Math.round(browserDuration) })
             .catch(err => console.error('同步持续时间失败', err));
         }
       }
