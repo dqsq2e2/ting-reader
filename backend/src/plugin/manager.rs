@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::time::Duration;
+use tokio::sync::{RwLock, Semaphore};
 use crate::core::error::{Result, TingError};
 use crate::plugin::types::*;
 use crate::plugin::scraper::ScraperPlugin;
@@ -121,6 +122,8 @@ pub struct PluginManager {
     wasm_runtime: Arc<WasmRuntime>,
     http_client: reqwest::Client,
     _event_subscribers: Arc<RwLock<Vec<Box<dyn Fn(PluginStateEvent) + Send + Sync>>>>,
+    /// Semaphore to limit concurrent plugin loading (防止资源耗尽)
+    load_semaphore: Arc<Semaphore>,
 }
 
 impl PluginManager {
@@ -139,6 +142,8 @@ impl PluginManager {
             wasm_runtime,
             http_client,
             _event_subscribers: Arc::new(RwLock::new(Vec::new())),
+            // 限制同时加载2个插件，防止资源耗尽
+            load_semaphore: Arc::new(Semaphore::new(2)),
         })
     }
 
@@ -275,6 +280,12 @@ impl PluginManager {
 
     /// Load a plugin from a directory
     pub async fn load_plugin(&self, plugin_path: &Path) -> Result<PluginId> {
+        // 获取信号量许可，限制并发加载
+        let _permit = self.load_semaphore.acquire().await
+            .map_err(|e| TingError::PluginLoadError(format!("Failed to acquire load permit: {}", e)))?;
+        
+        info!("Acquired plugin load permit for: {}", plugin_path.display());
+        
         let metadata = self.read_plugin_metadata(plugin_path)?;
         let plugin_id = metadata.instance_id();
         
@@ -284,19 +295,33 @@ impl PluginManager {
         {
             let registry = self.registry.read().await;
             if registry.contains_key(&plugin_id) {
+                info!("Plugin {} already loaded, skipping", plugin_id);
                 return Ok(plugin_id);
             }
         }
         
-        // Load plugin instance
-        let (instance, state, error) = match self.load_plugin_instance(plugin_path, &metadata).await {
-            Ok(inst) => (inst, PluginState::Loaded, None),
-            Err(e) => {
+        // Load plugin instance with timeout
+        let load_future = self.load_plugin_instance(plugin_path, &metadata);
+        let (instance, state, error) = match tokio::time::timeout(
+            Duration::from_secs(30),
+            load_future
+        ).await {
+            Ok(Ok(inst)) => (inst, PluginState::Loaded, None),
+            Ok(Err(e)) => {
                 error!("Failed to load plugin {}: {}", plugin_id, e);
                 (
                     Arc::new(FailedPlugin::new(metadata.clone(), e.to_string())) as Arc<dyn Plugin>,
                     PluginState::Failed,
                     Some(e.to_string())
+                )
+            }
+            Err(_) => {
+                let timeout_err = format!("Plugin load timeout after 30s");
+                error!("{} for plugin {}", timeout_err, plugin_id);
+                (
+                    Arc::new(FailedPlugin::new(metadata.clone(), timeout_err.clone())) as Arc<dyn Plugin>,
+                    PluginState::Failed,
+                    Some(timeout_err)
                 )
             }
         };
@@ -318,9 +343,18 @@ impl PluginManager {
         
         // Initialize plugin if not failed
         if state != PluginState::Failed {
-            self.initialize_plugin(&plugin_id).await?;
+            if let Err(e) = self.initialize_plugin(&plugin_id).await {
+                error!("Failed to initialize plugin {}: {}", plugin_id, e);
+                // Mark as failed
+                let mut registry = self.registry.write().await;
+                if let Some(entry) = registry.get_mut(&plugin_id) {
+                    entry.state = PluginState::Failed;
+                    entry.load_error = Some(e.to_string());
+                }
+            }
         }
         
+        info!("Plugin load completed for: {} (permit released)", plugin_id);
         Ok(plugin_id)
     }
 

@@ -952,6 +952,18 @@ impl LibraryScanner {
     }
 
     fn extract_and_save_cover(&self, audio_path: &Path, book_dir: &Path) -> Option<String> {
+        // Check if cover file already exists in the directory
+        // Common cover file patterns: cover.jpg, cover.png, cover.webp, cover.gif
+        let cover_extensions = ["jpg", "jpeg", "png", "webp", "gif"];
+        for ext in &cover_extensions {
+            let cover_path = book_dir.join(format!("cover.{}", ext));
+            if cover_path.exists() {
+                info!("Cover file already exists at {:?}, skipping extraction", cover_path);
+                return Some(cover_path.to_string_lossy().replace('\\', "/"));
+            }
+        }
+        
+        // No existing cover found, proceed with extraction
         // We use id3 library here, which mainly supports MP3 (ID3v2 tags).
         // For M4A, id3 library might fail. We should check if we can extract M4A covers too.
         // The id3 crate only supports ID3v1 and ID3v2 tags, not MP4/M4A metadata.

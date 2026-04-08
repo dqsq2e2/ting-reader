@@ -1,4 +1,5 @@
 use std::thread;
+use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use serde_json::Value;
 use tracing::{info, error};
@@ -49,112 +50,164 @@ impl JavaScriptPluginWrapper {
         // Create channel for communication
         let (tx, mut rx) = mpsc::channel::<JsCommand>(32);
         
+        // Create error channel to detect early failures
+        let (error_tx, mut error_rx) = oneshot::channel::<String>();
+        
         let plugin_id_clone = plugin_id.clone();
+        let plugin_id_clone2 = plugin_id.clone(); // For panic handler
         let _metadata_clone = metadata.clone();
         
         // Spawn dedicated thread for this plugin
-        thread::Builder::new()
+        let thread_result = thread::Builder::new()
             .name(format!("js-plugin-{}", plugin_id))
             .spawn(move || {
                 info!("Starting JS worker thread for {}", plugin_id_clone);
                 
-                // Create single-threaded Tokio runtime
-                let rt = match tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build() 
-                {
-                    Ok(rt) => rt,
-                    Err(e) => {
-                        error!("Failed to create Tokio runtime for {}: {}", plugin_id_clone, e);
-                        return;
-                    }
-                };
-                
-                // Run the local task set
-                let local = tokio::task::LocalSet::new();
-                
-                local.block_on(&rt, async move {
-                    // Create executor inside the thread
-                    // We need to recreate the loader logic or pass the loader? 
-                    // Loader is not Send? check js_plugin.rs.
-                    // JavaScriptPluginLoader contains PathBuf and PluginMetadata, which are Send.
-                    // So we can pass the loader or just reconstruct the executor.
-                    // But create_executor is a method on Loader.
-                    // Let's assume we can just use the dir and metadata.
-                    
-                    // Actually, let's use the code from create_executor directly or instantiate it.
-                    // But `JavaScriptPluginLoader` is not passed here, we passed `plugin_dir` and `metadata`.
-                    // We can reconstruct a loader or just modify `js_plugin.rs` to allow creating executor from dir+metadata.
-                    // Or just use `JavaScriptPluginLoader::new(plugin_dir)` again inside the thread.
-                    
-                    let loader = match JavaScriptPluginLoader::new(plugin_dir) {
-                        Ok(l) => l,
+                // Wrap entire thread logic to catch panics
+                let thread_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    // Create single-threaded Tokio runtime
+                    let rt = match tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build() 
+                    {
+                        Ok(rt) => rt,
                         Err(e) => {
-                            error!("Failed to initialize JS loader for {}: {}", plugin_id_clone, e);
+                            let err_msg = format!("Failed to create Tokio runtime: {}", e);
+                            error!("{} for {}", err_msg, plugin_id_clone);
+                            let _ = error_tx.send(err_msg);
                             return;
                         }
                     };
                     
-                    let mut executor = match loader.create_executor() {
-                        Ok(e) => e,
-                        Err(e) => {
-                            error!("Failed to create JS executor for {}: {}", plugin_id_clone, e);
-                            return;
+                    // Run the local task set
+                    let local = tokio::task::LocalSet::new();
+                    
+                    local.block_on(&rt, async move {
+                        // Create loader
+                        let loader = match JavaScriptPluginLoader::new(plugin_dir) {
+                            Ok(l) => l,
+                            Err(e) => {
+                                let err_msg = format!("Failed to initialize JS loader: {}", e);
+                                error!("{} for {}", err_msg, plugin_id_clone);
+                                let _ = error_tx.send(err_msg);
+                                return;
+                            }
+                        };
+                        
+                        // Create executor
+                        let mut executor = match loader.create_executor() {
+                            Ok(e) => e,
+                            Err(e) => {
+                                let err_msg = format!("Failed to create JS executor: {}", e);
+                                error!("{} for {}", err_msg, plugin_id_clone);
+                                let _ = error_tx.send(err_msg);
+                                return;
+                            }
+                        };
+                        
+                        // Load the module with timeout
+                        match tokio::time::timeout(
+                            Duration::from_secs(30),
+                            executor.load_module()
+                        ).await {
+                            Ok(Ok(())) => {
+                                info!("JS executor ready for {}", plugin_id_clone);
+                                // Signal success by dropping error_tx without sending
+                                drop(error_tx);
+                            }
+                            Ok(Err(e)) => {
+                                let err_msg = format!("Failed to load JS module: {}", e);
+                                error!("{} for {}", err_msg, plugin_id_clone);
+                                let _ = error_tx.send(err_msg);
+                                return;
+                            }
+                            Err(_) => {
+                                let err_msg = "Module load timeout after 30s".to_string();
+                                error!("{} for {}", err_msg, plugin_id_clone);
+                                let _ = error_tx.send(err_msg);
+                                return;
+                            }
                         }
+                        
+                        // Message loop
+                        while let Some(cmd) = rx.recv().await {
+                            match cmd {
+                                JsCommand::Initialize { context, resp } => {
+                                    let config = context.config.clone();
+                                    let data_dir = context.data_dir.clone();
+                                    
+                                    let result = executor.initialize(config, data_dir).await
+                                        .map_err(|e| TingError::PluginExecutionError(e.to_string()));
+                                        
+                                    let _ = resp.send(result);
+                                }
+                                JsCommand::Shutdown { resp } => {
+                                    let result = executor.shutdown()
+                                        .map_err(|e| TingError::PluginExecutionError(e.to_string()));
+                                        
+                                    let _ = resp.send(result);
+                                    break; 
+                                }
+                                JsCommand::CallFunction { name, args, resp } => {
+                                    let result = executor.call_function::<Value, Value>(&name, args).await
+                                        .map_err(|e| TingError::PluginExecutionError(e.to_string()));
+                                        
+                                    let _ = resp.send(result);
+                                }
+                                JsCommand::GarbageCollect { resp } => {
+                                    let result = executor.garbage_collect()
+                                        .map_err(|e| TingError::PluginExecutionError(e.to_string()));
+                                        
+                                    let _ = resp.send(result);
+                                }
+                            }
+                        }
+                        
+                        info!("JS worker thread for {} exiting normally", plugin_id_clone);
+                    });
+                }));
+                
+                // Handle panic
+                if let Err(panic_err) = thread_result {
+                    let panic_msg = if let Some(s) = panic_err.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = panic_err.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "Unknown panic".to_string()
                     };
-                    
-                    // Load the module
-                    if let Err(e) = executor.load_module().await {
-                         error!("Failed to load JS module for {}: {}", plugin_id_clone, e);
-                         return;
+                    error!("JS worker thread panicked for {}: {}", plugin_id_clone2, panic_msg);
+                }
+            });
+        
+        // Check if thread spawn failed
+        thread_result.map_err(|e| TingError::PluginLoadError(format!("Failed to spawn thread: {}", e)))?;
+        
+        // Wait briefly to check for early initialization errors
+        let init_check = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            error_rx.try_recv()
+        });
+        
+        // Block on the check (this is acceptable since it's very short)
+        match init_check.join() {
+            Ok(recv_result) => {
+                match recv_result {
+                    Ok(err_msg) => {
+                        // Early error detected
+                        return Err(TingError::PluginLoadError(format!("Plugin initialization failed: {}", err_msg)));
                     }
-                    
-                    info!("JS executor ready for {}", plugin_id_clone);
-                    
-                    // Message loop
-                    while let Some(cmd) = rx.recv().await {
-                        match cmd {
-                            JsCommand::Initialize { context, resp } => {
-                                // Convert context to Value and data_dir
-                                let config = context.config.clone();
-                                let data_dir = context.data_dir.clone();
-                                
-                                let result = executor.initialize(config, data_dir).await
-                                    .map_err(|e| TingError::PluginExecutionError(e.to_string()));
-                                    
-                                let _ = resp.send(result);
-                            }
-                            JsCommand::Shutdown { resp } => {
-                                let result = executor.shutdown()
-                                    .map_err(|e| TingError::PluginExecutionError(e.to_string()));
-                                    
-                                let _ = resp.send(result);
-                                // We continue the loop to allow graceful exit or potential restart?
-                                // Usually shutdown means we are done.
-                                break; 
-                            }
-                            JsCommand::CallFunction { name, args, resp } => {
-                                // We need to define generic return type. 
-                                // call_function returns Result<R>.
-                                // We expect R to be Value.
-                                let result = executor.call_function::<Value, Value>(&name, args).await
-                                    .map_err(|e| TingError::PluginExecutionError(e.to_string()));
-                                    
-                                let _ = resp.send(result);
-                            }
-                            JsCommand::GarbageCollect { resp } => {
-                                let result = executor.garbage_collect()
-                                    .map_err(|e| TingError::PluginExecutionError(e.to_string()));
-                                    
-                                let _ = resp.send(result);
-                            }
-                        }
+                    Err(_) => {
+                        // Channel closed without error = success
+                        info!("JS plugin {} initialized successfully", plugin_id);
                     }
-                    
-                    info!("JS worker thread for {} exiting", plugin_id_clone);
-                });
-            })
-            .map_err(|e| TingError::PluginLoadError(format!("Failed to spawn thread: {}", e)))?;
+                }
+            }
+            Err(_) => {
+                // Join failed
+                return Err(TingError::PluginLoadError("Init check thread panicked".to_string()));
+            }
+        }
             
         Ok(Self {
             metadata,

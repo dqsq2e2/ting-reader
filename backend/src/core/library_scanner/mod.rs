@@ -268,8 +268,16 @@ impl LibraryScanner {
 
         // Handle .strm files explicitly
         if ext == "strm" {
-            // Use filename as title, duration 0
+            // strm files are URL references, not actual audio files
+            // They should not download content for metadata extraction
+            // Instead, rely on companion metadata files (NFO/JSON) or manual input
+            
+            // Use filename as title, duration 0 (will be updated on first play)
             let t = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+            
+            tracing::info!("检测到 strm 文件: {}, 使用文件名作为标题", t);
+            tracing::info!("提示: strm 文件的完整元数据应通过 NFO 文件或 metadata.json 提供");
+            
             return (String::new(), t, None, None, None, 0);
         }
 

@@ -235,6 +235,18 @@ impl AudioStreamer {
         }
 
         let format = self.detect_format(file_path)?;
+        
+        // Skip validation for .strm files (they are URL redirects, not audio files)
+        if format == AudioFormat::Unknown {
+            let ext = file_path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if ext == "strm" {
+                return Ok(());
+            }
+        }
+        
         if !self.config.supported_formats.contains(&format) {
             return Err(TingError::InvalidRequest(format!(
                 "Unsupported audio format: {:?}",
@@ -256,6 +268,17 @@ impl AudioStreamer {
                     return Ok(metadata);
                 }
             }
+        }
+
+        // Skip metadata extraction for .strm files (they are URL redirects, not audio files)
+        let ext = file_path.extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        if ext == "strm" {
+            return Err(TingError::InvalidRequest(
+                "Cannot extract metadata from .strm files (URL redirects)".to_string()
+            ));
         }
 
         // Validate file

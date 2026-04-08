@@ -1190,36 +1190,54 @@ impl LibraryScanner {
                              let _ = std::fs::create_dir_all(&target_dir);
                          }
                          
-                         // Try to read from ID3 tag
-                         if let Ok(tag) = id3::Tag::read_from_path(&temp_path) {
-                             if let Some(picture) = tag.pictures().next() {
-                                 let ext = match picture.mime_type.as_str() {
-                                     "image/png" => "png",
-                                     _ => "jpg",
-                                 };
-                                 
-                                 let target_path = if use_hash_name {
-                                     // Generate hash from parent URL
-                                     let parent_url = if let Some(idx) = file_url.rfind('/') {
-                                         &file_url[..idx]
-                                     } else {
-                                         file_url
-                                     };
-                                     let mut hasher = Sha256::new();
-                                     hasher.update(parent_url.as_bytes());
-                                     let book_hash = format!("{:x}", hasher.finalize());
-                                     target_dir.join(format!("{}.{}", book_hash, ext))
-                                 } else {
-                                     target_dir.join(format!("cover.{}", ext))
-                                 };
-                                 
-                                 // Only write if not exists or overwrite?
-                                 if !target_path.exists() {
-                                     if std::fs::write(&target_path, &picture.data).is_ok() {
-                                         debug!("Saved WebDAV cover to {:?}", target_path);
-                                     }
+                         // Check if cover file already exists (for non-hash mode)
+                         if !use_hash_name {
+                             let cover_extensions = ["jpg", "jpeg", "png", "webp", "gif"];
+                             for ext in &cover_extensions {
+                                 let cover_path = target_dir.join(format!("cover.{}", ext));
+                                 if cover_path.exists() {
+                                     debug!("Cover file already exists at {:?}, skipping extraction", cover_path);
+                                     final_cover_url = Some(cover_path.to_string_lossy().replace('\\', "/"));
+                                     break;
                                  }
-                                 final_cover_url = Some(target_path.to_string_lossy().replace('\\', "/"));
+                             }
+                         }
+                         
+                         // Only extract if we didn't find an existing cover
+                         if final_cover_url.is_none() {
+                             // Try to read from ID3 tag
+                             if let Ok(tag) = id3::Tag::read_from_path(&temp_path) {
+                                 if let Some(picture) = tag.pictures().next() {
+                                     let ext = match picture.mime_type.as_str() {
+                                         "image/png" => "png",
+                                         "image/webp" => "webp",
+                                         "image/gif" => "gif",
+                                         _ => "jpg",
+                                     };
+                                     
+                                     let target_path = if use_hash_name {
+                                         // Generate hash from parent URL
+                                         let parent_url = if let Some(idx) = file_url.rfind('/') {
+                                             &file_url[..idx]
+                                         } else {
+                                             file_url
+                                         };
+                                         let mut hasher = Sha256::new();
+                                         hasher.update(parent_url.as_bytes());
+                                         let book_hash = format!("{:x}", hasher.finalize());
+                                         target_dir.join(format!("{}.{}", book_hash, ext))
+                                     } else {
+                                         target_dir.join(format!("cover.{}", ext))
+                                     };
+                                     
+                                     // Only write if not exists
+                                     if !target_path.exists() {
+                                         if std::fs::write(&target_path, &picture.data).is_ok() {
+                                             debug!("Saved WebDAV cover to {:?}", target_path);
+                                         }
+                                     }
+                                     final_cover_url = Some(target_path.to_string_lossy().replace('\\', "/"));
+                                 }
                              }
                          }
                     }

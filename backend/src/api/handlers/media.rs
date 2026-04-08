@@ -391,7 +391,7 @@ pub async fn stream_chapter(
         );
     }
 
-    // Handle .strm files (URL Redirect)
+    // Handle .strm files (URL Redirect or Proxy)
     let ext = std::path::Path::new(&chapter.path)
         .extension()
         .and_then(|e| e.to_str())
@@ -400,17 +400,151 @@ pub async fn stream_chapter(
         
     if ext == "strm" {
         // Read the URL from the file
-        let url = std::fs::read_to_string(&chapter.path).unwrap_or_default().trim().to_string();
+        let url = if library.library_type == "local" {
+            std::fs::read_to_string(&chapter.path)
+                .map_err(|e| TingError::IoError(e))?
+                .trim()
+                .to_string()
+        } else {
+            // WebDAV library
+            let (mut reader, _) = state.storage_service.get_webdav_reader(
+                &library, 
+                &chapter.path, 
+                None, 
+                state.encryption_key.as_ref()
+            ).await.map_err(|e| TingError::NotFound(format!("Failed to read strm file: {}", e)))?;
+            
+            let mut content = String::new();
+            reader.read_to_string(&mut content).await
+                .map_err(|e| TingError::IoError(e))?;
+            content.trim().to_string()
+        };
+        
         if url.is_empty() || !url.starts_with("http") {
-            return Err(TingError::InvalidRequest("Invalid strm file content".to_string()));
+            return Err(TingError::InvalidRequest(format!("Invalid strm file content: '{}'", url)));
         }
         
-        // Return 302 Redirect
-        return Ok((
-            StatusCode::FOUND,
-            [(header::LOCATION, url)],
-            Body::empty()
-        ).into_response());
+        tracing::info!("处理 strm 文件: {}", url);
+        
+        // Check if URL contains authentication (username:password@)
+        // If it does, we need to proxy the request to avoid CORS issues
+        let has_auth = url.contains("://") && url.split("://").nth(1).map(|s| s.contains('@')).unwrap_or(false);
+        
+        if has_auth {
+            // Proxy the request through our server to strip authentication from URL
+            tracing::info!("代理包含认证信息的 strm URL");
+            
+            let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
+            
+            // Build request with authentication
+            let client = reqwest::Client::new();
+            let mut req = client.get(&url);
+            
+            // Forward range header if present (use string literal to avoid type conflicts)
+            if let Some(range) = range_header {
+                req = req.header("range", range);
+            }
+            
+            // Make the request
+            let response = req.send().await
+                .map_err(|e| TingError::IoError(std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to fetch strm URL: {}", e))))?;
+            
+            let status = response.status();
+            
+            // Use string literals to avoid type conflicts between axum::http and reqwest::http
+            let content_type = response.headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("audio/mpeg")
+                .to_string();
+            
+            let content_length = response.headers()
+                .get("content-length")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok());
+            
+            let content_range = response.headers()
+                .get("content-range")
+                .and_then(|v| v.to_str().ok())
+                .map(|v| v.to_string());
+            
+            // Stream the response
+            let stream = response.bytes_stream();
+            let body = Body::from_stream(stream);
+            
+            // Build response with proper status code
+            let response_status = if status == reqwest::StatusCode::PARTIAL_CONTENT {
+                StatusCode::PARTIAL_CONTENT
+            } else {
+                StatusCode::OK
+            };
+            
+            let response_builder = (
+                response_status,
+                [
+                    (header::CONTENT_TYPE, content_type),
+                    (header::ACCEPT_RANGES, "bytes".to_string()),
+                    (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".to_string()),
+                    ("Cross-Origin-Resource-Policy".parse().unwrap(), "cross-origin".to_string()),
+                ],
+            );
+            
+            // Add optional headers
+            if let Some(cl) = content_length {
+                if let Some(cr) = content_range {
+                    return Ok((
+                        response_builder.0,
+                        [
+                            response_builder.1[0].clone(),
+                            response_builder.1[1].clone(),
+                            response_builder.1[2].clone(),
+                            response_builder.1[3].clone(),
+                            (header::CONTENT_LENGTH, cl.to_string()),
+                            (header::CONTENT_RANGE, cr),
+                        ],
+                        body,
+                    ).into_response());
+                } else {
+                    return Ok((
+                        response_builder.0,
+                        [
+                            response_builder.1[0].clone(),
+                            response_builder.1[1].clone(),
+                            response_builder.1[2].clone(),
+                            response_builder.1[3].clone(),
+                            (header::CONTENT_LENGTH, cl.to_string()),
+                        ],
+                        body,
+                    ).into_response());
+                }
+            } else if let Some(cr) = content_range {
+                return Ok((
+                    response_builder.0,
+                    [
+                        response_builder.1[0].clone(),
+                        response_builder.1[1].clone(),
+                        response_builder.1[2].clone(),
+                        response_builder.1[3].clone(),
+                        (header::CONTENT_RANGE, cr),
+                    ],
+                    body,
+                ).into_response());
+            } else {
+                return Ok((
+                    response_builder.0,
+                    response_builder.1,
+                    body,
+                ).into_response());
+            }
+        } else {
+            // No authentication in URL, safe to redirect
+            tracing::info!("重定向到 strm URL (无认证信息)");
+            return Ok((
+                StatusCode::FOUND,
+                [(header::LOCATION, url)],
+                Body::empty()
+            ).into_response());
+        }
     }
 
     // Handle Transcoding Request
