@@ -207,6 +207,7 @@ impl ApiServer {
             audio_streamer,
             merge_service,
             nfo_manager,
+            plugin_cache: Arc::new(crate::plugin::store::PluginCache::new()),
             active_preload_tasks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             library_watcher,
         };

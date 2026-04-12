@@ -124,6 +124,8 @@ pub struct PluginManager {
     _event_subscribers: Arc<RwLock<Vec<Box<dyn Fn(PluginStateEvent) + Send + Sync>>>>,
     /// Semaphore to limit concurrent plugin loading (防止资源耗尽)
     load_semaphore: Arc<Semaphore>,
+    /// Cache for store plugins
+    store_cache: Arc<crate::plugin::store::PluginCache>,
 }
 
 impl PluginManager {
@@ -144,6 +146,7 @@ impl PluginManager {
             _event_subscribers: Arc::new(RwLock::new(Vec::new())),
             // 限制同时加载2个插件，防止资源耗尽
             load_semaphore: Arc::new(Semaphore::new(2)),
+            store_cache: Arc::new(crate::plugin::store::PluginCache::new()),
         })
     }
 
@@ -617,7 +620,7 @@ impl PluginManager {
 
     /// Get the list of plugins from the store
     pub async fn get_store_plugins(&self) -> Result<Vec<crate::plugin::store::StorePlugin>> {
-        crate::plugin::store::fetch_store_plugins(&self.http_client).await
+        crate::plugin::store::fetch_store_plugins_cached(&self.http_client, &self.store_cache).await
     }
     
     /// Install a plugin from the store

@@ -58,6 +58,7 @@ pub struct AppState {
     pub audio_streamer: Arc<AudioStreamer>,
     pub merge_service: Arc<MergeService>,
     pub nfo_manager: Arc<NfoManager>,
+    pub plugin_cache: Arc<crate::plugin::store::PluginCache>,
     pub active_preload_tasks: Arc<tokio::sync::Mutex<std::collections::HashMap<String, tokio::task::JoinHandle<()>>>>,
     pub library_watcher: Arc<LibraryWatcher>,
 }

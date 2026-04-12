@@ -251,6 +251,14 @@ pub async fn get_store_plugins(State(state): State<AppState>) -> Result<impl Int
     Ok(Json(plugins))
 }
 
+/// Handler for POST /api/v1/store/cache/clear - Clear plugin store cache
+pub async fn clear_plugin_cache(State(state): State<AppState>) -> Result<impl IntoResponse> {
+    state.plugin_cache.clear().await;
+    Ok(Json(serde_json::json!({
+        "message": "Plugin cache cleared successfully"
+    })))
+}
+
 /// Handler for POST /api/v1/store/install - Install a plugin from store
 pub async fn install_store_plugin(
     State(state): State<AppState>,
