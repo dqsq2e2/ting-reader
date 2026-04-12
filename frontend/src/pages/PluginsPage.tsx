@@ -93,9 +93,20 @@ const PluginsPage: React.FC = () => {
     }
   };
 
-  const fetchStorePlugins = async () => {
+  const fetchStorePlugins = async (clearCache = false) => {
     setStoreLoading(true);
     try {
+      // If clearCache is true, clear the backend cache first
+      if (clearCache) {
+        try {
+          await apiClient.post('/api/v1/store/cache/clear');
+          console.log('Backend cache cleared');
+        } catch (err) {
+          console.error('清除缓存失败', err);
+          // Continue even if cache clear fails
+        }
+      }
+      
       const response = await apiClient.get('/api/v1/store/plugins');
       setStorePlugins(response.data);
     } catch (err) {
@@ -348,11 +359,11 @@ const PluginsPage: React.FC = () => {
                     </>
                  )}
                  <button 
-                    onClick={() => activeTab === 'installed' ? fetchPlugins() : fetchStorePlugins()} 
+                    onClick={() => activeTab === 'installed' ? fetchPlugins() : fetchStorePlugins(true)} 
                     className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 px-4 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-2 shadow-sm"
                  >
                     <RefreshCw size={16} />
-                    更新应用列表
+                    {activeTab === 'installed' ? '刷新列表' : '更新插件列表'}
                  </button>
               </div>
           </div>
