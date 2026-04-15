@@ -572,12 +572,18 @@ impl LibraryScanner {
         }
 
         // Read metadata.json if downloaded
+        let mut json_chapters: Option<Vec<crate::core::metadata_writer::AudiobookshelfChapter>> = None;
         if let Ok(Some(json_meta)) = crate::core::metadata_writer::read_metadata_json(&temp_book_dir) {
              if let Some(t) = json_meta.title { meta_album = t; }
              if !json_meta.authors.is_empty() { meta_author = Some(json_meta.authors[0].clone()); }
              if !json_meta.narrators.is_empty() { meta_narrator = Some(json_meta.narrators[0].clone()); }
              if !json_meta.series.is_empty() { json_series = json_meta.series; }
              if !json_meta.tags.is_empty() { json_tags = json_meta.tags; }
+             
+             // Store chapters for later use
+             if !json_meta.chapters.is_empty() {
+                 json_chapters = Some(json_meta.chapters);
+             }
              
              // Extended
              subtitle = json_meta.subtitle;
@@ -815,8 +821,24 @@ impl LibraryScanner {
         // Track processed chapter IDs to find deleted ones
         let mut processed_chapter_ids = HashSet::new();
         let mut chapters_changed = false;
+        
+        // Check if we can use JSON chapters
+        let use_json_chapters = if let Some(ref chapters) = json_chapters {
+            if chapters.len() == file_urls.len() {
+                info!("Using metadata.json chapters for WebDAV book: {}", book_title);
+                true
+            } else {
+                if !chapters.is_empty() {
+                    warn!("metadata.json chapter count ({}) does not match file count ({}) for WebDAV book {}. Ignoring JSON chapters.", 
+                          chapters.len(), file_urls.len(), book_title);
+                }
+                false
+            }
+        } else {
+            false
+        };
 
-        for file_url in file_urls.iter() {
+        for (index, file_url) in file_urls.iter().enumerate() {
             // Decode filename for title
             let decoded_file_url = self.decode_url_path(file_url);
             let filename = decoded_file_url.split('/').last().unwrap_or("chapter").to_string();
@@ -845,12 +867,34 @@ impl LibraryScanner {
             
             // Extract metadata from WebDAV file (download header chunk)
             // Optimization: Skip metadata extraction if chapter exists and not forced?
-            // But we don't have file modification time per file here easily without refetching list.
-            // For now, keep extraction. It uses partial download (header).
-            let (_, meta_title, _, _, _, meta_duration) = self.extract_webdav_metadata(library, file_url, None, scraper_config.extract_audio_cover).await;
+            // Extract metadata or use JSON chapters
+            let (meta_title, meta_duration) = if use_json_chapters {
+                if let Some(ref chapters) = json_chapters {
+                    if index < chapters.len() {
+                        let chapter = &chapters[index];
+                        let duration = ((chapter.end - chapter.start).round() as i32).max(0);
+                        (chapter.title.clone(), duration)
+                    } else {
+                        // Fallback (should not happen)
+                        let (_, t, _, _, _, d) = self.extract_webdav_metadata(library, file_url, None, scraper_config.extract_audio_cover).await;
+                        (t, d)
+                    }
+                } else {
+                    // Fallback (should not happen)
+                    let (_, t, _, _, _, d) = self.extract_webdav_metadata(library, file_url, None, scraper_config.extract_audio_cover).await;
+                    (t, d)
+                }
+            } else {
+                // Extract from WebDAV file
+                let (_, t, _, _, _, d) = self.extract_webdav_metadata(library, file_url, None, scraper_config.extract_audio_cover).await;
+                (t, d)
+            };
             
             // Determine Title
-            let raw_title = if let Some(rt) = regex_title {
+            let raw_title = if use_json_chapters {
+                // Use JSON title directly
+                meta_title
+            } else if let Some(rt) = regex_title {
                 rt
             } else if scraper_config.use_filename_as_title {
                 filename
@@ -860,8 +904,12 @@ impl LibraryScanner {
                 filename
             };
             
-            // Clean Title
-            let (final_title, is_extra) = self.text_cleaner.clean_chapter_title(&raw_title, book.title.as_deref());
+            // Clean Title (skip if using JSON)
+            let (final_title, is_extra) = if use_json_chapters {
+                (raw_title, false)
+            } else {
+                self.text_cleaner.clean_chapter_title(&raw_title, book.title.as_deref())
+            };
             
             let counter_idx = if is_extra {
                  extra_counter += 1;

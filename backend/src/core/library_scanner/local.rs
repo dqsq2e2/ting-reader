@@ -1202,7 +1202,35 @@ impl LibraryScanner {
             }
 
             // Extract metadata
-            let (_, extracted_title, _, _, _, duration) = self.extract_chapter_metadata(file_path).await;
+            // If using JSON chapters, calculate duration from JSON (end - start)
+            let duration = if use_json_chapters {
+                if let Some(ref chapters) = json_chapters {
+                    if index < chapters.len() {
+                        let chapter = &chapters[index];
+                        ((chapter.end - chapter.start).round() as i32).max(0)
+                    } else {
+                        // Fallback to file extraction
+                        let (_, _, _, _, _, d) = self.extract_chapter_metadata(file_path).await;
+                        d
+                    }
+                } else {
+                    // Fallback to file extraction
+                    let (_, _, _, _, _, d) = self.extract_chapter_metadata(file_path).await;
+                    d
+                }
+            } else {
+                // Extract from file
+                let (_, _, _, _, _, d) = self.extract_chapter_metadata(file_path).await;
+                d
+            };
+            
+            // Extract title (only if not using JSON chapters)
+            let extracted_title = if !use_json_chapters {
+                let (_, t, _, _, _, _) = self.extract_chapter_metadata(file_path).await;
+                t
+            } else {
+                String::new()
+            };
             
             // Determine initial title based on preference
             let mut title = if use_json_chapters {
