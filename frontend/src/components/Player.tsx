@@ -394,7 +394,17 @@ const Player: React.FC = () => {
       setBufferedTime(0);
       setRetryCount(0);
     }, 0);
-  }, [currentChapter?.id]);
+    
+    // 立即从章节数据设置时长，不等待音频加载
+    if (currentChapter?.duration && currentChapter.duration > 0) {
+      setDuration(currentChapter.duration);
+      console.log(`章节切换，立即设置时长: ${currentChapter.duration}s`);
+    } else {
+      // 如果章节数据中没有时长，先设置为 0，等待音频加载后更新
+      setDuration(0);
+      console.log('章节切换，等待音频加载获取时长');
+    }
+  }, [currentChapter?.id, currentChapter?.duration, setDuration]);
 
   // Reset initial load ref when retrying (to allow resume logic to run again)
   useEffect(() => {
@@ -683,11 +693,19 @@ const Player: React.FC = () => {
     if (audioRef.current) {
       let browserDuration = audioRef.current.duration;
       
-      // Handle infinite duration (common in streaming/transcoding)
-      if (!Number.isFinite(browserDuration) || isNaN(browserDuration)) {
-        if (currentChapter?.duration) {
-          browserDuration = currentChapter.duration;
-        }
+      // 优先使用章节数据中的时长（数据库中已有）
+      if (currentChapter?.duration && currentChapter.duration > 0) {
+        browserDuration = currentChapter.duration;
+        console.log(`使用章节数据中的时长: ${browserDuration}s`);
+      } 
+      // 只在章节数据中没有时长时，才使用浏览器返回的时长
+      else if (Number.isFinite(browserDuration) && !isNaN(browserDuration) && browserDuration > 0) {
+        console.log(`使用浏览器返回的时长: ${browserDuration}s`);
+      }
+      // 两者都无效，尝试从音频元素获取
+      else {
+        console.warn('无法获取有效时长，使用默认值 0');
+        browserDuration = 0;
       }
 
       setDuration(browserDuration);
@@ -711,14 +729,15 @@ const Player: React.FC = () => {
       // Ensure playback rate is applied
       audioRef.current.playbackRate = playbackSpeed;
 
-      // Sync duration back to server if it's significantly different and valid
-      if (currentChapter && Number.isFinite(browserDuration) && browserDuration > 0) {
-        const diff = Math.abs(browserDuration - (currentChapter.duration || 0));
-        if (diff > 2) {
-          console.log(`同步准确的持续时间: ${currentChapter.title}: ${browserDuration}s`);
-          // Convert to integer (round to nearest second)
-          apiClient.patch(`/api/chapters/${currentChapter.id}`, { duration: Math.round(browserDuration) })
-            .catch(err => console.error('同步持续时间失败', err));
+      // 只在章节数据中没有时长，且浏览器返回了有效时长时，才同步回服务器
+      if (currentChapter && (!currentChapter.duration || currentChapter.duration === 0)) {
+        if (Number.isFinite(browserDuration) && browserDuration > 0) {
+          const audioDuration = audioRef.current.duration;
+          if (Number.isFinite(audioDuration) && audioDuration > 0) {
+            console.log(`章节数据中无时长，同步浏览器时长到服务器: ${Math.round(audioDuration)}s`);
+            apiClient.patch(`/api/chapters/${currentChapter.id}`, { duration: Math.round(audioDuration) })
+              .catch(err => console.error('同步持续时间失败', err));
+          }
         }
       }
     }
