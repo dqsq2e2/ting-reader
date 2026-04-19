@@ -2,18 +2,7 @@
 
 ### This script is called after the user installs the application.
 
-# JWT 密钥现在由应用程序自动管理，无需在安装时配置
-# 系统会在首次启动时自动生成、加密存储并定期轮换密钥
-
-# 确保数据目录存在（用于存储自动生成的机器ID）
 DATA_DIR="${TRIM_APPDEST_VOL}/@appshare/ting-reader/data"
 mkdir -p "$DATA_DIR"
-
-echo "Installation completed. JWT keys will be automatically managed by the application."
-echo "Data directory: $DATA_DIR"
-
-# 注意：docker-compose.yaml 中已经移除了 TING_SECURITY__JWT_SECRET 环境变量
-# 应用程序会自动在 $DATA_DIR/.machine-id 生成机器标识符
-# 并使用它来派生主密钥，进而管理 JWT 密钥的生成和轮换
 
 exit 0

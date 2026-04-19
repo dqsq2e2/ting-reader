@@ -2,14 +2,7 @@
 
 ### This script is called after the user installs the application.
 
-# JWT 密钥现在由应用程序自动管理，无需在安装时配置
-# 系统会在首次启动时自动生成、加密存储并定期轮换密钥
-
-# 确保数据目录存在（用于存储自动生成的机器ID）
 DATA_DIR="${TRIM_APPDEST_VOL}/@appshare/ting-reader/data"
 mkdir -p "$DATA_DIR"
-
-echo "Installation completed. JWT keys will be automatically managed by the application."
-echo "Data directory: $DATA_DIR"
 
 exit 0

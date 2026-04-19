@@ -3,24 +3,16 @@
 LOG_FILE="${TRIM_TEMP_LOGFILE}"
 PID_FILE="${TRIM_PKGVAR}/app.pid"
 
-# Set environment variables for Rust app
 export RUST_LOG=info
 export TING_SERVER__HOST=0.0.0.0
 export TING_SERVER__PORT=3000
 
-# Handle Wizard Variables
 if [ -n "$wizard_port" ]; then
     export TING_SERVER__PORT="$wizard_port"
 fi
 
-# JWT 密钥现在由应用程序自动管理，无需通过环境变量设置
-# 系统会自动生成、加密存储并定期轮换密钥
-
-# Map shared directories
-# TRIM_DATA_SHARE_PATHS format: /vol1/@appshare/ting-reader/data:/vol1/@appshare/ting-reader/storage:...
 IFS=':' read -r -a SHARES <<< "$TRIM_DATA_SHARE_PATHS"
 
-# Order must match config/resource
 export TING_STORAGE__DATA_DIR="${SHARES[0]}"
 export TING_STORAGE__TEMP_DIR="${SHARES[3]}"
 export TING_PLUGINS__PLUGIN_DIR="${SHARES[2]}"
@@ -33,20 +25,14 @@ export TEMP_DIR="${SHARES[3]}"
 
 export TING_STORAGE__LOCAL_STORAGE_ROOT="${SHARES[1]}"
 
-# Override STORAGE_DIR if wizard_storage_path is set
 if [ -n "$wizard_storage_path" ]; then
     export STORAGE_DIR="$wizard_storage_path"
     export TING_STORAGE__LOCAL_STORAGE_ROOT="$wizard_storage_path"
 fi
 
-# 可选：设置机器标识符（用于主密钥派生）
-# 如果不设置，系统会自动生成并保存到 $DATA_DIR/.machine-id
-# export TING_MACHINE_ID="fnos-ting-reader-native"
-
 export STATIC_DIR="${TRIM_APPDEST}/server/static"
 export TING_CONFIG_PATH="${TRIM_APPDEST}/server/config.toml"
 
-# Command to start the application
 CMD="${TRIM_APPDEST}/server/ting-reader"
 
 log_msg() {
@@ -66,12 +52,9 @@ start_process() {
     log_msg "PLUGINS_DIR: $PLUGINS_DIR"
     log_msg "TEMP_DIR: $TEMP_DIR"
     log_msg "PORT: $TING_SERVER__PORT"
-    log_msg "JWT keys will be automatically managed by the application"
     
-    # Run the process
     $CMD > /dev/null 2>&1 &
     
-    # write pid to pidfile
     printf "%s" "$!" > ${PID_FILE}
     return 0
 }
