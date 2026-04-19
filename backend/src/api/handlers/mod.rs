@@ -50,7 +50,8 @@ pub struct AppState {
     pub config_manager: Arc<PluginConfigManager>,
     pub task_queue: Arc<TaskQueue>,
     pub config: Arc<tokio::sync::RwLock<Config>>,
-    pub jwt_secret: Arc<String>,
+    pub jwt_secret: Arc<String>, // 保留用于向后兼容
+    pub jwt_key_manager: Option<Arc<crate::auth::JwtKeyManager>>, // 新的密钥管理器
     pub cache_manager: Arc<CacheManager>,
     pub encryption_key: Arc<[u8; 32]>,
     pub storage_service: Arc<StorageService>,

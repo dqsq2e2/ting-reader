@@ -12,6 +12,7 @@ use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::task;
 
@@ -247,6 +248,11 @@ impl DatabaseManager {
     /// Get the current pool size
     pub fn pool_size(&self) -> u32 {
         self.pool.max_size()
+    }
+    
+    /// Get a reference to the connection pool
+    pub fn get_pool(&self) -> Arc<Pool<SqliteConnectionManager>> {
+        Arc::new(self.pool.clone())
     }
 
     /// Get the number of idle connections in the pool

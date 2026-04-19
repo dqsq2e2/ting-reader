@@ -374,6 +374,7 @@ mod tests {
     
     fn create_test_plugin(dir: &Path, name: &str, version: &str) -> Result<()> {
         let metadata = PluginMetadata {
+            id: format!("{}@{}", name, version),
             name: name.to_string(),
             version: version.to_string(),
             plugin_type: crate::plugin::types::PluginType::Utility,
@@ -405,6 +406,7 @@ mod tests {
         dependencies: Vec<PluginDependency>,
     ) -> Result<()> {
         let metadata = PluginMetadata {
+            id: format!("{}@{}", name, version),
             name: name.to_string(),
             version: version.to_string(),
             plugin_type: crate::plugin::types::PluginType::Utility,

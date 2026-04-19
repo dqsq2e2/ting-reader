@@ -711,6 +711,7 @@ mod tests {
     
     fn create_test_plugin(name: &str, version: &str) -> (PluginMetadata, Arc<dyn Plugin>) {
         let metadata = PluginMetadata::new(
+            format!("{}@{}", name, version),
             name.to_string(),
             version.to_string(),
             PluginType::Utility,
@@ -801,6 +802,7 @@ mod tests {
         let registry = PluginRegistry::new();
         
         let mut metadata = PluginMetadata::new(
+            "dependent-plugin@1.0.0".to_string(),
             "dependent-plugin".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,
@@ -828,6 +830,7 @@ mod tests {
         
         // Create dependent plugin
         let mut metadata = PluginMetadata::new(
+            "dependent-plugin@1.0.0".to_string(),
             "dependent-plugin".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,
@@ -855,6 +858,7 @@ mod tests {
         
         // Register dependent plugin
         let mut dep_metadata = PluginMetadata::new(
+            "dependent-plugin@1.0.0".to_string(),
             "dependent-plugin".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,
@@ -885,6 +889,7 @@ mod tests {
         
         // Register dependent plugin
         let mut dep_metadata = PluginMetadata::new(
+            "dependent-plugin@1.0.0".to_string(),
             "dependent-plugin".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,
@@ -916,6 +921,7 @@ mod tests {
         
         // Create dependent plugin with caret requirement ^1.0.0
         let mut dep_metadata = PluginMetadata::new(
+            "dependent-plugin@1.0.0".to_string(),
             "dependent-plugin".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,
@@ -943,6 +949,7 @@ mod tests {
         
         // Create dependent plugin with caret requirement ^1.0.0
         let mut dep_metadata = PluginMetadata::new(
+            "dependent-plugin@1.0.0".to_string(),
             "dependent-plugin".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,
@@ -970,6 +977,7 @@ mod tests {
         
         // Create dependent plugin with tilde requirement ~1.2.0
         let mut dep_metadata = PluginMetadata::new(
+            "dependent-plugin@1.0.0".to_string(),
             "dependent-plugin".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,
@@ -997,6 +1005,7 @@ mod tests {
         
         // Create dependent plugin with range requirement >=1.2.0, <2.0.0
         let mut dep_metadata = PluginMetadata::new(
+            "dependent-plugin@1.0.0".to_string(),
             "dependent-plugin".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,
@@ -1062,6 +1071,7 @@ mod tests {
         
         // Register dependent plugin
         let mut dep_metadata = PluginMetadata::new(
+            "dependent@1.0.0".to_string(),
             "dependent".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,
@@ -1092,6 +1102,7 @@ mod tests {
         
         // Register middle plugin that depends on base
         let mut middle_meta = PluginMetadata::new(
+            "middle@1.0.0".to_string(),
             "middle".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,
@@ -1105,6 +1116,7 @@ mod tests {
         
         // Register top plugin that depends on middle
         let mut top_meta = PluginMetadata::new(
+            "top@1.0.0".to_string(),
             "top".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,
@@ -1133,6 +1145,7 @@ mod tests {
         
         // Register middle plugin that depends on base
         let mut middle_meta = PluginMetadata::new(
+            "middle@1.0.0".to_string(),
             "middle".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,
@@ -1146,6 +1159,7 @@ mod tests {
         
         // Register top plugin that depends on middle
         let mut top_meta = PluginMetadata::new(
+            "top@1.0.0".to_string(),
             "top".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,
@@ -1174,6 +1188,7 @@ mod tests {
         
         // Register dependent plugin
         let mut dep_meta = PluginMetadata::new(
+            "dependent@1.0.0".to_string(),
             "dependent".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,
@@ -1200,6 +1215,7 @@ mod tests {
         
         // Register plugin B that depends on A
         let mut b_meta = PluginMetadata::new(
+            "plugin-b@1.0.0".to_string(),
             "plugin-b".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,
@@ -1213,6 +1229,7 @@ mod tests {
         
         // Try to register plugin C that depends on B
         let mut c_meta = PluginMetadata::new(
+            "plugin-c@1.0.0".to_string(),
             "plugin-c".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,
@@ -1254,6 +1271,7 @@ mod tests {
         
         // Register middle plugin
         let mut middle_meta = PluginMetadata::new(
+            "middle@1.0.0".to_string(),
             "middle".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,
@@ -1267,6 +1285,7 @@ mod tests {
         
         // Register top plugin
         let mut top_meta = PluginMetadata::new(
+            "top@1.0.0".to_string(),
             "top".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,

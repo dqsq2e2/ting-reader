@@ -31,26 +31,40 @@ pub fn generate_token(user_id: &str, secret: &str) -> Result<String> {
     .map_err(|e| TingError::AuthenticationError(format!("生成令牌失败: {}", e)))
 }
 
-/// Validate a JWT token and extract claims
+/// Validate a JWT token and extract claims (single secret)
 pub fn validate_token(token: &str, secret: &str) -> Result<Claims> {
-    let token_data = decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(secret.as_bytes()),
-        &Validation::default(),
-    )
-    .map_err(|e| {
-        // Parse the error to provide more specific Chinese messages
+    validate_token_with_secrets(token, &[secret.to_string()])
+}
+
+/// Validate a JWT token with multiple secrets (for key rotation)
+pub fn validate_token_with_secrets(token: &str, secrets: &[String]) -> Result<Claims> {
+    let mut last_error = None;
+    
+    // 尝试用每个密钥验证
+    for secret in secrets {
+        match decode::<Claims>(
+            token,
+            &DecodingKey::from_secret(secret.as_bytes()),
+            &Validation::default(),
+        ) {
+            Ok(token_data) => return Ok(token_data.claims),
+            Err(e) => last_error = Some(e),
+        }
+    }
+    
+    // 所有密钥都失败，返回错误
+    if let Some(e) = last_error {
         let error_msg = e.to_string();
         if error_msg.contains("ExpiredSignature") {
-            TingError::AuthenticationError("令牌已过期".to_string())
+            return Err(TingError::AuthenticationError("令牌已过期".to_string()));
         } else if error_msg.contains("InvalidSignature") {
-            TingError::AuthenticationError("令牌签名无效".to_string())
+            return Err(TingError::AuthenticationError("令牌签名无效".to_string()));
         } else if error_msg.contains("InvalidToken") {
-            TingError::AuthenticationError("令牌格式无效".to_string())
+            return Err(TingError::AuthenticationError("令牌格式无效".to_string()));
         } else {
-            TingError::AuthenticationError(format!("令牌验证失败: {}", e))
+            return Err(TingError::AuthenticationError(format!("令牌验证失败: {}", e)));
         }
-    })?;
-
-    Ok(token_data.claims)
+    }
+    
+    Err(TingError::AuthenticationError("令牌验证失败".to_string()))
 }

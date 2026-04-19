@@ -86,7 +86,14 @@ pub async fn login(
     }
 
     // Generate JWT token
-    let token = generate_token(&user.id, &state.jwt_secret)?;
+    let token = if let Some(key_manager) = &state.jwt_key_manager {
+        // 使用密钥管理器（新方式）
+        let signing_secret = key_manager.get_signing_secret().await;
+        generate_token(&user.id, &signing_secret)?
+    } else {
+        // 向后兼容：使用配置文件中的密钥
+        generate_token(&user.id, &state.jwt_secret)?
+    };
 
     tracing::info!(target: "audit::login", "用户 '{}' 登录成功", user.username);
 

@@ -53,9 +53,19 @@ pub async fn authenticate(
     };
 
     // Validate token
-    let claims = match validate_token(&token, &state.jwt_secret) {
-        Ok(c) => c,
-        Err(e) => return e.into_response(),
+    let claims = if let Some(key_manager) = &state.jwt_key_manager {
+        // 使用密钥管理器（新方式）- 支持多密钥验证
+        let validation_secrets = key_manager.get_validation_secrets().await;
+        match crate::auth::jwt::validate_token_with_secrets(&token, &validation_secrets) {
+            Ok(c) => c,
+            Err(e) => return e.into_response(),
+        }
+    } else {
+        // 向后兼容：使用配置文件中的密钥
+        match validate_token(&token, &state.jwt_secret) {
+            Ok(c) => c,
+            Err(e) => return e.into_response(),
+        }
     };
 
     // Fetch user from database

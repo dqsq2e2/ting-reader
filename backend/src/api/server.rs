@@ -85,13 +85,36 @@ impl ApiServer {
         let suggestion_repo = Arc::new(MergeSuggestionRepository::new(db.clone()));
         let series_repo = Arc::new(crate::db::repository::SeriesRepository::new(db.clone()));
         
-        // Get JWT secret from config
+        // 自动派生主密钥（基于机器特征，无需用户配置）
+        let encryption_key = crate::core::master_key::MasterKeyManager::derive_master_key(&config.database.path)
+            .map_err(|e| anyhow::anyhow!("Failed to derive master key: {}", e))?;
+        
+        tracing::info!("主密钥已自动派生，基于机器特征和数据库路径");
+        
+        // Initialize JWT key manager (auto-generates and rotates keys)
+        let jwt_key_manager = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                match crate::auth::JwtKeyManager::new(db.get_pool(), encryption_key).await {
+                    Ok(manager) => {
+                        tracing::info!("JWT 密钥管理器初始化成功，密钥已加密存储，启用自动轮换");
+                        let manager_arc = Arc::new(manager);
+                        // 启动后台轮换任务
+                        manager_arc.clone().start_rotation_task();
+                        Some(manager_arc)
+                    }
+                    Err(e) => {
+                        tracing::warn!("JWT 密钥管理器初始化失败，使用配置文件密钥: {}", e);
+                        None
+                    }
+                }
+            })
+        });
+        
+        // Get JWT secret from config (fallback)
         let jwt_secret = Arc::new(config.security.jwt_secret.clone());
         
         // Create plugin config manager
         let config_dir = config.plugins.plugin_dir.join("configs");
-        // Use a default encryption key for now (in production, this should be from secure config)
-        let encryption_key = [0u8; 32]; // TODO: Load from secure configuration
         let config_manager = Arc::new(
             crate::plugin::config::PluginConfigManager::new(config_dir, encryption_key)
                 .map_err(|e| anyhow::anyhow!("Failed to create config manager: {}", e))?
@@ -200,6 +223,7 @@ impl ApiServer {
             task_queue,
             config: config_arc,
             jwt_secret,
+            jwt_key_manager, // 新增密钥管理器
             cache_manager,
             encryption_key: Arc::new(encryption_key),
             storage_service,

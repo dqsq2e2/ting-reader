@@ -717,6 +717,7 @@ mod tests {
     fn create_test_metadata() -> PluginMetadata {
         PluginMetadata::new(
             "test-plugin".to_string(),
+            "test-plugin".to_string(),
             "1.0.0".to_string(),
             PluginType::Utility,
             "Test Author".to_string(),

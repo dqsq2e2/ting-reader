@@ -302,6 +302,16 @@ ALTER TABLE books ADD COLUMN year INTEGER;
 CREATE INDEX IF NOT EXISTS idx_books_year ON books(year);
 "#;
 
+/// Thirteenth schema migration (version 13)
+const MIGRATION_V13: &str = r#"
+-- System settings table for JWT key rotation
+CREATE TABLE IF NOT EXISTS system_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+"#;
+
 /// Run all pending database migrations
 ///
 /// This function applies database schema migrations in order.
@@ -411,6 +421,11 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     if current_version < 12 {
         info!("Applying migration v12: Add year field");
         apply_migration(conn, 12, MIGRATION_V12)?;
+    }
+
+    if current_version < 13 {
+        info!("Applying migration v13: System settings for JWT rotation");
+        apply_migration(conn, 13, MIGRATION_V13)?;
     }
 
     info!("数据库迁移成功完成");

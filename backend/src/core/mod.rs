@@ -21,6 +21,7 @@ pub mod audio_streamer;
 pub mod decryption_cache;
 pub mod nfo_manager;
 pub mod crypto;
+pub mod master_key;
 pub mod library_scanner;
 pub mod library_watcher;
 pub mod color;

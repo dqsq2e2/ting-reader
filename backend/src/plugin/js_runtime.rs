@@ -359,6 +359,7 @@ mod tests {
     async fn test_js_runtime_creation() {
         let metadata = PluginMetadata::new(
             "test-plugin".to_string(),
+            "test-plugin".to_string(),
             "1.0.0".to_string(),
             super::super::types::PluginType::Utility,
             "Test Author".to_string(),
@@ -374,6 +375,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_simple_script() {
         let metadata = PluginMetadata::new(
+            "test-plugin".to_string(),
             "test-plugin".to_string(),
             "1.0.0".to_string(),
             super::super::types::PluginType::Utility,
@@ -392,6 +394,7 @@ mod tests {
     #[tokio::test]
     async fn test_load_module() {
         let metadata = PluginMetadata::new(
+            "test-plugin".to_string(),
             "test-plugin".to_string(),
             "1.0.0".to_string(),
             super::super::types::PluginType::Utility,
@@ -414,6 +417,7 @@ mod tests {
     async fn test_execute_script_with_error() {
         let metadata = PluginMetadata::new(
             "test-plugin".to_string(),
+            "test-plugin".to_string(),
             "1.0.0".to_string(),
             super::super::types::PluginType::Utility,
             "Test Author".to_string(),
@@ -434,6 +438,7 @@ mod tests {
         use super::super::sandbox::Permission;
         
         let mut metadata = PluginMetadata::new(
+            "test-plugin".to_string(),
             "test-plugin".to_string(),
             "1.0.0".to_string(),
             super::super::types::PluginType::Utility,
@@ -465,6 +470,7 @@ mod tests {
         use std::path::PathBuf;
         
         let mut metadata = PluginMetadata::new(
+            "test-plugin".to_string(),
             "test-plugin".to_string(),
             "1.0.0".to_string(),
             super::super::types::PluginType::Utility,
@@ -517,6 +523,7 @@ mod tests {
         
         let mut metadata = PluginMetadata::new(
             "test-plugin".to_string(),
+            "test-plugin".to_string(),
             "1.0.0".to_string(),
             super::super::types::PluginType::Utility,
             "Test Author".to_string(),
@@ -545,6 +552,7 @@ mod tests {
         use super::super::sandbox::Permission;
         
         let mut metadata = PluginMetadata::new(
+            "test-plugin".to_string(),
             "test-plugin".to_string(),
             "1.0.0".to_string(),
             super::super::types::PluginType::Utility,

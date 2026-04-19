@@ -256,6 +256,7 @@ mod tests {
     #[test]
     fn test_native_plugin_creation() {
         let metadata = PluginMetadata::new(
+            "test-plugin@1.0.0".to_string(),
             "test-plugin".to_string(),
             "1.0.0".to_string(),
             crate::plugin::types::PluginType::Format,
