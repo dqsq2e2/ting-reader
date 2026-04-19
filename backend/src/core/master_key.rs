@@ -152,11 +152,16 @@ impl MasterKeyManager {
     
     /// 获取或创建机器 ID 文件
     fn get_or_create_machine_id_file() -> Result<Vec<u8>> {
-        // 优先使用数据目录中的机器ID（容器友好）
-        let data_machine_id_path = std::env::current_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("."))
-            .join("data")
-            .join(".machine-id");
+        // 优先使用 DATA_DIR 环境变量指定的数据目录（容器/飞牛部署友好）
+        let data_machine_id_path = if let Ok(data_dir) = std::env::var("DATA_DIR") {
+            std::path::PathBuf::from(data_dir).join(".machine-id")
+        } else {
+            // 备选：使用当前目录下的 data 目录
+            std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .join("data")
+                .join(".machine-id")
+        };
         
         // 备选：用户目录中的机器ID
         let user_machine_id_path = dirs::data_dir()
