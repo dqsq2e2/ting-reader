@@ -470,7 +470,8 @@ const AdminLibraries: React.FC = () => {
       const payload = {
         url: formData.url,
         username: formData.username || null,
-        password: formData.password || null
+        password: formData.password || null,
+        root_path: formData.rootPath || null
       };
       
       const response = await apiClient.post('/api/libraries/test-connection', payload);
