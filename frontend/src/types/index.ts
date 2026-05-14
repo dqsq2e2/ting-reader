@@ -90,6 +90,18 @@ export interface Stats {
   lastScanTime?: string;
 }
 
+export interface PluginDependency {
+  pluginName: string;
+  versionRequirement: string;
+}
+
+export interface PluginStats {
+  totalCalls: number;
+  successfulCalls: number;
+  failedCalls: number;
+  avgExecutionTimeMs: number;
+}
+
 export interface Plugin {
   id: string;
   name: string;
@@ -98,10 +110,22 @@ export interface Plugin {
   author: string;
   description: string;
   state: 'active' | 'inactive' | 'loading' | 'failed';
+  runtime?: string;
+  license?: string;
+  homepage?: string;
+  descriptionEn?: string;
+  isEnabled?: boolean;
+  entryPoint?: string;
+  dependencies?: PluginDependency[];
+  permissions?: string[];
+  configSchema?: Record<string, unknown>;
+  supportedExtensions?: string[];
   totalCalls?: number;
   successfulCalls?: number;
   failedCalls?: number;
   successRate?: number;
+  stats?: PluginStats;
+  error?: string;
 }
 
 export interface StorePlugin {
@@ -117,6 +141,16 @@ export interface StorePlugin {
   size?: string | Record<string, string>;
   date?: string;
   dependencies?: string[];
+  runtime?: string;
+  license?: string;
+  homepage?: string;
+  author?: string;
+  descriptionEn?: string;
+  permissions?: string[];
+  configSchema?: Record<string, unknown>;
+  supportedExtensions?: string[];
+  minCoreVersion?: string;
+  downloads?: { name: string; url: string }[];
 }
 
 export interface MergeSuggestion {

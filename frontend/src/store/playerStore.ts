@@ -15,7 +15,7 @@ interface PlayerState {
   isExpanded: boolean;
   isCollapsed: boolean;
   isSeriesEditing: boolean;
-  
+
   // Actions
   playBook: (book: Book, chapters: Chapter[], startChapterId?: string) => void;
   togglePlay: () => void;
@@ -31,6 +31,12 @@ interface PlayerState {
   setIsExpanded: (isExpanded: boolean) => void;
   setIsCollapsed: (isCollapsed: boolean) => void;
   setIsSeriesEditing: (isSeriesEditing: boolean) => void;
+}
+
+/** Check if a chapter's progress indicates it has been fully played */
+function isChapterFinished(chapter: Chapter): boolean {
+  if (!chapter.progressPosition || !chapter.duration || chapter.duration <= 0) return false;
+  return chapter.progressPosition / chapter.duration >= 0.95;
 }
 
 export const usePlayerStore = create<PlayerState>((set, get) => ({
@@ -69,13 +75,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
             chapter = chapters[0];
           }
         }
-        
-        const newState: Partial<PlayerState> = { 
-          currentBook: book, 
-          chapters, 
+
+        // If chapter is finished, restart from beginning
+        const startPos = isChapterFinished(chapter) ? 0 : (chapter.progressPosition || 0);
+
+        const newState: Partial<PlayerState> = {
+          currentBook: book,
+          chapters,
           currentChapter: chapter,
           isPlaying: true,
-          currentTime: chapter.progressPosition || 0
+          currentTime: startPos
         };
 
         if (book.themeColor && !isTooLight(book.themeColor)) {
@@ -88,13 +97,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       },
 
       togglePlay: () => set((state) => ({ isPlaying: !state.isPlaying })),
-      
+
       setCurrentTime: (time) => set({ currentTime: time }),
-      
+
       setDuration: (duration) => set({ duration }),
-      
+
       setPlaybackSpeed: (speed) => set({ playbackSpeed: speed }),
-      
+
       setVolume: (volume) => set({ volume }),
 
       setThemeColor: (color) => set({ themeColor: color }),
@@ -102,7 +111,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       nextChapter: () => {
         const { currentChapter, chapters, currentBook } = get();
         if (!currentChapter || !currentBook) return;
-        
+
         // 确保 chapters 数组不为空且包含当前章节
         if (chapters.length === 0 || !chapters.some(c => c.id === currentChapter.id)) {
           // 如果 chapters 数组为空或不包含当前章节，直接返回
@@ -110,7 +119,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           console.warn('Chapters array is empty or does not contain current chapter, cannot proceed to next chapter');
           return;
         }
-        
+
         const index = chapters.findIndex(c => c.id === currentChapter.id);
         if (index !== -1 && index < chapters.length - 1) {
           const nextChapter = chapters[index + 1];
@@ -129,14 +138,24 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       },
 
       playChapter: (book, chapters, chapter, resumePosition) => {
-        const newState: Partial<PlayerState> = { 
-          currentBook: book, 
-          chapters, 
-          currentChapter: chapter, 
-          isPlaying: true, 
-          currentTime: resumePosition ?? (chapter.progressPosition || 0)
+        let startPos: number;
+        if (resumePosition !== undefined) {
+          startPos = resumePosition;
+        } else if (isChapterFinished(chapter)) {
+          // Clicking a finished chapter clears its progress and restarts from beginning
+          startPos = 0;
+        } else {
+          startPos = chapter.progressPosition || 0;
+        }
+
+        const newState: Partial<PlayerState> = {
+          currentBook: book,
+          chapters,
+          currentChapter: chapter,
+          isPlaying: true,
+          currentTime: startPos
         };
-        
+
         if (book.themeColor && !isTooLight(book.themeColor)) {
           newState.themeColor = book.themeColor;
         } else {
