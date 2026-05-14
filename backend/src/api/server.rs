@@ -119,6 +119,9 @@ impl ApiServer {
             crate::plugin::config::PluginConfigManager::new(config_dir, encryption_key)
                 .map_err(|e| anyhow::anyhow!("Failed to create config manager: {}", e))?
         );
+
+        // Wire config manager into plugin manager so plugins receive real config at init
+        plugin_manager.set_config_manager(config_manager.clone());
         
         // Create services
         let book_service = Arc::new(crate::core::services::BookService::new(book_repo.clone()));
@@ -206,6 +209,9 @@ impl ApiServer {
             }
         });
         
+        // Create WebSocket session manager
+        let ws_manager = crate::api::ws::manager::WsSessionManager::new();
+
         // Create application state
         let app_state = AppState {
             book_repo,
@@ -234,6 +240,7 @@ impl ApiServer {
             plugin_cache: Arc::new(crate::plugin::store::PluginCache::new()),
             active_preload_tasks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             library_watcher,
+            ws_manager,
         };
         
         // Create public routes (no authentication required)
@@ -241,6 +248,9 @@ impl ApiServer {
             .route("/health", get(health_check))
             .route("/api/auth/login", axum::routing::post(crate::auth::handlers::login))
             .route("/api/auth/register", axum::routing::post(crate::auth::handlers::register))
+            // WebSocket endpoint — handles auth internally via query param token
+            .route("/api/ws", get(crate::api::ws::handler::ws_handler))
+            .route("/api/v1/ws", get(crate::api::ws::handler::ws_handler))
             .with_state(app_state.clone());
         
         // Create protected routes (authentication required)

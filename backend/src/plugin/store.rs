@@ -78,6 +78,33 @@ pub struct StorePlugin {
     pub date: Option<String>,
     pub downloads: Option<Vec<StoreDownload>>,
     pub dependencies: Option<Vec<String>>,
+    /// Runtime type: "wasm", "javascript", or "native"
+    #[serde(default)]
+    pub runtime: Option<String>,
+    /// License identifier (e.g., "MIT")
+    #[serde(default)]
+    pub license: Option<String>,
+    /// Plugin author
+    #[serde(default)]
+    pub author: Option<String>,
+    /// Plugin homepage URL
+    #[serde(default)]
+    pub homepage: Option<String>,
+    /// English description
+    #[serde(default, rename = "description_en")]
+    pub description_en: Option<String>,
+    /// Required permissions
+    #[serde(default)]
+    pub permissions: Option<Vec<String>>,
+    /// Configuration schema (JSON Schema format)
+    #[serde(default, rename = "config_schema")]
+    pub config_schema: Option<serde_json::Value>,
+    /// Supported file extensions (format plugins)
+    #[serde(default, rename = "supported_extensions")]
+    pub supported_extensions: Option<Vec<String>>,
+    /// Minimum core version required
+    #[serde(default, rename = "min_core_version")]
+    pub min_core_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

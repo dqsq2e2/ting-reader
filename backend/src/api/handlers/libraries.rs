@@ -2,6 +2,7 @@ use crate::api::models::{
     LibraryResponse, CreateLibraryRequest, UpdateLibraryRequest, LibraryScanResponse, FolderInfo,
     TestWebDavRequest, TestWebDavResponse,
 };
+use crate::api::require_admin;
 use crate::core::error::{Result, TingError};
 use axum::{
     extract::{Path, Query, State},
@@ -34,9 +35,7 @@ pub async fn create_library(
     user: crate::auth::middleware::AuthUser,
     Json(req): Json<CreateLibraryRequest>,
 ) -> Result<impl IntoResponse> {
-    if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
-    }
+    require_admin(&user)?;
 
     let url = if req.library_type == "local" {
         req.path.unwrap_or_default()
@@ -184,9 +183,7 @@ pub async fn update_library(
     user: crate::auth::middleware::AuthUser,
     Json(req): Json<UpdateLibraryRequest>,
 ) -> Result<impl IntoResponse> {
-    if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
-    }
+    require_admin(&user)?;
 
     let mut library = state.library_repo.find_by_id(&library_id).await?
         .ok_or_else(|| TingError::NotFound(format!("Library {} not found", library_id)))?;
@@ -274,9 +271,7 @@ pub async fn delete_library(
     Path(library_id): Path<String>,
     user: crate::auth::middleware::AuthUser,
 ) -> Result<impl IntoResponse> {
-    if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
-    }
+    require_admin(&user)?;
 
     let library = state.library_repo.find_by_id(&library_id).await?
         .ok_or_else(|| TingError::NotFound(format!("Library {} not found", library_id)))?;
@@ -342,9 +337,7 @@ pub async fn scan_library(
     Path(library_id): Path<String>,
     user: crate::auth::middleware::AuthUser,
 ) -> Result<impl IntoResponse> {
-    if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
-    }
+    require_admin(&user)?;
 
     let library = state.library_repo.find_by_id(&library_id).await?
         .ok_or_else(|| TingError::NotFound(format!("Library {} not found", library_id)))?;
@@ -393,9 +386,7 @@ pub async fn get_storage_folders(
     user: crate::auth::middleware::AuthUser,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<impl IntoResponse> {
-    if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
-    }
+    require_admin(&user)?;
 
     let config = state.config.read().await;
     let storage_root = config.storage.local_storage_root.clone();
@@ -478,9 +469,7 @@ pub async fn test_webdav_connection(
     user: crate::auth::middleware::AuthUser,
     Json(req): Json<TestWebDavRequest>,
 ) -> Result<impl IntoResponse> {
-    if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
-    }
+    require_admin(&user)?;
 
     if !req.url.starts_with("http://") && !req.url.starts_with("https://") {
         return Ok(Json(TestWebDavResponse {

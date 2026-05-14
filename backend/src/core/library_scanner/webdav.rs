@@ -59,17 +59,12 @@ impl LibraryScanner {
         let total_groups = dir_groups.len();
         let mut processed_count = 0;
 
-        // Pre-fetch all books (minimal) for the library to handle deletions and fast lookup
-        let all_books_minimal = self.book_repo.find_all_minimal_by_library(&library.id).await.unwrap_or_default();
-        
-        // Build lookup maps
+        // Pre-fetch all books for lookup and deletion handling
+        let prefetched = self.prefetch_books(&library.id).await;
+
         let mut book_path_map: HashMap<String, (String, i32, Option<String>)> = HashMap::new();
         let mut book_hash_map: HashMap<String, (String, i32, Option<String>)> = HashMap::new();
-        
-        for (id, path, hash, manual_corrected, match_pattern) in &all_books_minimal {
-            // WebDAV path stored in DB might be full URL or relative.
-            // In process_webdav_book, we use dir_url.to_string() as path.
-            // So we should key by path string.
+        for (id, path, hash, manual_corrected, match_pattern) in &prefetched.all_books {
             book_path_map.insert(path.clone(), (id.clone(), *manual_corrected, match_pattern.clone()));
             book_hash_map.insert(hash.clone(), (id.clone(), *manual_corrected, match_pattern.clone()));
         }
@@ -204,23 +199,8 @@ impl LibraryScanner {
             self.plugin_manager.garbage_collect_all().await;
         }
 
-        // 3. Handle Deletions (Decremental Sync)
-        for (id, path_str, _, _, _) in all_books_minimal {
-            if !found_book_ids.contains(&id) {
-                // For WebDAV, if we traversed the whole library successfully and didn't find the book,
-                // and the book's path belongs to this library (which it does by library_id query),
-                // then it is deleted.
-                info!("WebDAV Book missing, deleting record: {}", path_str);
-                if let Err(e) = self.book_repo.delete(&id).await {
-                    warn!("Failed to delete missing WebDAV book {}: {}", id, e);
-                } else {
-                    scan_result.books_deleted += 1;
-                    if let Err(e) = self.chapter_repo.delete_by_book(&id).await {
-                        warn!("Failed to delete chapters for missing WebDAV book {}: {}", id, e);
-                    }
-                }
-            }
-        }
+        // 3. Handle deletions via shared helper (no path-exists check for WebDAV)
+        self.handle_book_deletions(&mut scan_result, &prefetched, &found_book_ids, false).await;
 
         // Final garbage collection after scan
         self.plugin_manager.garbage_collect_all().await;

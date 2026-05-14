@@ -46,16 +46,23 @@ use axum::{
 
 use axum::extract::DefaultBodyLimit;
 
+/// Helper macro to register a route on both /api/v1 and /api prefixes
+macro_rules! api_route {
+    ($router:expr, $path:expr, $($method:ident($handler:expr)),+ $(,)?) => {
+        $(
+            $router = $router
+                .route(concat!("/api/v1", $path), $method($handler))
+                .route(concat!("/api", $path), $method($handler));
+        )+
+    };
+}
+
 /// Build the API routes
 pub fn build_api_routes(state: AppState) -> Router {
     // Public routes (no authentication required)
-    let public_routes = Router::new()
-        // Statistics endpoint (public)
-        .route("/api/v1/stats", get(get_stats))
-        .route("/api/stats", get(get_stats))
-        // Health check (public)
-        .route("/api/v1/health", get(health_check))
-        .route("/api/health", get(health_check));
+    let mut public_routes = Router::new();
+    api_route!(public_routes, "/stats", get(get_stats));
+    api_route!(public_routes, "/health", get(health_check));
 
     // Protected routes (authentication required)
     let protected_routes = Router::new()

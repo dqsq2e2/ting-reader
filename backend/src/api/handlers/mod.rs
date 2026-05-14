@@ -19,7 +19,7 @@ pub use series::*;
 use crate::core::services::{BookService, ScraperService};
 use crate::core::task_queue::TaskQueue;
 use crate::db::repository::{
-    BookRepository, UserRepository, ProgressRepository, 
+    BookRepository, UserRepository, ProgressRepository,
     FavoriteRepository, UserSettingsRepository, LibraryRepository, ChapterRepository, SeriesRepository
 };
 use std::sync::Arc;
@@ -32,6 +32,7 @@ use crate::plugin::config::PluginConfigManager;
 use crate::core::config::Config;
 use crate::core::nfo_manager::NfoManager;
 use crate::core::library_watcher::LibraryWatcher;
+use crate::api::ws::manager::WsSessionManager;
 
 /// Shared application state for handlers
 #[derive(Clone)]
@@ -62,4 +63,5 @@ pub struct AppState {
     pub plugin_cache: Arc<crate::plugin::store::PluginCache>,
     pub active_preload_tasks: Arc<tokio::sync::Mutex<std::collections::HashMap<String, tokio::task::JoinHandle<()>>>>,
     pub library_watcher: Arc<LibraryWatcher>,
+    pub ws_manager: Arc<WsSessionManager>,
 }

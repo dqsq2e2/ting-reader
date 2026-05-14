@@ -1,13 +1,13 @@
 [package]
 name = "ting_reader"
-version = "1.3.6"
+version = "1.3.7"
 edition = "2021"
 rust-version = "1.70"
 
 [dependencies]
 reqwest = { version = "0.11", features = ["json", "rustls-tls", "stream"] }
 # HTTP Server
-axum = { version = "0.7", features = ["multipart"] }
+axum = { version = "0.7", features = ["multipart", "ws"] }
 tower = { version = "0.4", features = ["util", "timeout"] }
 tower-http = { version = "0.5", features = ["cors", "trace", "fs", "compression-full"] }
 

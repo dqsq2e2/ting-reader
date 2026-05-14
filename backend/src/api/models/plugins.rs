@@ -22,6 +22,9 @@ pub struct PluginInfoResponse {
     pub version: String,
     /// Plugin type (scraper, format, utility)
     pub plugin_type: String,
+    /// Plugin runtime (wasm, javascript, native)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
     /// Plugin author
     pub author: Option<String>,
     /// Plugin description
@@ -32,6 +35,18 @@ pub struct PluginInfoResponse {
     pub state: String,
     /// Plugin statistics
     pub stats: Option<PluginStatsResponse>,
+    /// Configuration schema (JSON Schema format)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_schema: Option<serde_json::Value>,
+    /// Plugin permissions
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<Vec<String>>,
+    /// Plugin license
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    /// Plugin homepage
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub homepage: Option<String>,
 }
 
 /// Plugin statistics response
@@ -58,6 +73,9 @@ pub struct PluginDetailResponse {
     pub version: String,
     /// Plugin type (scraper, format, utility)
     pub plugin_type: String,
+    /// Plugin runtime (wasm, javascript, native)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
     /// Plugin author
     pub author: Option<String>,
     /// Plugin description
@@ -76,6 +94,12 @@ pub struct PluginDetailResponse {
     pub dependencies: Vec<PluginDependencyResponse>,
     /// Plugin permissions
     pub permissions: Vec<String>,
+    /// Supported file extensions (format plugins only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supported_extensions: Option<Vec<String>>,
+    /// Configuration schema (JSON Schema format)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_schema: Option<serde_json::Value>,
     /// Plugin statistics
     pub stats: Option<PluginStatsResponse>,
 }

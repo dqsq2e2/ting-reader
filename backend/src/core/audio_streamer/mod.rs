@@ -1,0 +1,515 @@
+mod types;
+pub use types::*;
+
+use crate::core::error::{Result, TingError};
+use std::io::SeekFrom;
+use std::ops::Range;
+use std::path::Path;
+use std::sync::{Arc, RwLock};
+use std::time::Duration;
+use symphonia::core::formats::FormatOptions;
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::meta::MetadataOptions;
+use symphonia::core::probe::Hint;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use std::fs::File;
+use tracing::{debug, info};
+use id3::TagLike;
+
+pub struct AudioStreamer {
+    cache: Arc<RwLock<AudioCache>>,
+    config: StreamerConfig,
+}
+
+impl AudioStreamer {
+    /// Create a new audio streamer with the given configuration
+    pub fn new(config: StreamerConfig) -> Self {
+        let cache_size = if config.cache_enabled {
+            config.cache_size
+        } else {
+            0
+        };
+
+        Self {
+            cache: Arc::new(RwLock::new(AudioCache::new(cache_size))),
+            config,
+        }
+    }
+
+    /// Detect the audio format of a file
+    pub fn detect_format(&self, file_path: &Path) -> Result<AudioFormat> {
+        let extension = file_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        let format = match extension.as_str() {
+            "mp3" => AudioFormat::Mp3,
+            "m4a" | "mp4" => AudioFormat::M4a,
+            "aac" => AudioFormat::Aac,
+            "flac" => AudioFormat::Flac,
+            "ogg" => AudioFormat::Ogg,
+            "opus" => AudioFormat::Opus,
+            "wma" => AudioFormat::Wma,
+            _ => AudioFormat::Unknown,
+        };
+
+        debug!("Detected format {:?} for file: {:?}", format, file_path);
+        Ok(format)
+    }
+
+    /// Validate that an audio file exists and is readable
+    pub fn validate_audio(&self, file_path: &Path) -> Result<()> {
+        if !file_path.exists() {
+            return Err(TingError::NotFound(format!(
+                "Audio file not found: {:?}",
+                file_path
+            )));
+        }
+
+        if !file_path.is_file() {
+            return Err(TingError::InvalidRequest(format!(
+                "Path is not a file: {:?}",
+                file_path
+            )));
+        }
+
+        let format = self.detect_format(file_path)?;
+        
+        // Skip validation for .strm files (they are URL redirects, not audio files)
+        if format == AudioFormat::Unknown {
+            let ext = file_path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if ext == "strm" {
+                return Ok(());
+            }
+        }
+        
+        if !self.config.supported_formats.contains(&format) {
+            return Err(TingError::InvalidRequest(format!(
+                "Unsupported audio format: {:?}",
+                format
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Read audio metadata from a file
+    pub fn read_metadata(&self, file_path: &Path) -> Result<AudioMetadata> {
+        // Check cache first
+        if self.config.cache_enabled {
+            let cache_key = file_path.to_string_lossy().to_string();
+            if let Ok(mut cache) = self.cache.write() {
+                if let Some(metadata) = cache.get(&cache_key) {
+                    debug!("Cache hit for metadata: {:?}", file_path);
+                    return Ok(metadata);
+                }
+            }
+        }
+
+        // Skip metadata extraction for .strm files (they are URL redirects, not audio files)
+        let ext = file_path.extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        if ext == "strm" {
+            return Err(TingError::InvalidRequest(
+                "Cannot extract metadata from .strm files (URL redirects)".to_string()
+            ));
+        }
+
+        // Validate file
+        self.validate_audio(file_path)?;
+
+        // Open file and probe format
+        let file = File::open(file_path).map_err(|e| {
+            TingError::IoError(std::io::Error::new(
+                e.kind(),
+                format!("Failed to open audio file {:?}: {}", file_path, e),
+            ))
+        })?;
+
+        let mss = MediaSourceStream::new(Box::new(file), Default::default());
+
+        let mut hint = Hint::new();
+        if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
+            hint.with_extension(ext);
+        }
+
+        // Configure format options
+        // Note: Symphonia 0.5 doesn't have a configurable probe_limit
+        // The default limit is sufficient for most files
+        let format_opts = FormatOptions {
+            enable_gapless: true,
+            ..Default::default()
+        };
+        
+        let metadata_opts = MetadataOptions::default();
+
+        let probed = symphonia::default::get_probe()
+            .format(&hint, mss, &format_opts, &metadata_opts)
+            .map_err(|e| {
+                let error_msg = e.to_string();
+                if error_msg.contains("probe limit") || error_msg.contains("unsupported format") {
+                    tracing::warn!(
+                        "音频格式探测失败: {:?}, 错误: {}",
+                        file_path,
+                        error_msg
+                    );
+                    TingError::InvalidRequest(format!(
+                        "音频文件格式探测失败（文件可能损坏或格式不支持）: {}",
+                        error_msg
+                    ))
+                } else {
+                    tracing::warn!(
+                        "音频格式探测失败: {:?}, 错误: {}",
+                        file_path,
+                        error_msg
+                    );
+                    TingError::InvalidRequest(format!("音频格式探测失败: {}", error_msg))
+                }
+            })?;
+
+        let mut format_reader = probed.format;
+        let track = format_reader
+            .default_track()
+            .ok_or_else(|| TingError::InvalidRequest("No audio track found".to_string()))?;
+
+        let codec_params = &track.codec_params;
+
+        // Extract metadata
+        let format = self.detect_format(file_path)?;
+        let sample_rate = codec_params.sample_rate.unwrap_or(44100);
+        let channels = codec_params.channels.map(|c| c.count()).unwrap_or(2) as u8;
+
+        // Calculate duration
+        let duration = if let Some(n_frames) = codec_params.n_frames {
+            Duration::from_secs_f64(n_frames as f64 / sample_rate as f64)
+        } else {
+            Duration::from_secs(0)
+        };
+
+        // Calculate bitrate
+        let file_size = std::fs::metadata(file_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        let bitrate = if duration.as_secs() > 0 {
+            ((file_size * 8) / duration.as_secs()) as u32
+        } else {
+            0
+        };
+
+        // Extract tags
+        let mut title = None;
+        let mut artist = None;
+        let mut album = None;
+        let mut album_artist = None;
+        let mut composer = None;
+        let mut genre = None;
+
+        // Iterate through all metadata revisions
+        // Symphonia might provide multiple metadata blocks (e.g. ID3v2 and ID3v1, or iTunes metadata)
+        // We process them all, preferring values found later (or earlier? usually header metadata comes first)
+        // We'll fill in missing values.
+        
+        // Note: metadata() returns a MetadataLog. pop() returns the oldest? 
+        // Actually Symphonia documentation says pop() "Removes the oldest metadata from the log".
+        // So we should probably process them in order.
+        
+        while let Some(metadata_rev) = format_reader.metadata().pop() {
+            for tag in metadata_rev.tags() {
+                match tag.std_key {
+                    Some(symphonia::core::meta::StandardTagKey::TrackTitle) => {
+                        if title.is_none() { title = Some(tag.value.to_string()); }
+                    }
+                    Some(symphonia::core::meta::StandardTagKey::Artist) => {
+                         if artist.is_none() { artist = Some(tag.value.to_string()); }
+                    }
+                    Some(symphonia::core::meta::StandardTagKey::Album) => {
+                         if album.is_none() { album = Some(tag.value.to_string()); }
+                    }
+                    Some(symphonia::core::meta::StandardTagKey::AlbumArtist) => {
+                         if album_artist.is_none() { album_artist = Some(tag.value.to_string()); }
+                    }
+                    Some(symphonia::core::meta::StandardTagKey::Composer) => {
+                         if composer.is_none() { composer = Some(tag.value.to_string()); }
+                    }
+                    Some(symphonia::core::meta::StandardTagKey::Genre) => {
+                         if genre.is_none() { genre = Some(tag.value.to_string()); }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Try to use id3 crate for MP3 AND M4A files as fallback if metadata is missing
+        // Some M4A files might contain ID3v2 tags (non-standard but common)
+        // Or the file might be an MP3 renamed as M4A
+        if (format == AudioFormat::Mp3 || format == AudioFormat::M4a) && (title.is_none() || artist.is_none() || album.is_none()) {
+            debug!("Using id3 crate fallback for {:?}", file_path);
+            if let Ok(tag) = id3::Tag::read_from_path(file_path) {
+                if title.is_none() {
+                    title = tag.title().map(|s| s.to_string());
+                }
+                if artist.is_none() {
+                    artist = tag.artist().map(|s| s.to_string());
+                }
+                if album.is_none() {
+                    album = tag.album().map(|s| s.to_string());
+                }
+                if album_artist.is_none() {
+                    album_artist = tag.album_artist().map(|s| s.to_string());
+                }
+                if genre.is_none() {
+                    genre = tag.genre().map(|s| s.to_string());
+                }
+            }
+        }
+
+        let metadata = AudioMetadata {
+            format,
+            duration,
+            bitrate,
+            sample_rate,
+            channels,
+            title,
+            artist,
+            album,
+            album_artist,
+            composer,
+            genre,
+        };
+
+        // Cache the metadata
+        if self.config.cache_enabled {
+            let cache_key = file_path.to_string_lossy().to_string();
+            if let Ok(mut cache) = self.cache.write() {
+                cache.insert(cache_key, metadata.clone(), file_size);
+            }
+        }
+
+        debug!("Read metadata for {:?}: {:?}", file_path, metadata);
+        Ok(metadata)
+    }
+
+    /// Get the duration of an audio file
+    pub fn get_duration(&self, file_path: &Path) -> Result<Duration> {
+        let metadata = self.read_metadata(file_path)?;
+        Ok(metadata.duration)
+    }
+
+    /// Parse HTTP Range header
+    /// Supports formats: "bytes=0-499", "bytes=500-", "bytes=-500"
+    pub fn parse_range_header(&self, header: &str, file_size: u64) -> Result<Range<u64>> {
+        if !header.starts_with("bytes=") {
+            return Err(TingError::InvalidRequest(
+                "Invalid Range header format".to_string(),
+            ));
+        }
+
+        let range_str = &header[6..]; // Skip "bytes="
+        let parts: Vec<&str> = range_str.split('-').collect();
+
+        if parts.len() != 2 {
+            return Err(TingError::InvalidRequest(
+                "Invalid Range header format".to_string(),
+            ));
+        }
+
+        let (start, end) = if parts[0].is_empty() {
+            // Suffix range: bytes=-500
+            let suffix_len: u64 = parts[1].parse().map_err(|_| {
+                TingError::InvalidRequest("Invalid Range header: invalid suffix length".to_string())
+            })?;
+            let start = file_size.saturating_sub(suffix_len);
+            (start, file_size)
+        } else {
+            let start: u64 = parts[0].parse().map_err(|_| {
+                TingError::InvalidRequest("Invalid Range header: invalid start".to_string())
+            })?;
+            
+            let end = if parts[1].is_empty() {
+                // Open-ended range: bytes=500-
+                file_size
+            } else {
+                let end_val: u64 = parts[1].parse().map_err(|_| {
+                    TingError::InvalidRequest("Invalid Range header: invalid end".to_string())
+                })?;
+                (end_val + 1).min(file_size) // Range is inclusive, so add 1
+            };
+            
+            (start, end)
+        };
+
+        if start >= file_size {
+            return Err(TingError::InvalidRequest(format!(
+                "Range start {} exceeds file size {}",
+                start, file_size
+            )));
+        }
+
+        if start >= end {
+            return Err(TingError::InvalidRequest(format!(
+                "Invalid range: start {} >= end {}",
+                start, end
+            )));
+        }
+
+        Ok(start..end)
+    }
+
+    /// Stream audio file with optional range support
+    /// Returns the content type, content length, range, and the file data
+    pub async fn stream_audio(
+        &self,
+        file_path: &Path,
+        range: Option<Range<u64>>,
+    ) -> Result<(String, u64, Option<Range<u64>>, Vec<u8>)> {
+        // Validate file
+        self.validate_audio(file_path)?;
+
+        // Get file size
+        let file_size = std::fs::metadata(file_path)
+            .map(|m| m.len())
+            .map_err(|e| TingError::IoError(e))?;
+
+        // Determine content type
+        let format = self.detect_format(file_path)?;
+        let content_type = format.mime_type().to_string();
+
+        // Determine range to read
+        let (start, end) = if let Some(ref r) = range {
+            (r.start, r.end)
+        } else {
+            (0, file_size)
+        };
+
+        let content_length = end - start;
+
+        // Read file data
+        let mut file = tokio::fs::File::open(file_path)
+            .await
+            .map_err(|e| TingError::IoError(e))?;
+
+        // Seek to start position
+        file.seek(SeekFrom::Start(start))
+            .await
+            .map_err(|e| TingError::IoError(e))?;
+
+        // Read the requested range
+        let mut buffer = vec![0u8; content_length as usize];
+        file.read_exact(&mut buffer)
+            .await
+            .map_err(|e| TingError::IoError(e))?;
+
+        info!(
+            "Streaming audio: {:?}, range: {:?}, size: {}",
+            file_path, range, content_length
+        );
+
+        Ok((content_type, content_length, range, buffer))
+    }
+
+    /// Build HTTP response headers for range request
+    /// Returns (status_code, content_type, content_length, content_range, accept_ranges)
+    pub fn build_range_response(
+        &self,
+        content_type: String,
+        range: Option<Range<u64>>,
+        total_size: u64,
+    ) -> (u16, String, u64, Option<String>, String) {
+        if let Some(r) = range {
+            let content_length = r.end - r.start;
+            let content_range = format!("bytes {}-{}/{}", r.start, r.end - 1, total_size);
+            (
+                206, // 206 Partial Content
+                content_type,
+                content_length,
+                Some(content_range),
+                "bytes".to_string(),
+            )
+        } else {
+            (
+                200, // 200 OK
+                content_type,
+                total_size,
+                None,
+                "bytes".to_string(),
+            )
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_audio_format_mime_types() {
+        assert_eq!(AudioFormat::Mp3.mime_type(), "audio/mpeg");
+        assert_eq!(AudioFormat::M4a.mime_type(), "audio/mp4");
+        assert_eq!(AudioFormat::Aac.mime_type(), "audio/aac");
+        assert_eq!(AudioFormat::Flac.mime_type(), "audio/flac");
+    }
+
+    #[test]
+    fn test_parse_range_header() {
+        let streamer = AudioStreamer::new(StreamerConfig::default());
+        let file_size = 1000u64;
+
+        // Test normal range
+        let range = streamer
+            .parse_range_header("bytes=0-499", file_size)
+            .unwrap();
+        assert_eq!(range, 0..500);
+
+        // Test open-ended range
+        let range = streamer
+            .parse_range_header("bytes=500-", file_size)
+            .unwrap();
+        assert_eq!(range, 500..1000);
+
+        // Test suffix range
+        let range = streamer
+            .parse_range_header("bytes=-500", file_size)
+            .unwrap();
+        assert_eq!(range, 500..1000);
+
+        // Test invalid range
+        assert!(streamer
+            .parse_range_header("bytes=1000-", file_size)
+            .is_err());
+        assert!(streamer
+            .parse_range_header("bytes=500-400", file_size)
+            .is_err());
+    }
+
+    #[test]
+    fn test_build_range_response() {
+        let streamer = AudioStreamer::new(StreamerConfig::default());
+
+        // Test partial content response
+        let (status, content_type, content_length, content_range, accept_ranges) =
+            streamer.build_range_response("audio/mpeg".to_string(), Some(0..500), 1000);
+
+        assert_eq!(status, 206);
+        assert_eq!(content_type, "audio/mpeg");
+        assert_eq!(content_length, 500);
+        assert_eq!(content_range, Some("bytes 0-499/1000".to_string()));
+        assert_eq!(accept_ranges, "bytes");
+
+        // Test full content response
+        let (status, content_type, content_length, content_range, accept_ranges) =
+            streamer.build_range_response("audio/mpeg".to_string(), None, 1000);
+
+        assert_eq!(status, 200);
+        assert_eq!(content_type, "audio/mpeg");
+        assert_eq!(content_length, 1000);
+        assert_eq!(content_range, None);
+        assert_eq!(accept_ranges, "bytes");
+    }
+}

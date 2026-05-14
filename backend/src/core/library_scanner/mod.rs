@@ -18,6 +18,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 pub mod local;
+pub mod shared;
 pub mod webdav;
 
 /// Supported audio file extensions

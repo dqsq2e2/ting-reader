@@ -27,6 +27,7 @@ pub async fn list_plugins(State(state): State<AppState>) -> Result<impl IntoResp
             name: info.name,
             version: info.version,
             plugin_type: format!("{:?}", info.plugin_type).to_lowercase(),
+            runtime: info.runtime,
             author: Some(info.author),
             description: Some(info.description),
             is_enabled: true, // All loaded plugins are enabled
@@ -37,6 +38,10 @@ pub async fn list_plugins(State(state): State<AppState>) -> Result<impl IntoResp
                 failed_calls: info.failed_calls,
                 avg_execution_time_ms: 0.0, // Not available in PluginInfo
             }),
+            config_schema: info.config_schema,
+            permissions: Some(info.permissions),
+            license: info.license,
+            homepage: info.homepage,
         })
         .collect();
 
@@ -62,6 +67,7 @@ pub async fn get_plugin_detail(
         name: metadata.name.clone(),
         version: metadata.version.to_string(),
         plugin_type: format!("{:?}", metadata.plugin_type).to_lowercase(),
+        runtime: metadata.runtime.clone(),
         author: Some(metadata.author.clone()),
         description: Some(metadata.description.clone()),
         license: metadata.license.clone(),
@@ -82,6 +88,8 @@ pub async fn get_plugin_detail(
             .iter()
             .map(|perm| format!("{:?}", perm))
             .collect(),
+        supported_extensions: metadata.supported_extensions.clone(),
+        config_schema: metadata.config_schema.clone(),
         stats: Some(PluginStatsResponse {
             total_calls: plugin_info.total_calls,
             successful_calls: plugin_info.successful_calls,
@@ -170,11 +178,15 @@ pub async fn get_plugin_config(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse> {
-    if state.plugin_manager.get_plugin(&id).is_err() {
-        return Err(TingError::PluginNotFound(id.clone()));
-    }
+    let metadata = state.plugin_manager.get_plugin(&id)
+        .map_err(|_| TingError::PluginNotFound(id.clone()))?;
 
-    let config = state.config_manager.get_config(&id)?;
+    let config = state.config_manager.get_config(&id).unwrap_or_else(|_| {
+        // Config not initialized yet — bootstrap from schema defaults
+        metadata.config_schema.as_ref()
+            .map(|s| extract_defaults_from_schema(s))
+            .unwrap_or(serde_json::json!({}))
+    });
 
     Ok(Json(PluginConfigResponse {
         plugin_id: id,
@@ -188,8 +200,20 @@ pub async fn update_plugin_config(
     Path(id): Path<String>,
     Json(req): Json<UpdatePluginConfigRequest>,
 ) -> Result<impl IntoResponse> {
-    if state.plugin_manager.get_plugin(&id).is_err() {
-        return Err(TingError::PluginNotFound(id.clone()));
+    let metadata = state.plugin_manager.get_plugin(&id)
+        .map_err(|_| TingError::PluginNotFound(id.clone()))?;
+
+    // Auto-initialize config if it doesn't exist yet
+    if state.config_manager.get_config(&id).is_err() {
+        if let Some(ref schema) = metadata.config_schema {
+            let defaults = extract_defaults_from_schema(schema);
+            let _ = state.config_manager.initialize_config(
+                id.clone(),
+                metadata.name.clone(),
+                Some(schema.clone()),
+                defaults,
+            );
+        }
     }
 
     state.config_manager.update_config(&id, req.config)?;
@@ -197,6 +221,20 @@ pub async fn update_plugin_config(
     Ok(Json(UpdatePluginConfigResponse {
         message: format!("Plugin {} configuration updated successfully", id),
     }))
+}
+
+/// Extract default config values from a JSON Schema
+fn extract_defaults_from_schema(schema: &serde_json::Value) -> serde_json::Value {
+    let mut defaults = serde_json::json!({});
+    if let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) {
+        let obj = defaults.as_object_mut().unwrap();
+        for (key, prop) in properties {
+            if let Some(default_val) = prop.get("default") {
+                obj.insert(key.clone(), default_val.clone());
+            }
+        }
+    }
+    defaults
 }
 
 /// Handler for GET /api/v1/scraper/sources - Get list of scraper sources

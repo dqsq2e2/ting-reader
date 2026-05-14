@@ -30,9 +30,11 @@ pub mod merge_service;
 pub mod metadata_writer;
 pub mod webdav_client;
 
+pub mod cache;
 pub mod utils;
 
-pub use services::{BookService, ScraperService, FormatService};
+pub use cache::LruCache;
+pub use services::{BookService, ScraperService};
 pub use task_queue::{TaskQueue, Task, TaskStatus};
 pub use event_bus::{EventBus, Event, EventType};
 pub use config::Config;

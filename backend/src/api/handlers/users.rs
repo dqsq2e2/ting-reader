@@ -4,6 +4,7 @@ use crate::api::models::{
     FavoriteActionResponse,
     ProgressResponse, UpdateProgressRequest,
 };
+use crate::api::require_admin;
 use crate::core::error::{Result, TingError};
 use axum::{
     extract::{Path, State},
@@ -20,9 +21,7 @@ pub async fn list_users(
     State(state): State<AppState>,
     user: crate::auth::middleware::AuthUser,
 ) -> Result<impl IntoResponse> {
-    if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
-    }
+    require_admin(&user)?;
 
     let users_list = state.user_repo.find_all().await?;
     let mut users: Vec<UserInfoResponse> = Vec::new();
