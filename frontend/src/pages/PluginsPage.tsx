@@ -19,8 +19,6 @@ import {
   FileText,
   Link2,
   Package,
-  ChevronDown,
-  ChevronUp,
   Tag,
   Settings,
 } from 'lucide-react';

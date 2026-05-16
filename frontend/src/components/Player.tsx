@@ -174,7 +174,7 @@ const Player: React.FC = () => {
     isSeriesEditing
   } = usePlayerStore();
 
-  const { isConnected: wsConnected, sendProgress: wsSendProgress } = useWebSocket();
+  const { sendProgress: wsSendProgress } = useWebSocket();
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const location = useLocation();

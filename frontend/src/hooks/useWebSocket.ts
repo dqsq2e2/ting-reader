@@ -26,6 +26,7 @@ export function useWebSocket() {
   const [isConnected, setIsConnected] = useState(false);
   const pingTimerRef = useRef<ReturnType<typeof setInterval>>();
 
+  const connectRef = useRef<() => void>(() => {});
   const maxReconnectAttempts = 20;
 
   const getWsUrl = useCallback(() => {
@@ -92,7 +93,7 @@ export function useWebSocket() {
             30000
           );
           reconnectAttemptsRef.current += 1;
-          reconnectTimerRef.current = setTimeout(connect, delay);
+          reconnectTimerRef.current = setTimeout(() => connectRef.current(), delay);
         }
       };
 
@@ -103,9 +104,11 @@ export function useWebSocket() {
       wsRef.current = ws;
     } catch {
       // Connection failed, retry later
-      reconnectTimerRef.current = setTimeout(connect, 5000);
+      reconnectTimerRef.current = setTimeout(() => connectRef.current(), 5000);
     }
   }, [token, getWsUrl]);
+
+  useEffect(() => { connectRef.current = connect; }, [connect]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimerRef.current) {
