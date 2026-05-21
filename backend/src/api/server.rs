@@ -212,6 +212,22 @@ impl ApiServer {
         // Create WebSocket session manager
         let ws_manager = crate::api::ws::manager::WsSessionManager::new();
 
+        // Create HLS session manager
+        let hls_temp_dir = config.storage.temp_dir.join("ting_hls_sessions");
+        std::fs::create_dir_all(&hls_temp_dir)
+            .map_err(|e| anyhow::anyhow!("Failed to create HLS temp directory: {}", e))?;
+        let hls_session_manager = Arc::new(crate::api::handlers::media::stream::HlsSessionManager::new(hls_temp_dir));
+        
+        // Start HLS session cleanup task (runs every 10 minutes)
+        let hls_manager_clone = hls_session_manager.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(600));
+            loop {
+                interval.tick().await;
+                hls_manager_clone.cleanup_expired().await;
+            }
+        });
+
         // Create application state
         let app_state = AppState {
             book_repo,
@@ -241,6 +257,7 @@ impl ApiServer {
             active_preload_tasks: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             library_watcher,
             ws_manager,
+            hls_session_manager,
         };
         
         // Create public routes (no authentication required)

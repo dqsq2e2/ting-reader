@@ -33,6 +33,7 @@ use crate::core::config::Config;
 use crate::core::nfo_manager::NfoManager;
 use crate::core::library_watcher::LibraryWatcher;
 use crate::api::ws::manager::WsSessionManager;
+use crate::api::handlers::media::stream::HlsSessionManager;
 
 /// Shared application state for handlers
 #[derive(Clone)]
@@ -64,4 +65,5 @@ pub struct AppState {
     pub active_preload_tasks: Arc<tokio::sync::Mutex<std::collections::HashMap<String, tokio::task::JoinHandle<()>>>>,
     pub library_watcher: Arc<LibraryWatcher>,
     pub ws_manager: Arc<WsSessionManager>,
+    pub hls_session_manager: Arc<HlsSessionManager>,
 }

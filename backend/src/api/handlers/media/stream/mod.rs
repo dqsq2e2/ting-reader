@@ -1,6 +1,12 @@
 mod decrypt;
+mod hls;
+mod hls_session;
+mod hls_serve;
 
 pub(crate) use decrypt::create_decrypted_stream;
+pub use hls::handle_hls_request;
+pub use hls_session::HlsSessionManager;
+pub use hls_serve::{get_hls_playlist, get_hls_segment, seek_hls_stream};
 use crate::core::error::{Result, TingError};
 use crate::db::repository::Repository;
 use crate::plugin::manager::FormatMethod;
@@ -429,6 +435,21 @@ pub async fn stream_chapter(
                 [(header::LOCATION, url)],
                 Body::empty()
             ).into_response());
+        }
+    }
+
+    // Handle HLS Transcoding Request
+    if let Some(format) = &params.transcode {
+        if format == "hls" {
+            tracing::info!("请求 HLS 转码: {}", chapter.path);
+            return handle_hls_request(
+                state,
+                chapter,
+                book,
+                library,
+                ext == "strm",
+                params.seek.clone(),
+            ).await;
         }
     }
 

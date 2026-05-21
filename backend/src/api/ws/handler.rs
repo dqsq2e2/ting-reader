@@ -15,7 +15,6 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{debug, warn};
@@ -23,8 +22,7 @@ use tracing::{debug, warn};
 /// WebSocket query parameters (token auth)
 #[derive(Deserialize)]
 pub struct WsQuery {
-    #[allow(dead_code)]
-    token: Option<String>,
+    pub token: Option<String>,
 }
 
 /// Client → Server message
@@ -61,10 +59,10 @@ enum ServerMessage {
 /// Handle WebSocket upgrade request
 pub async fn ws_handler(
     State(state): State<AppState>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(params): Query<WsQuery>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    let token = params.get("token").cloned();
+    let token = params.token;
 
     // Authenticate via token
     let user_id = match authenticate_ws_token(&state, token).await {

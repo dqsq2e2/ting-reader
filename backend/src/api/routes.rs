@@ -36,6 +36,7 @@ use crate::api::handlers::{
     stream_chapter,
     AppState,
 };
+use crate::api::handlers::media::stream::{get_hls_playlist, get_hls_segment, seek_hls_stream};
 use crate::auth::handlers::{get_me, update_me};
 use crate::auth::middleware::authenticate;
 use axum::{
@@ -63,6 +64,12 @@ pub fn build_api_routes(state: AppState) -> Router {
     let mut public_routes = Router::new();
     api_route!(public_routes, "/stats", get(get_stats));
     api_route!(public_routes, "/health", get(health_check));
+    
+    // HLS streaming endpoints (public - session ID provides security)
+    public_routes = public_routes
+        .route("/api/stream/hls/:sessionId/playlist.m3u8", get(get_hls_playlist))
+        .route("/api/stream/hls/:sessionId/:filename", get(get_hls_segment))
+        .route("/api/stream/hls/:sessionId/seek", post(seek_hls_stream));
 
     // Protected routes (authentication required)
     let protected_routes = Router::new()
