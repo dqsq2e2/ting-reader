@@ -140,6 +140,11 @@ const Player: React.FC = () => {
       url += '&transcode=mp3';
     }
     
+    // Add seek parameter for transcoded streams (FFmpeg pipe doesn't support Range requests)
+    if (shouldTranscode && seekOffset !== null && seekOffset > 0) {
+      url += `&seek=${seekOffset}`;
+    }
+    
     // Add retry count to force URL refresh even if shouldTranscode didn't change (e.g. network retry)
     if (retryCount > 0) {
         url += `&retry=${retryCount}`;
@@ -312,6 +317,7 @@ const Player: React.FC = () => {
   const [autoCache, setAutoCache] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [shouldTranscode, setShouldTranscode] = useState(false);
+  const [seekOffset, setSeekOffset] = useState<number | null>(null);
   const isInitialLoadRef = useRef(true);
   const preloadAudioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -389,10 +395,11 @@ const Player: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Reset initial load ref when chapter changes
+  // Reset all playback state when chapter ID changes
   useEffect(() => {
     isInitialLoadRef.current = true;
     setShouldTranscode(false);
+    setSeekOffset(null);
     setTimeout(() => {
       setBufferedTime(0);
       setRetryCount(0);
@@ -403,11 +410,19 @@ const Player: React.FC = () => {
       setDuration(currentChapter.duration);
       console.log(`章节切换，立即设置时长: ${currentChapter.duration}s`);
     } else {
-      // 如果章节数据中没有时长，先设置为 0，等待音频加载后更新
       setDuration(0);
       console.log('章节切换，等待音频加载获取时长');
     }
-  }, [currentChapter?.id, currentChapter?.duration, setDuration]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentChapter?.id]);
+
+  // Update duration display when chapter duration is updated (e.g., after FFprobe)
+  // without resetting shouldTranscode or retryCount
+  useEffect(() => {
+    if (currentChapter?.duration && currentChapter.duration > 0) {
+      setDuration(currentChapter.duration);
+    }
+  }, [currentChapter?.duration, setDuration]);
 
   // Reset initial load ref when retrying (to allow resume logic to run again)
   useEffect(() => {
@@ -451,7 +466,7 @@ const Player: React.FC = () => {
       audioRef.current.pause();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlaying, currentChapter?.id, retryCount, shouldTranscode]);
+  }, [isPlaying, currentChapter?.id, retryCount, shouldTranscode, seekOffset]);
 
   // Some browsers may report "playing" while decode hasn't actually advanced.
   // Detect "stuck at start" by checking that currentTime does not move after a delay,
@@ -525,17 +540,20 @@ const Player: React.FC = () => {
   const handleTimeUpdate = () => {
     if (!audioRef.current) return;
     
-    const time = audioRef.current.currentTime;
+    const rawTime = audioRef.current.currentTime;
+    // For transcoded streams with server-side seek, add the seekOffset
+    // because FFmpeg -ss output starts from 0 but represents audio at seekOffset
+    const time = (shouldTranscode && seekOffset !== null && seekOffset > 0) ? rawTime + seekOffset : rawTime;
     
     // Prevent overwriting persisted progress with 0 on initial load
     // If we are at the very beginning (time < 0.5) but store has significant progress (> 2s),
     // ignore this update until we've resumed properly.
-    if (isInitialLoadRef.current && time < 0.5 && currentTime > 2) {
+    if (isInitialLoadRef.current && rawTime < 0.5 && currentTime > 2) {
       return;
     }
 
     // Mark initial load as done if we have successfully played past 1s
-    if (isInitialLoadRef.current && time > 1) {
+    if (isInitialLoadRef.current && rawTime > 1) {
        isInitialLoadRef.current = false;
     }
 
@@ -802,10 +820,24 @@ const Player: React.FC = () => {
   const handleSeekEnd = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
     setIsSeeking(false);
+    
     if (audioRef.current) {
-      audioRef.current.currentTime = time;
+      // For transcoded streams, native seeking won't work (no Range support)
+      // Detect by checking if seekable ranges are empty or if we're in transcode mode
+      const isNonSeekable = shouldTranscode || audioRef.current.seekable.length === 0;
+      
+      if (isNonSeekable && shouldTranscode) {
+        // Reload audio with seek parameter (server-side seek via FFmpeg -ss)
+        setSeekOffset(time);
+        setCurrentTime(time);
+        isInitialLoadRef.current = false;
+      } else {
+        audioRef.current.currentTime = time;
+        setCurrentTime(time);
+      }
+    } else {
+      setCurrentTime(time);
     }
-    setCurrentTime(time);
   };
 
   const formatTime = (time: number) => {
