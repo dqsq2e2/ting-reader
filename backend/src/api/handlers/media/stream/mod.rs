@@ -124,8 +124,7 @@ pub async fn stream_chapter(
         tracing::info!("处理 strm 文件: {}", url);
         
         // Handle Transcoding Request for .strm files
-        // Some strm URLs point to formats that browsers can't play (WMA, APE, etc.)
-        // Frontend will automatically request transcoding when playback fails
+        // Frontend will request transcoding via &transcode=mp3 when playback fails
         if let Some(format) = &params.transcode {
             tracing::info!("对 strm URL 进行转码: {} -> {}", url, format);
             
@@ -428,13 +427,113 @@ pub async fn stream_chapter(
                 ).into_response());
             }
         } else {
-            // No authentication in URL, safe to redirect
-            tracing::info!("重定向到 strm URL (无认证信息)");
-            return Ok((
-                StatusCode::FOUND,
-                [(header::LOCATION, url)],
-                Body::empty()
-            ).into_response());
+            // Proxy all strm URLs (even without auth) to enable proper Range/seeking support
+            // 302 redirect breaks seeking on iPhone Safari because external servers may not
+            // support Range requests properly or return required headers
+            tracing::info!("代理 strm URL (启用 Range 支持)");
+            
+            let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
+            
+            let client = reqwest::Client::builder()
+                .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new());
+            let mut req = client.get(&url)
+                .header("Accept", "*/*")
+                .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+                .header("Connection", "keep-alive");
+            
+            if let Some(range) = range_header {
+                req = req.header("range", range);
+            }
+            
+            let response = req.send().await
+                .map_err(|e| TingError::IoError(std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to fetch strm URL: {}", e))))?;
+            
+            let status = response.status();
+            
+            let content_type = response.headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("audio/mpeg")
+                .to_string();
+            
+            let content_length = response.headers()
+                .get("content-length")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok());
+            
+            let content_range = response.headers()
+                .get("content-range")
+                .and_then(|v| v.to_str().ok())
+                .map(|v| v.to_string());
+            
+            let stream = response.bytes_stream();
+            let body = Body::from_stream(stream);
+            
+            let response_status = if status == reqwest::StatusCode::PARTIAL_CONTENT {
+                StatusCode::PARTIAL_CONTENT
+            } else {
+                StatusCode::OK
+            };
+            
+            let response_builder = (
+                response_status,
+                [
+                    (header::CONTENT_TYPE, content_type),
+                    (header::ACCEPT_RANGES, "bytes".to_string()),
+                    (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".to_string()),
+                    ("Cross-Origin-Resource-Policy".parse().unwrap(), "cross-origin".to_string()),
+                ],
+            );
+            
+            if let Some(cl) = content_length {
+                if let Some(cr) = content_range {
+                    return Ok((
+                        response_builder.0,
+                        [
+                            response_builder.1[0].clone(),
+                            response_builder.1[1].clone(),
+                            response_builder.1[2].clone(),
+                            response_builder.1[3].clone(),
+                            (header::CONTENT_LENGTH, cl.to_string()),
+                            (header::CONTENT_RANGE, cr),
+                        ],
+                        body,
+                    ).into_response());
+                } else {
+                    return Ok((
+                        response_builder.0,
+                        [
+                            response_builder.1[0].clone(),
+                            response_builder.1[1].clone(),
+                            response_builder.1[2].clone(),
+                            response_builder.1[3].clone(),
+                            (header::CONTENT_LENGTH, cl.to_string()),
+                        ],
+                        body,
+                    ).into_response());
+                }
+            } else if let Some(cr) = content_range {
+                return Ok((
+                    response_builder.0,
+                    [
+                        response_builder.1[0].clone(),
+                        response_builder.1[1].clone(),
+                        response_builder.1[2].clone(),
+                        response_builder.1[3].clone(),
+                        (header::CONTENT_RANGE, cr),
+                    ],
+                    body,
+                ).into_response());
+            } else {
+                return Ok((
+                    response_builder.0,
+                    response_builder.1,
+                    body,
+                ).into_response());
+            }
         }
     }
 
