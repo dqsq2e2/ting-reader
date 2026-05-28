@@ -125,7 +125,21 @@ pub async fn stream_chapter(
         
         // Handle Transcoding Request for .strm files
         // Frontend will request transcoding via &transcode=mp3 when playback fails
+        // Android app uses &transcode=hls which is handled by the general HLS handler below
         if let Some(format) = &params.transcode {
+            // HLS transcoding for strm files is handled by the general HLS handler
+            if format == "hls" {
+                tracing::info!("strm 文件请求 HLS 转码，转交 HLS handler");
+                return handle_hls_request(
+                    state,
+                    chapter,
+                    book,
+                    library,
+                    true, // is_strm
+                    params.seek.clone(),
+                ).await;
+            }
+            
             tracing::info!("对 strm URL 进行转码: {} -> {}", url, format);
             
             let content_type = match format.as_str() {
