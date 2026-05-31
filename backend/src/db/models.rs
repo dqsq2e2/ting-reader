@@ -225,6 +225,11 @@ pub struct ScraperConfig {
     #[serde(default)]
     #[serde(rename = "disableWatcher", alias = "disable_watcher")]
     pub disable_watcher: bool,
+    /// Cloud drive mode: when enabled, adjust scanning behavior for WebDAV/local libraries
+    /// "cloudMode" is the primary key used by the frontend, "cloud_mode" kept for compatibility
+    #[serde(default)]
+    #[serde(rename = "cloudMode", alias = "cloud_mode")]
+    pub cloud_mode: bool,
 }
 
 fn default_extract_audio_cover() -> bool {

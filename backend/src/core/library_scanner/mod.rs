@@ -254,7 +254,7 @@ impl LibraryScanner {
         Ok(scan_result)
     }
 
-    pub(crate) async fn extract_chapter_metadata(&self, path: &Path) -> (String, String, Option<String>, Option<String>, Option<String>, i32) {
+    pub(crate) async fn extract_chapter_metadata(&self, path: &Path, cloud_mode: bool) -> (String, String, Option<String>, Option<String>, Option<String>, i32) {
         // Returns: (album, title, author, narrator, cover_url, duration)
         
         // Try NFO
@@ -269,24 +269,28 @@ impl LibraryScanner {
 
         // Handle .strm files explicitly
         if ext == "strm" {
+            let t = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+
+            // In cloud/drive mode for local libraries, we do not probe remote URLs or durations
+            if cloud_mode {
+                tracing::info!("Cloud mode enabled, skipping metadata extraction for strm file: {}", path.display());
+                return (String::new(), t, None, None, None, 0);
+            }
+
             // strm files are URL references, not actual audio files
             // Read the URL from the file
             let url = match tokio::fs::read_to_string(path).await {
                 Ok(content) => content.trim().to_string(),
                 Err(e) => {
                     tracing::error!("无法读取 strm 文件 {}: {}", path.display(), e);
-                    let t = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
                     return (String::new(), t, None, None, None, 0);
                 }
             };
             
             if url.is_empty() || !url.starts_with("http") {
                 tracing::warn!("strm 文件 {} 包含无效的 URL: {}", path.display(), url);
-                let t = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
                 return (String::new(), t, None, None, None, 0);
             }
-            
-            let t = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
             
             // Try to get duration using FFprobe (derive from FFmpeg path)
             let duration = if let Some(ffmpeg_path) = self.plugin_manager.get_ffmpeg_path().await {

@@ -761,6 +761,27 @@ const Player: React.FC = () => {
       else {
         console.warn('无法获取有效时长，使用默认值 0');
         browserDuration = 0;
+
+        // 转码流（chunked transfer）浏览器报告 Infinity/NaN，
+        // 但后端在启动 FFmpeg 之前已经通过 FFprobe 获取了真实时长并写入了数据库。
+        // 重新从服务器拉取章节数据，拿到 FFprobe 发现的时长。
+        if (shouldTranscode && currentBook?.id && currentChapter?.id) {
+          const fetchBookId = currentBook.id;
+          const fetchChapterId = currentChapter.id;
+          apiClient.get(`/api/books/${fetchBookId}/chapters`).then(res => {
+            const updatedChapters = sortChaptersByIndex(res.data);
+            const updatedChapter = updatedChapters.find((c: Chapter) => c.id === fetchChapterId);
+            if (updatedChapter && updatedChapter.duration && updatedChapter.duration > 0) {
+              setChapters(updatedChapters);
+              usePlayerStore.setState({
+                chapters: updatedChapters,
+                currentChapter: updatedChapter,
+              });
+              setDuration(updatedChapter.duration);
+              console.log(`转码音频：从服务器获取到时长: ${updatedChapter.duration}s`);
+            }
+          }).catch(err => console.error('获取转码音频时长失败', err));
+        }
       }
 
       setDuration(browserDuration);

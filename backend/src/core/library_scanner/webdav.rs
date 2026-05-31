@@ -40,11 +40,15 @@ impl LibraryScanner {
         // Key: Parent URL (String), Value: List of (File URL, Last Modified)
         let mut dir_groups: HashMap<String, Vec<(String, Option<chrono::DateTime<chrono::Utc>>)>> = HashMap::new();
         
+        // Metadata/sidecar file extensions that should be grouped alongside audio files
+        // so that cover images, metadata.json, book.nfo etc. are available during processing.
+        const METADATA_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "json", "nfo"];
+
         for (file_url, last_mod) in files {
             // Check extension
             if let Some(ext_pos) = file_url.rfind('.') {
                 let ext = file_url[ext_pos+1..].to_lowercase();
-                if supported_extensions.contains(&ext) {
+                if supported_extensions.contains(&ext) || METADATA_EXTENSIONS.contains(&ext.as_str()) {
                     // Get parent URL
                     if let Some(last_slash) = file_url.rfind('/') {
                         let parent = file_url[0..last_slash].to_string();
@@ -103,6 +107,11 @@ impl LibraryScanner {
                 } else {
                     file_urls.push(url.clone());
                 }
+            }
+
+            // Skip directories with no audio files (only metadata/sidecar files)
+            if file_urls.is_empty() {
+                continue;
             }
 
             // Calculate directory hash for lookup
@@ -524,9 +533,10 @@ impl LibraryScanner {
         let mut abridged: bool = false;
         let mut json_tags: Vec<String> = Vec::new();
         let mut json_series: Vec<String> = Vec::new();
+        let is_cloud_mode = scraper_config.cloud_mode;
         
         // Extract metadata from WebDAV files (try multiple files if needed)
-        let (mut meta_album, mut _meta_chapter_title, mut meta_author, mut meta_narrator, mut meta_cover_url, _meta_duration) = if !file_urls.is_empty() {
+        let (mut meta_album, mut _meta_chapter_title, mut meta_author, mut meta_narrator, mut meta_cover_url, _meta_duration) = if !is_cloud_mode && !file_urls.is_empty() {
             // 尝试多个文件，直到找到完整的元数据（包括封面）
             let mut album = String::new();
             let mut title = String::new();
@@ -652,18 +662,31 @@ impl LibraryScanner {
         }
         
         // Also check if there's a local cover image directly in the webdav folder
-        // For webdav, we downloaded metadata_files, let's see if there is a cover
-        for meta_url in metadata_files {
-            let filename = meta_url.split('/').last().unwrap_or_default().to_lowercase();
-            if ["cover.jpg", "cover.png", "cover.jpeg", "cover.webp", "folder.jpg"].contains(&filename.as_str()) {
-                // We don't download it yet, just store the URL so the frontend can access it via WebDAV proxy or similar.
-                // Wait, cover_url needs to be accessible. WebDAV urls are not directly accessible by frontend unless proxied.
-                // Actually, our API serves cover_url directly if it's a URL or path.
-                // We can set it to the meta_url.
-                if meta_cover_url.is_none() {
-                    meta_cover_url = Some(meta_url.clone());
+        // Download it to temp_book_dir so the proxy can serve it as a local file.
+        // Storing the raw WebDAV URL doesn't work because the frontend/proxy lacks WebDAV auth.
+        if meta_cover_url.is_none() {
+            if let Some(storage) = &self.storage_service {
+                let key = self.encryption_key.as_deref().unwrap_or(&[0u8; 32]);
+                for meta_url in metadata_files {
+                    let filename = meta_url.split('/').last().unwrap_or_default().to_lowercase();
+                    if ["cover.jpg", "cover.png", "cover.jpeg", "cover.webp", "folder.jpg"].contains(&filename.as_str()) {
+                        // Download cover image to temp_book_dir
+                        let original_ext = meta_url.split('.').last().unwrap_or("jpg");
+                        let temp_cover_path = temp_book_dir.join(format!("cover.{}", original_ext));
+                        if !temp_cover_path.exists() {
+                            if let Ok((mut reader, _)) = storage.get_webdav_reader(library, meta_url, None, key).await {
+                                if let Ok(mut file) = tokio::fs::File::create(&temp_cover_path).await {
+                                    let _ = tokio::io::copy(&mut reader, &mut file).await;
+                                    tracing::debug!("Downloaded WebDAV cover to {:?}", temp_cover_path);
+                                }
+                            }
+                        }
+                        if temp_cover_path.exists() {
+                            meta_cover_url = Some(temp_cover_path.to_string_lossy().replace('\\', "/"));
+                        }
+                        break;
+                    }
                 }
-                break;
             }
         }
 
@@ -907,24 +930,31 @@ impl LibraryScanner {
             let ch_hash = format!("{:x}", ch_hasher.finalize());
             
             // Extract metadata from WebDAV file (download header chunk)
-            // Optimization: Skip metadata extraction if chapter exists and not forced?
-            // Extract metadata or use JSON chapters
+            // In cloud mode we avoid probing WebDAV audio files and rely solely on scraped/sidecar metadata
             let (meta_title, meta_duration) = if use_json_chapters {
                 if let Some(ref chapters) = json_chapters {
                     if index < chapters.len() {
                         let chapter = &chapters[index];
                         let duration = ((chapter.end - chapter.start).round() as i32).max(0);
                         (chapter.title.clone(), duration)
+                    } else if is_cloud_mode {
+                        // Cloud mode: fallback to filename only, no remote probing
+                        (filename.clone(), 0)
                     } else {
                         // Fallback (should not happen)
                         let (_, t, _, _, _, d) = self.extract_webdav_metadata(library, file_url, None, scraper_config.extract_audio_cover).await;
                         (t, d)
                     }
+                } else if is_cloud_mode {
+                    (filename.clone(), 0)
                 } else {
                     // Fallback (should not happen)
                     let (_, t, _, _, _, d) = self.extract_webdav_metadata(library, file_url, None, scraper_config.extract_audio_cover).await;
                     (t, d)
                 }
+            } else if is_cloud_mode {
+                // Cloud/WebDAV mode without JSON chapters: use filename as title and duration 0
+                (filename.clone(), 0)
             } else {
                 // Extract from WebDAV file
                 let (_, t, _, _, _, d) = self.extract_webdav_metadata(library, file_url, None, scraper_config.extract_audio_cover).await;
@@ -1205,9 +1235,109 @@ impl LibraryScanner {
         extract_cover: bool,
     ) -> (String, String, Option<String>, Option<String>, Option<String>, i32) {
         // Returns: (album, title, author, narrator, cover_url, duration)
+        
+        // Handle .strm files: download the file, read the URL inside, then FFprobe that URL
+        let ext = Path::new(file_url).extension().and_then(|e| e.to_str()).unwrap_or("tmp").to_lowercase();
+        if ext == "strm" {
+            let decoded_url = self.decode_url_path(file_url);
+            let filename = decoded_url.split('/').last().unwrap_or("chapter");
+            let title = filename.strip_suffix(".strm").unwrap_or(filename).to_string();
+            
+            if let Some(storage) = &self.storage_service {
+                let key = self.encryption_key.as_deref().unwrap_or(&[0u8; 32]);
+                
+                // Download .strm file content
+                let temp_dir = std::env::temp_dir();
+                let temp_filename = format!("ting_scan_strm_{}.strm", Uuid::new_v4());
+                let temp_path = temp_dir.join(&temp_filename);
+                
+                if let Ok((mut reader, _)) = storage.get_webdav_reader(library, file_url, None, key).await {
+                    if let Ok(mut file) = tokio::fs::File::create(&temp_path).await {
+                        let _ = tokio::io::copy(&mut reader, &mut file).await;
+                    }
+                }
+                
+                // Read the URL from the .strm file
+                let url = match tokio::fs::read_to_string(&temp_path).await {
+                    Ok(content) => content.trim().to_string(),
+                    Err(e) => {
+                        tracing::error!("无法读取 WebDAV strm 文件 {}: {}", file_url, e);
+                        let _ = tokio::fs::remove_file(&temp_path).await;
+                        return (String::new(), title, None, None, None, 0);
+                    }
+                };
+                
+                let _ = tokio::fs::remove_file(&temp_path).await;
+                
+                if url.is_empty() || !url.starts_with("http") {
+                    tracing::warn!("WebDAV strm 文件 {} 包含无效的 URL: {}", file_url, url);
+                    return (String::new(), title, None, None, None, 0);
+                }
+                
+                // Use FFprobe to get duration from the URL inside the .strm file
+                let duration = if let Some(ffmpeg_path) = self.plugin_manager.get_ffmpeg_path().await {
+                    let ffprobe_path = {
+                        let ffmpeg_dir = std::path::Path::new(&ffmpeg_path).parent();
+                        if let Some(dir) = ffmpeg_dir {
+                            let ffprobe_name = if cfg!(target_os = "windows") { "ffprobe.exe" } else { "ffprobe" };
+                            let probe = dir.join(ffprobe_name);
+                            if probe.exists() { Some(probe.to_string_lossy().to_string()) } else { None }
+                        } else { None }
+                    };
+                    
+                    if let Some(ffprobe_path) = ffprobe_path {
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                        
+                        match tokio::process::Command::new(&ffprobe_path)
+                            .arg("-v").arg("error")
+                            .arg("-user_agent").arg("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                            .arg("-headers").arg("Accept: */*")
+                            .arg("-show_entries").arg("format=duration")
+                            .arg("-of").arg("default=noprint_wrappers=1:nokey=1")
+                            .arg(&url)
+                            .output()
+                            .await
+                        {
+                            Ok(output) if output.status.success() => {
+                                let duration_str = String::from_utf8_lossy(&output.stdout);
+                                match duration_str.trim().parse::<f64>() {
+                                    Ok(dur) => {
+                                        let duration_secs = dur.round() as i32;
+                                        tracing::info!("WebDAV strm 文件 {} 时长: {} 秒", title, duration_secs);
+                                        duration_secs
+                                    }
+                                    Err(_) => {
+                                        tracing::warn!("无法解析 FFprobe 输出: {}", duration_str);
+                                        0
+                                    }
+                                }
+                            }
+                            Ok(output) => {
+                                tracing::warn!("FFprobe 获取 WebDAV strm 时长失败: {}", String::from_utf8_lossy(&output.stderr));
+                                0
+                            }
+                            Err(e) => {
+                                tracing::warn!("无法运行 FFprobe: {}", e);
+                                0
+                            }
+                        }
+                    } else {
+                        tracing::warn!("未找到 FFprobe，WebDAV strm 文件时长将设为 0");
+                        0
+                    }
+                } else {
+                    tracing::warn!("未找到 FFmpeg，WebDAV strm 文件时长将设为 0");
+                    0
+                };
+                
+                return (String::new(), title, None, None, None, duration);
+            } else {
+                return (String::new(), title, None, None, None, 0);
+            }
+        }
+        
         if let Some(storage) = &self.storage_service {
             // Determine temp file path
-            let ext = Path::new(file_url).extension().and_then(|e| e.to_str()).unwrap_or("tmp");
             let temp_dir = std::env::temp_dir();
             let temp_filename = format!("ting_scan_{}.{}", Uuid::new_v4(), ext);
             let temp_path = temp_dir.join(&temp_filename);

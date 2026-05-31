@@ -220,7 +220,15 @@ impl LibraryScanner {
                 if let Ok(re) = regex::Regex::new(pattern) {
                     if re.is_match(dir_name) {
                         info!("New Chapter Protection: Merging {} into existing book {}", dir_name, book_id);
-                        let has_changes = self.process_chapters(book_id, files, last_scanned, task_id, scraper_config.use_filename_as_title, None).await?;
+                        let has_changes = self.process_chapters(
+                            book_id,
+                            files,
+                            last_scanned,
+                            task_id,
+                            scraper_config.use_filename_as_title,
+                            scraper_config.cloud_mode,
+                            None,
+                        ).await?;
                         return Ok((book_id.clone(), if has_changes { ScanStatus::Updated } else { ScanStatus::Skipped }));
                     }
                 }
@@ -263,7 +271,15 @@ impl LibraryScanner {
         if skip_metadata_update && existing_book_id.is_some() && is_manual_corrected {
              let book_id = existing_book_id.unwrap();
              // Just process chapters (which also has skip logic)
-             let has_changes = self.process_chapters(&book_id, files, last_scanned, task_id, scraper_config.use_filename_as_title, None).await?;
+             let has_changes = self.process_chapters(
+                 &book_id,
+                 files,
+                 last_scanned,
+                 task_id,
+                 scraper_config.use_filename_as_title,
+                 scraper_config.cloud_mode,
+                 None,
+             ).await?;
              
              // Check if we need to restore missing NFO/JSON files or update due to chapter changes
              if scraper_config.nfo_writing_enabled {
@@ -448,7 +464,15 @@ impl LibraryScanner {
         };
 
         // 5. Process Chapters
-        let chapters_changed = self.process_chapters(&book_id, files, last_scanned, task_id, scraper_config.use_filename_as_title, json_chapters).await?;
+        let chapters_changed = self.process_chapters(
+            &book_id,
+            files,
+            last_scanned,
+            task_id,
+            scraper_config.use_filename_as_title,
+            scraper_config.cloud_mode,
+            json_chapters,
+        ).await?;
 
         // 5.1 Process Series
         if !json_series.is_empty() {
@@ -1071,6 +1095,7 @@ impl LibraryScanner {
         last_scanned: Option<chrono::DateTime<chrono::Utc>>,
         task_id: Option<&str>,
         use_filename_as_title: bool,
+        cloud_mode: bool,
         json_chapters: Option<Vec<crate::core::metadata_writer::AudiobookshelfChapter>>,
     ) -> Result<bool> {
         let mut has_changes = false;
@@ -1268,23 +1293,23 @@ impl LibraryScanner {
                         ((chapter.end - chapter.start).round() as i32).max(0)
                     } else {
                         // Fallback to file extraction
-                        let (_, _, _, _, _, d) = self.extract_chapter_metadata(file_path).await;
+                        let (_, _, _, _, _, d) = self.extract_chapter_metadata(file_path, cloud_mode).await;
                         d
                     }
                 } else {
                     // Fallback to file extraction
-                    let (_, _, _, _, _, d) = self.extract_chapter_metadata(file_path).await;
+                    let (_, _, _, _, _, d) = self.extract_chapter_metadata(file_path, cloud_mode).await;
                     d
                 }
             } else {
                 // Extract from file
-                let (_, _, _, _, _, d) = self.extract_chapter_metadata(file_path).await;
+                let (_, _, _, _, _, d) = self.extract_chapter_metadata(file_path, cloud_mode).await;
                 d
             };
             
             // Extract title (only if not using JSON chapters)
             let extracted_title = if !use_json_chapters {
-                let (_, t, _, _, _, _) = self.extract_chapter_metadata(file_path).await;
+                let (_, t, _, _, _, _) = self.extract_chapter_metadata(file_path, cloud_mode).await;
                 t
             } else {
                 String::new()
