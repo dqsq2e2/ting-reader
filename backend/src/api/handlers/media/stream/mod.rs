@@ -325,10 +325,25 @@ pub async fn stream_chapter(
         // Check if URL contains authentication (username:password@)
         // If it does, we need to proxy the request to avoid CORS issues
         let has_auth = url.contains("://") && url.split("://").nth(1).map(|s| s.contains('@')).unwrap_or(false);
-        
-        if has_auth {
-            // Proxy the request through our server to strip authentication from URL
-            tracing::info!("代理包含认证信息的 strm URL");
+
+        // Safari/iOS browsers: proxy instead of 302 redirect because many external
+        // audio servers don't return Accept-Ranges headers, breaking Safari seeking.
+        // iOS WKWebView also shares this limitation.
+        let user_agent = headers
+            .get(header::USER_AGENT)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        let is_safari = user_agent.contains("Safari")
+            && !user_agent.contains("Chrome")
+            && !user_agent.contains("CriOS");
+        let is_ios = user_agent.contains("iPhone") || user_agent.contains("iPad") || user_agent.contains("iPod");
+
+        if has_auth || is_safari || is_ios {
+            // Proxy the request through our server:
+            // - Auth URLs: strip credentials from URL, avoid CORS issues
+            // - Safari/iOS: forward Range headers, add Accept-Ranges for seeking
+            let reason = if has_auth { "认证信息" } else { "Safari/iOS" };
+            tracing::info!("代理 strm URL ({})", reason);
             
             let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
             
@@ -441,32 +456,7 @@ pub async fn stream_chapter(
                 ).into_response());
             }
         } else {
-            // No authentication in URL
-            // Safari/iOS browsers: use HLS transcoding directly since Safari natively
-            // supports HLS playback and many external audio servers don't return
-            // Accept-Ranges headers, breaking seeking
-            let user_agent = headers
-                .get(header::USER_AGENT)
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-            let is_safari = user_agent.contains("Safari")
-                && !user_agent.contains("Chrome")
-                && !user_agent.contains("CriOS");
-            let is_ios = user_agent.contains("iPhone") || user_agent.contains("iPad") || user_agent.contains("iPod");
-
-            if is_safari || is_ios {
-                tracing::info!("Safari/iOS 浏览器，使用 HLS 转码");
-                return handle_hls_request(
-                    state,
-                    chapter,
-                    book,
-                    library,
-                    true, // is_strm
-                    params.seek.clone(),
-                ).await;
-            }
-
-            // Other browsers: 302 redirect (zero bandwidth cost)
+            // No auth, not Safari/iOS: 302 redirect (zero bandwidth cost)
             tracing::info!("重定向到 strm URL (无认证信息)");
             return Ok((
                 StatusCode::FOUND,
