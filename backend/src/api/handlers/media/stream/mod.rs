@@ -326,9 +326,9 @@ pub async fn stream_chapter(
         // If it does, we need to proxy the request to avoid CORS issues
         let has_auth = url.contains("://") && url.split("://").nth(1).map(|s| s.contains('@')).unwrap_or(false);
 
-        // Safari/iOS browsers: proxy instead of 302 redirect because many external
-        // audio servers don't return Accept-Ranges headers, breaking Safari seeking.
-        // iOS WKWebView also shares this limitation.
+        // Safari/iOS browsers may need proxy if the upstream source doesn't support
+        // Range requests. Do a quick HEAD probe first — most CDNs support Range,
+        // so we only proxy when actually necessary.
         let user_agent = headers
             .get(header::USER_AGENT)
             .and_then(|v| v.to_str().ok())
@@ -338,12 +338,39 @@ pub async fn stream_chapter(
             && !user_agent.contains("CriOS");
         let is_ios = user_agent.contains("iPhone") || user_agent.contains("iPad") || user_agent.contains("iPod");
 
-        if has_auth || is_safari || is_ios {
+        let needs_proxy = if has_auth {
+            true
+        } else if is_safari || is_ios {
+            // HEAD probe: check if upstream supports Range
+            let probe = reqwest::Client::builder()
+                .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new());
+            let supports_range = probe.head(&url).send().await
+                .map(|r| {
+                    r.headers().get("accept-ranges")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|v| v.contains("bytes"))
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
+            if !supports_range {
+                tracing::info!("上游不支持 Range，Safari/iOS 走代理");
+                true
+            } else {
+                tracing::info!("上游支持 Range，Safari/iOS 走 302");
+                false
+            }
+        } else {
+            false
+        };
+
+        if needs_proxy {
             // Proxy the request through our server:
             // - Auth URLs: strip credentials from URL, avoid CORS issues
-            // - Safari/iOS: forward Range headers, add Accept-Ranges for seeking
-            let reason = if has_auth { "认证信息" } else { "Safari/iOS" };
-            tracing::info!("代理 strm URL ({})", reason);
+            // - Safari/iOS + no Range: forward Range headers, add Accept-Ranges for seeking
+            tracing::info!("代理 strm URL");
             
             let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
             
@@ -456,8 +483,8 @@ pub async fn stream_chapter(
                 ).into_response());
             }
         } else {
-            // No auth, not Safari/iOS: 302 redirect (zero bandwidth cost)
-            tracing::info!("重定向到 strm URL (无认证信息)");
+            // 302 redirect (zero bandwidth cost)
+            tracing::info!("重定向到 strm URL");
             return Ok((
                 StatusCode::FOUND,
                 [(header::LOCATION, url)],
