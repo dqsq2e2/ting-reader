@@ -441,9 +441,32 @@ pub async fn stream_chapter(
                 ).into_response());
             }
         } else {
-            // No authentication in URL, safe to redirect
-            // Safari seeking: if the external server doesn't return Accept-Ranges,
-            // the frontend will detect this and fall back to HLS transcoding
+            // No authentication in URL
+            // Safari/iOS browsers: use HLS transcoding directly since Safari natively
+            // supports HLS playback and many external audio servers don't return
+            // Accept-Ranges headers, breaking seeking
+            let user_agent = headers
+                .get(header::USER_AGENT)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+            let is_safari = user_agent.contains("Safari")
+                && !user_agent.contains("Chrome")
+                && !user_agent.contains("CriOS");
+            let is_ios = user_agent.contains("iPhone") || user_agent.contains("iPad") || user_agent.contains("iPod");
+
+            if is_safari || is_ios {
+                tracing::info!("Safari/iOS 浏览器，使用 HLS 转码");
+                return handle_hls_request(
+                    state,
+                    chapter,
+                    book,
+                    library,
+                    true, // is_strm
+                    params.seek.clone(),
+                ).await;
+            }
+
+            // Other browsers: 302 redirect (zero bandwidth cost)
             tracing::info!("重定向到 strm URL (无认证信息)");
             return Ok((
                 StatusCode::FOUND,
