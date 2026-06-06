@@ -11,14 +11,14 @@
 //! - Subscribing to system events
 //! - Supporting user configuration
 
+use super::Plugin;
+use crate::core::error::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use crate::core::error::Result;
-use super::Plugin;
 
 /// Utility plugin trait
 ///
@@ -258,9 +258,8 @@ impl Response {
 /// Endpoint handler function type
 ///
 /// Handlers receive a Request and return a Future that resolves to a Response.
-pub type EndpointHandler = Arc<
-    dyn Fn(Request) -> Pin<Box<dyn Future<Output = Result<Response>> + Send>> + Send + Sync
->;
+pub type EndpointHandler =
+    Arc<dyn Fn(Request) -> Pin<Box<dyn Future<Output = Result<Response>> + Send>> + Send + Sync>;
 
 /// System event type enumeration
 ///

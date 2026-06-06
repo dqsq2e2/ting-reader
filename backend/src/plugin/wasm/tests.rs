@@ -1,5 +1,5 @@
-use super::*;
 use super::plugin::StoreLimits;
+use super::*;
 use wasmtime::ResourceLimiter;
 
 #[tokio::test]
@@ -11,9 +11,7 @@ async fn test_wasm_runtime_creation() {
 #[tokio::test]
 async fn test_sandbox_creation() {
     let runtime = WasmRuntime::new().unwrap();
-    let permissions = vec![
-        Permission::FileRead(std::path::PathBuf::from("/tmp")),
-    ];
+    let permissions = vec![Permission::FileRead(std::path::PathBuf::from("/tmp"))];
     let limits = ResourceLimits::default();
 
     let sandbox = runtime.create_sandbox(permissions, limits);

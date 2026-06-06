@@ -33,18 +33,6 @@ pub struct Book {
     pub chapter_regex: Option<String>,
 }
 
-/// Merge suggestion record
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MergeSuggestion {
-    pub id: String,
-    pub book_a_id: String,
-    pub book_b_id: String,
-    pub score: f64,
-    pub reason: String,
-    pub status: String, // 'pending', 'rejected', 'ignored'
-    pub created_at: String,
-}
-
 /// User library access record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserLibraryAccess {
@@ -78,30 +66,6 @@ pub struct Chapter {
     pub created_at: String,
 }
 
-/// Plugin registry record
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginRecord {
-    pub id: String,
-    pub name: String,
-    pub version: String,
-    pub plugin_type: String,
-    pub description: Option<String>,
-    pub author: Option<String>,
-    pub enabled: i32,
-    pub config: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-/// Plugin dependency record
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginDependency {
-    pub plugin_id: String,
-    pub dependency_id: String,
-    pub version_requirement: String,
-    pub created_at: String,
-}
-
 /// Task record in the database
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskRecord {
@@ -116,7 +80,6 @@ pub struct TaskRecord {
     pub created_at: String,
     pub updated_at: String,
 }
-
 
 /// User record in the database
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -210,7 +173,7 @@ pub struct ScraperConfig {
     /// Whether to force using file/folder name as title (ignoring priority)
     /// This field was previously "prefer_audio_title" with inverted logic
     #[serde(default)]
-    #[serde(rename = "preferAudioTitle", alias = "prefer_audio_title")] 
+    #[serde(rename = "preferAudioTitle", alias = "prefer_audio_title")]
     pub use_filename_as_title: bool,
     /// Priority order for metadata sources
     /// Values: "local_metadata" (nfo/json), "audio_metadata" (id3 tags), "scraper"

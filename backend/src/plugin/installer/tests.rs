@@ -1,6 +1,6 @@
 use super::*;
-use tempfile::TempDir;
 use crate::plugin::types::PluginDependency;
+use tempfile::TempDir;
 
 fn create_test_plugin(dir: &Path, name: &str, version: &str) -> Result<()> {
     let metadata = PluginMetadata {
@@ -12,7 +12,7 @@ fn create_test_plugin(dir: &Path, name: &str, version: &str) -> Result<()> {
         description: "Test plugin".to_string(),
         description_en: None,
         license: Some("MIT".to_string()),
-        homepage: None,
+        repo: None,
         entry_point: "plugin.js".to_string(),
         runtime: Some("javascript".to_string()),
         dependencies: vec![],
@@ -21,6 +21,7 @@ fn create_test_plugin(dir: &Path, name: &str, version: &str) -> Result<()> {
         config_schema: None,
         min_core_version: None,
         supported_extensions: None,
+        scraper: None,
     };
 
     let metadata_json = serde_json::to_string_pretty(&metadata)
@@ -46,7 +47,7 @@ fn create_test_plugin_with_dependencies(
         description: "Test plugin with dependencies".to_string(),
         description_en: None,
         license: Some("MIT".to_string()),
-        homepage: None,
+        repo: None,
         entry_point: "plugin.js".to_string(),
         runtime: Some("javascript".to_string()),
         dependencies,
@@ -55,6 +56,7 @@ fn create_test_plugin_with_dependencies(
         config_schema: None,
         min_core_version: None,
         supported_extensions: None,
+        scraper: None,
     };
 
     let metadata_json = serde_json::to_string_pretty(&metadata)
@@ -77,10 +79,9 @@ async fn test_install_plugin_success() {
 
     let installer = PluginInstaller::new(plugin_dir.clone(), temp_extract).unwrap();
 
-    let result = installer.install_plugin(
-        &source_dir,
-        |_metadata| Ok(()),
-    ).await;
+    let result = installer
+        .install_plugin(&source_dir, |_metadata| Ok(()))
+        .await;
 
     assert!(result.is_ok());
     let plugin_id = result.unwrap();
@@ -105,10 +106,11 @@ async fn test_install_plugin_dependency_failure() {
 
     let installer = PluginInstaller::new(plugin_dir.clone(), temp_extract).unwrap();
 
-    let result = installer.install_plugin(
-        &source_dir,
-        |_metadata| Err(TingError::DependencyError("Missing dependency".to_string())),
-    ).await;
+    let result = installer
+        .install_plugin(&source_dir, |_metadata| {
+            Err(TingError::DependencyError("Missing dependency".to_string()))
+        })
+        .await;
 
     assert!(result.is_err());
 
@@ -137,10 +139,9 @@ async fn test_install_plugin_rollback() {
 
     let installer = PluginInstaller::new(plugin_dir.clone(), temp_extract).unwrap();
 
-    let result = installer.install_plugin(
-        &source_dir,
-        |_metadata| Ok(()),
-    ).await;
+    let result = installer
+        .install_plugin(&source_dir, |_metadata| Ok(()))
+        .await;
 
     assert!(result.is_err());
 
@@ -161,7 +162,8 @@ fn test_calculate_checksum() {
     let installer = PluginInstaller::new(
         temp_dir.path().join("plugins"),
         temp_dir.path().join("temp"),
-    ).unwrap();
+    )
+    .unwrap();
 
     let checksum1 = installer.calculate_checksum(&plugin_dir).unwrap();
     let checksum2 = installer.calculate_checksum(&plugin_dir).unwrap();
@@ -190,10 +192,10 @@ async fn test_uninstall_plugin() {
     let installer = PluginInstaller::new(plugin_dir.clone(), temp_extract).unwrap();
 
     // Install plugin
-    let plugin_id = installer.install_plugin(
-        &source_dir,
-        |_metadata| Ok(()),
-    ).await.unwrap();
+    let plugin_id = installer
+        .install_plugin(&source_dir, |_metadata| Ok(()))
+        .await
+        .unwrap();
 
     let installed_path = plugin_dir.join(&plugin_id);
     assert!(installed_path.exists());
@@ -220,10 +222,9 @@ async fn test_validate_package_missing_plugin_json() {
 
     let installer = PluginInstaller::new(plugin_dir, temp_extract).unwrap();
 
-    let result = installer.install_plugin(
-        &source_dir,
-        |_metadata| Ok(()),
-    ).await;
+    let result = installer
+        .install_plugin(&source_dir, |_metadata| Ok(()))
+        .await;
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -248,10 +249,9 @@ async fn test_validate_package_invalid_json() {
 
     let installer = PluginInstaller::new(plugin_dir, temp_extract).unwrap();
 
-    let result = installer.install_plugin(
-        &source_dir,
-        |_metadata| Ok(()),
-    ).await;
+    let result = installer
+        .install_plugin(&source_dir, |_metadata| Ok(()))
+        .await;
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -271,10 +271,9 @@ async fn test_validate_package_nonexistent_path() {
 
     let installer = PluginInstaller::new(plugin_dir, temp_extract).unwrap();
 
-    let result = installer.install_plugin(
-        &nonexistent_dir,
-        |_metadata| Ok(()),
-    ).await;
+    let result = installer
+        .install_plugin(&nonexistent_dir, |_metadata| Ok(()))
+        .await;
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -297,7 +296,8 @@ fn test_checksum_consistency() {
     let installer = PluginInstaller::new(
         temp_dir.path().join("plugins"),
         temp_dir.path().join("temp"),
-    ).unwrap();
+    )
+    .unwrap();
 
     // Calculate checksum multiple times
     let checksum1 = installer.calculate_checksum(&plugin_dir).unwrap();
@@ -320,7 +320,8 @@ fn test_checksum_detects_file_changes() {
     let installer = PluginInstaller::new(
         temp_dir.path().join("plugins"),
         temp_dir.path().join("temp"),
-    ).unwrap();
+    )
+    .unwrap();
 
     let checksum_before = installer.calculate_checksum(&plugin_dir).unwrap();
 
@@ -344,7 +345,8 @@ fn test_checksum_detects_new_files() {
     let installer = PluginInstaller::new(
         temp_dir.path().join("plugins"),
         temp_dir.path().join("temp"),
-    ).unwrap();
+    )
+    .unwrap();
 
     let checksum_before = installer.calculate_checksum(&plugin_dir).unwrap();
 
@@ -369,7 +371,8 @@ fn test_checksum_detects_deleted_files() {
     let installer = PluginInstaller::new(
         temp_dir.path().join("plugins"),
         temp_dir.path().join("temp"),
-    ).unwrap();
+    )
+    .unwrap();
 
     let checksum_before = installer.calculate_checksum(&plugin_dir).unwrap();
 
@@ -393,26 +396,24 @@ async fn test_dependency_check_success() {
 
     fs::create_dir_all(&source_dir).unwrap();
 
-    let dependencies = vec![
-        PluginDependency {
-            plugin_name: "base-plugin".to_string(),
-            version_requirement: "^1.0.0".to_string(),
-        },
-    ];
+    let dependencies = vec![PluginDependency {
+        plugin_name: "base-plugin".to_string(),
+        version_requirement: "^1.0.0".to_string(),
+    }];
 
-    create_test_plugin_with_dependencies(&source_dir, "dependent-plugin", "1.0.0", dependencies).unwrap();
+    create_test_plugin_with_dependencies(&source_dir, "dependent-plugin", "1.0.0", dependencies)
+        .unwrap();
 
     let installer = PluginInstaller::new(plugin_dir.clone(), temp_extract).unwrap();
 
     // Dependency checker that succeeds
-    let result = installer.install_plugin(
-        &source_dir,
-        |metadata| {
+    let result = installer
+        .install_plugin(&source_dir, |metadata| {
             assert_eq!(metadata.dependencies.len(), 1);
             assert_eq!(metadata.dependencies[0].plugin_name, "base-plugin");
             Ok(())
-        },
-    ).await;
+        })
+        .await;
 
     assert!(result.is_ok());
 }
@@ -426,22 +427,24 @@ async fn test_dependency_check_missing_dependency() {
 
     fs::create_dir_all(&source_dir).unwrap();
 
-    let dependencies = vec![
-        PluginDependency {
-            plugin_name: "missing-plugin".to_string(),
-            version_requirement: "^1.0.0".to_string(),
-        },
-    ];
+    let dependencies = vec![PluginDependency {
+        plugin_name: "missing-plugin".to_string(),
+        version_requirement: "^1.0.0".to_string(),
+    }];
 
-    create_test_plugin_with_dependencies(&source_dir, "dependent-plugin", "1.0.0", dependencies).unwrap();
+    create_test_plugin_with_dependencies(&source_dir, "dependent-plugin", "1.0.0", dependencies)
+        .unwrap();
 
     let installer = PluginInstaller::new(plugin_dir.clone(), temp_extract).unwrap();
 
     // Dependency checker that fails
-    let result = installer.install_plugin(
-        &source_dir,
-        |_metadata| Err(TingError::DependencyError("Missing dependency: missing-plugin".to_string())),
-    ).await;
+    let result = installer
+        .install_plugin(&source_dir, |_metadata| {
+            Err(TingError::DependencyError(
+                "Missing dependency: missing-plugin".to_string(),
+            ))
+        })
+        .await;
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -465,24 +468,24 @@ async fn test_dependency_check_version_incompatible() {
 
     fs::create_dir_all(&source_dir).unwrap();
 
-    let dependencies = vec![
-        PluginDependency {
-            plugin_name: "base-plugin".to_string(),
-            version_requirement: "^2.0.0".to_string(),
-        },
-    ];
+    let dependencies = vec![PluginDependency {
+        plugin_name: "base-plugin".to_string(),
+        version_requirement: "^2.0.0".to_string(),
+    }];
 
-    create_test_plugin_with_dependencies(&source_dir, "dependent-plugin", "1.0.0", dependencies).unwrap();
+    create_test_plugin_with_dependencies(&source_dir, "dependent-plugin", "1.0.0", dependencies)
+        .unwrap();
 
     let installer = PluginInstaller::new(plugin_dir.clone(), temp_extract).unwrap();
 
     // Dependency checker that fails due to version incompatibility
-    let result = installer.install_plugin(
-        &source_dir,
-        |_metadata| Err(TingError::DependencyError(
-            "Version incompatible: base-plugin requires ^2.0.0, found 1.0.0".to_string()
-        )),
-    ).await;
+    let result = installer
+        .install_plugin(&source_dir, |_metadata| {
+            Err(TingError::DependencyError(
+                "Version incompatible: base-plugin requires ^2.0.0, found 1.0.0".to_string(),
+            ))
+        })
+        .await;
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -517,21 +520,21 @@ async fn test_dependency_check_multiple_dependencies() {
         },
     ];
 
-    create_test_plugin_with_dependencies(&source_dir, "complex-plugin", "1.0.0", dependencies).unwrap();
+    create_test_plugin_with_dependencies(&source_dir, "complex-plugin", "1.0.0", dependencies)
+        .unwrap();
 
     let installer = PluginInstaller::new(plugin_dir.clone(), temp_extract).unwrap();
 
     // Dependency checker that validates all dependencies
-    let result = installer.install_plugin(
-        &source_dir,
-        |metadata| {
+    let result = installer
+        .install_plugin(&source_dir, |metadata| {
             assert_eq!(metadata.dependencies.len(), 3);
             assert_eq!(metadata.dependencies[0].plugin_name, "plugin-a");
             assert_eq!(metadata.dependencies[1].plugin_name, "plugin-b");
             assert_eq!(metadata.dependencies[2].plugin_name, "plugin-c");
             Ok(())
-        },
-    ).await;
+        })
+        .await;
 
     assert!(result.is_ok());
 }
@@ -552,17 +555,20 @@ async fn test_rollback_on_validation_failure() {
     let existing_plugin_dir = plugin_dir.join("test-plugin@1.0.0");
     fs::create_dir_all(&existing_plugin_dir).unwrap();
     fs::write(existing_plugin_dir.join("old_file.txt"), "old content").unwrap();
-    fs::write(existing_plugin_dir.join("plugin.json"), r#"{"name":"test-plugin","version":"1.0.0"}"#).unwrap();
+    fs::write(
+        existing_plugin_dir.join("plugin.json"),
+        r#"{"name":"test-plugin","version":"1.0.0"}"#,
+    )
+    .unwrap();
 
     // Create invalid source (missing plugin.json)
     fs::write(source_dir.join("invalid.txt"), "invalid").unwrap();
 
     let installer = PluginInstaller::new(plugin_dir.clone(), temp_extract).unwrap();
 
-    let result = installer.install_plugin(
-        &source_dir,
-        |_metadata| Ok(()),
-    ).await;
+    let result = installer
+        .install_plugin(&source_dir, |_metadata| Ok(()))
+        .await;
 
     assert!(result.is_err());
 
@@ -593,10 +599,13 @@ async fn test_rollback_on_dependency_failure() {
 
     let installer = PluginInstaller::new(plugin_dir.clone(), temp_extract).unwrap();
 
-    let result = installer.install_plugin(
-        &source_dir,
-        |_metadata| Err(TingError::DependencyError("Dependency check failed".to_string())),
-    ).await;
+    let result = installer
+        .install_plugin(&source_dir, |_metadata| {
+            Err(TingError::DependencyError(
+                "Dependency check failed".to_string(),
+            ))
+        })
+        .await;
 
     assert!(result.is_err());
 
@@ -620,10 +629,11 @@ async fn test_rollback_cleans_up_partial_installation() {
     let installer = PluginInstaller::new(plugin_dir.clone(), temp_extract).unwrap();
 
     // Simulate installation failure by providing invalid dependency checker
-    let result = installer.install_plugin(
-        &source_dir,
-        |_metadata| Err(TingError::DependencyError("Simulated failure".to_string())),
-    ).await;
+    let result = installer
+        .install_plugin(&source_dir, |_metadata| {
+            Err(TingError::DependencyError("Simulated failure".to_string()))
+        })
+        .await;
 
     assert!(result.is_err());
 
@@ -652,10 +662,13 @@ async fn test_rollback_preserves_other_plugins() {
 
     let installer = PluginInstaller::new(plugin_dir.clone(), temp_extract).unwrap();
 
-    let result = installer.install_plugin(
-        &source_dir,
-        |_metadata| Err(TingError::DependencyError("Installation failed".to_string())),
-    ).await;
+    let result = installer
+        .install_plugin(&source_dir, |_metadata| {
+            Err(TingError::DependencyError(
+                "Installation failed".to_string(),
+            ))
+        })
+        .await;
 
     assert!(result.is_err());
 

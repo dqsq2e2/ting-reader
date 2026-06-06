@@ -1,5 +1,5 @@
 use crate::plugin::types::PluginLogger;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 
 pub struct DefaultPluginLogger {
     plugin_name: String,

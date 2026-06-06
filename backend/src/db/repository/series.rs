@@ -1,7 +1,8 @@
 use crate::core::error::{Result, TingError};
 use crate::db::manager::DatabaseManager;
-use crate::db::models::{Series, SeriesBook, Book};
+use crate::db::models::{Book, Series, SeriesBook};
 use crate::db::repository::base::Repository;
+use crate::db::repository::book::map_book_row;
 use async_trait::async_trait;
 use rusqlite::OptionalExtension;
 use std::sync::Arc;
@@ -117,7 +118,11 @@ impl SeriesRepository {
     }
 
     /// Find series by title and library
-    pub async fn find_by_title_and_library(&self, title: &str, library_id: &str) -> Result<Option<Series>> {
+    pub async fn find_by_title_and_library(
+        &self,
+        title: &str,
+        library_id: &str,
+    ) -> Result<Option<Series>> {
         let title = title.trim().to_lowercase();
         let library_id = library_id.to_string();
         self.db.execute(move |conn| {
@@ -174,8 +179,6 @@ impl SeriesRepository {
         }).await
     }
 
-
-
     /// Find series with filters and access control
     pub async fn find_with_filters(
         &self,
@@ -214,7 +217,7 @@ impl SeriesRepository {
             query += " ORDER BY s.created_at DESC";
 
             let mut stmt = conn.prepare(&query).map_err(TingError::DatabaseError)?;
-            
+
             let series = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
                 Ok(Series {
                     id: row.get(0)?,
@@ -230,20 +233,25 @@ impl SeriesRepository {
             }).map_err(TingError::DatabaseError)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(TingError::DatabaseError)?;
-            
+
             Ok(series)
         }).await
     }
 
     /// Check if a user has access to a series
-    pub async fn check_access(&self, series_id: &str, user_id: &str, is_admin: bool) -> Result<bool> {
+    pub async fn check_access(
+        &self,
+        series_id: &str,
+        user_id: &str,
+        is_admin: bool,
+    ) -> Result<bool> {
         if is_admin {
             return Ok(true);
         }
-        
+
         let series_id = series_id.to_string();
         let user_id = user_id.to_string();
-        
+
         self.db.execute(move |conn| {
             let has_access: bool = conn.query_row(
                 "SELECT EXISTS(
@@ -257,7 +265,7 @@ impl SeriesRepository {
                 rusqlite::params![&series_id, &user_id, &user_id],
                 |row| row.get(0),
             ).unwrap_or(false);
-            
+
             Ok(has_access)
         }).await
     }
@@ -277,27 +285,7 @@ impl SeriesRepository {
             ).map_err(TingError::DatabaseError)?;
 
             let books = stmt.query_map([&series_id], |row| {
-                let book = Book {
-                    id: row.get(0)?,
-                    library_id: row.get(1)?,
-                    title: row.get(2)?,
-                    author: row.get(3)?,
-                    narrator: row.get(4)?,
-                    cover_url: row.get(5)?,
-                    theme_color: row.get(6)?,
-                    description: row.get(7)?,
-                    skip_intro: row.get(8)?,
-                    skip_outro: row.get(9)?,
-                    path: row.get(10)?,
-                    hash: row.get(11)?,
-                    tags: row.get(12)?,
-                    genre: row.get(13)?,
-                    year: row.get(14)?,
-                    created_at: row.get(15)?,
-                    manual_corrected: row.get(16).unwrap_or(0),
-                    match_pattern: row.get(17).unwrap_or(None),
-                    chapter_regex: row.get(18).unwrap_or(None),
-                };
+                let book = map_book_row(row)?;
                 let order: i32 = row.get(19)?;
                 Ok((book, order))
             }).map_err(TingError::DatabaseError)?
@@ -341,27 +329,7 @@ impl SeriesRepository {
             let mut stmt = conn.prepare(&query).map_err(TingError::DatabaseError)?;
 
             let books = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
-                let book = Book {
-                    id: row.get(0)?,
-                    library_id: row.get(1)?,
-                    title: row.get(2)?,
-                    author: row.get(3)?,
-                    narrator: row.get(4)?,
-                    cover_url: row.get(5)?,
-                    theme_color: row.get(6)?,
-                    description: row.get(7)?,
-                    skip_intro: row.get(8)?,
-                    skip_outro: row.get(9)?,
-                    path: row.get(10)?,
-                    hash: row.get(11)?,
-                    tags: row.get(12)?,
-                    genre: row.get(13)?,
-                    year: row.get(14)?,
-                    created_at: row.get(15)?,
-                    manual_corrected: row.get(16).unwrap_or(0),
-                    match_pattern: row.get(17).unwrap_or(None),
-                    chapter_regex: row.get(18).unwrap_or(None),
-                };
+                let book = map_book_row(row)?;
                 let order: i32 = row.get(19)?;
                 Ok((book, order))
             }).map_err(TingError::DatabaseError)?
@@ -374,41 +342,57 @@ impl SeriesRepository {
 
     /// Add a book to a series
     pub async fn add_book(&self, series_book: SeriesBook) -> Result<()> {
-        self.db.execute(move |conn| {
-            conn.execute(
-                "INSERT INTO series_books (series_id, book_id, book_order) VALUES (?, ?, ?) \
+        self.db
+            .execute(move |conn| {
+                conn.execute(
+                    "INSERT INTO series_books (series_id, book_id, book_order) VALUES (?, ?, ?) \
                  ON CONFLICT(series_id, book_id) DO UPDATE SET book_order = excluded.book_order",
-                rusqlite::params![&series_book.series_id, &series_book.book_id, series_book.book_order],
-            ).map_err(TingError::DatabaseError)?;
-            Ok(())
-        }).await
+                    rusqlite::params![
+                        &series_book.series_id,
+                        &series_book.book_id,
+                        series_book.book_order
+                    ],
+                )
+                .map_err(TingError::DatabaseError)?;
+                Ok(())
+            })
+            .await
     }
 
     /// Remove a book from a series
     pub async fn remove_book(&self, series_id: &str, book_id: &str) -> Result<()> {
         let series_id = series_id.to_string();
         let book_id = book_id.to_string();
-        self.db.execute(move |conn| {
-            conn.execute(
-                "DELETE FROM series_books WHERE series_id = ? AND book_id = ?",
-                [&series_id, &book_id],
-            ).map_err(TingError::DatabaseError)?;
-            Ok(())
-        }).await
+        self.db
+            .execute(move |conn| {
+                conn.execute(
+                    "DELETE FROM series_books WHERE series_id = ? AND book_id = ?",
+                    [&series_id, &book_id],
+                )
+                .map_err(TingError::DatabaseError)?;
+                Ok(())
+            })
+            .await
     }
 
     /// Update book orders in a series
-    pub async fn update_book_orders(&self, series_id: &str, orders: Vec<(String, i32)>) -> Result<()> {
+    pub async fn update_book_orders(
+        &self,
+        series_id: &str,
+        orders: Vec<(String, i32)>,
+    ) -> Result<()> {
         let series_id = series_id.to_string();
-        self.db.transaction(move |tx| {
-            for (book_id, order) in orders {
-                tx.execute(
+        self.db
+            .transaction(move |tx| {
+                for (book_id, order) in orders {
+                    tx.execute(
                     "UPDATE series_books SET book_order = ? WHERE series_id = ? AND book_id = ?",
                     rusqlite::params![order, &series_id, &book_id],
                 ).map_err(TingError::DatabaseError)?;
-            }
-            Ok(())
-        }).await
+                }
+                Ok(())
+            })
+            .await
     }
 }
 
@@ -508,10 +492,12 @@ impl Repository<Series> for SeriesRepository {
 
     async fn delete(&self, id: &str) -> Result<()> {
         let id = id.to_string();
-        self.db.execute(move |conn| {
-            conn.execute("DELETE FROM series WHERE id = ?", [&id])
-                .map_err(TingError::DatabaseError)?;
-            Ok(())
-        }).await
+        self.db
+            .execute(move |conn| {
+                conn.execute("DELETE FROM series WHERE id = ?", [&id])
+                    .map_err(TingError::DatabaseError)?;
+                Ok(())
+            })
+            .await
     }
 }

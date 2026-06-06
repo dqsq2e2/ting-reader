@@ -1,350 +1,34 @@
+use super::AppState;
 use crate::api::models::{
-    TasksQuery, TaskInfoResponse, TaskDetailResponse, CancelTaskResponse,
-    DeleteTaskResponse, ClearTasksQuery, ClearTasksResponse,
-    BatchDeleteTasksRequest, BatchDeleteTasksResponse,
-    HealthResponse, HealthStatus, ComponentsHealth, ComponentStatus, ComponentHealth,
-    MetricsResponse, SystemMetrics, PluginMetrics, TaskQueueMetrics, DatabaseMetrics,
-    ConfigResponse, ServerConfigResponse, DatabaseConfigResponse,
-    PluginSystemConfigResponse, TaskQueueConfigResponse,
-    LoggingConfigResponse, SecurityConfigResponse, StorageConfigResponse,
+    BatchDeleteTasksRequest, BatchDeleteTasksResponse, CancelTaskResponse, ClearTasksQuery,
+    ClearTasksResponse, ComponentHealth, ComponentStatus, ComponentsHealth, ConfigResponse,
+    DatabaseConfigResponse, DatabaseMetrics, DeleteTaskResponse, HealthResponse, HealthStatus,
+    LoggingConfigResponse, MetricsResponse, PluginMetrics, PluginSystemConfigResponse,
+    SecurityConfigResponse, ServerConfigResponse, StorageConfigResponse, SystemMetrics,
+    TaskDetailResponse, TaskInfoResponse, TaskQueueConfigResponse, TaskQueueMetrics, TasksQuery,
     UpdateConfigRequest, UpdateConfigResponse,
 };
 use crate::core::error::{Result, TingError};
 use crate::db::repository::Repository;
-use crate::core::logging::LogEntry;
 use axum::{
     extract::{Path, Query, State},
     response::IntoResponse,
     Json,
 };
-use serde::{Deserialize, Serialize};
 use chrono::Utc;
-use std::path::{Path as StdPath, PathBuf};
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-use super::AppState;
 use serde_json::Value;
+use std::path::PathBuf;
 
-#[derive(Debug, Deserialize)]
-pub struct LogsQuery {
-    pub level: Option<String>,
-    pub module: Option<String>,
-    #[serde(default = "default_page")]
-    pub page: usize,
-    #[serde(default = "default_page_size")]
-    pub page_size: usize,
-}
+#[path = "system/logs.rs"]
+mod logs;
 
-fn default_page() -> usize { 1 }
-fn default_page_size() -> usize { 50 }
-
-#[derive(Debug, Serialize)]
-pub struct LogsResponse {
-    pub logs: Vec<LogEntry>,
-    pub total: usize,
-    pub page: usize,
-    pub page_size: usize,
-}
-
-fn parse_log_file(path: &StdPath, logs: &mut Vec<LogEntry>) {
-    let file = match File::open(path) {
-        Ok(f) => f,
-        Err(_) => return,
-    };
-    let reader = BufReader::new(file);
-    
-    for line in reader.lines().flatten() {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
-            let timestamp = json.get("timestamp").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let level = json.get("level").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let module = json.get("target").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            
-            let message = if let Some(fields) = json.get("fields") {
-                fields.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string()
-            } else {
-                String::new()
-            };
-
-            logs.push(LogEntry {
-                timestamp,
-                level,
-                module,
-                message,
-                task_id: None,
-                task_status: None,
-                task_type: None,
-            });
-        }
-    }
-}
-
-fn read_api_logs(data_dir: &StdPath) -> Vec<LogEntry> {
-    let mut logs = Vec::new();
-    let api_log_dir = data_dir.join("logs");
-    
-    for i in (1..=3).rev() {
-        let path = api_log_dir.join(format!("system.json.{}", i));
-        if path.exists() {
-            parse_log_file(&path, &mut logs);
-        }
-    }
-    
-    let current_path = api_log_dir.join("system.json");
-    if current_path.exists() {
-        parse_log_file(&current_path, &mut logs);
-    }
-    
-    logs
-}
-
-/// Handler for GET /api/v1/system/logs - Get system logs
-pub async fn get_system_logs(
-    State(state): State<AppState>,
-    user: crate::auth::middleware::AuthUser,
-    Query(query): Query<LogsQuery>,
-) -> Result<impl IntoResponse> {
-    if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
-    }
-
-    let config = state.config.read().await;
-    let data_dir = config.storage.data_dir.clone();
-    drop(config);
-    
-    let level_filter = query.level.clone();
-    let module_filter = query.module.clone();
-
-    // Get all tasks
-    let tasks = state.task_queue.list_tasks().await.unwrap_or_default();
-
-    let filtered_logs = tokio::task::spawn_blocking(move || {
-        let all_logs = read_api_logs(&data_dir);
-        
-        let mut filtered: Vec<LogEntry> = all_logs.into_iter()
-            .filter(|log| {
-                // Ignore duplicate text logs for tasks so we only have one record per task
-                if log.module == "audit::scan" || log.module == "audit::metadata" {
-                    // Skip these text logs, we will use Task records instead
-                    return false;
-                }
-
-                let level_match = match &level_filter {
-                    Some(l) if !l.is_empty() => log.level.eq_ignore_ascii_case(l),
-                    _ => true,
-                };
-                
-                let module_match = match &module_filter {
-                    Some(m) if !m.is_empty() => {
-                        if m.eq_ignore_ascii_case("audit") {
-                            log.module.starts_with("audit::") || log.level.eq_ignore_ascii_case("error")
-                        } else if m.eq_ignore_ascii_case("all") {
-                            true
-                        } else {
-                            log.module.to_lowercase().starts_with(&m.to_lowercase())
-                        }
-                    },
-                    _ => log.module.starts_with("audit::") || log.level.eq_ignore_ascii_case("error"), // 默认只返回 audit 相关的和错误
-                };
-                
-                level_match && module_match
-            })
-            .collect();
-
-        // Convert tasks to LogEntry and add them
-        for task in tasks {
-            let module = match task.task_type.as_str() {
-                "scan" | "library_scan" | "scrape" => "audit::scan",
-                "write_metadata" => "audit::metadata",
-                _ => "audit::task",
-            };
-
-            let level = if task.status == "failed" { "ERROR" } else { "INFO" };
-
-            let level_match = match &level_filter {
-                Some(l) if !l.is_empty() => level.eq_ignore_ascii_case(l),
-                _ => true,
-            };
-
-            let module_match = match &module_filter {
-                Some(m) if !m.is_empty() => {
-                    if m.eq_ignore_ascii_case("audit") {
-                        module.starts_with("audit::") || level.eq_ignore_ascii_case("error")
-                    } else if m.eq_ignore_ascii_case("all") {
-                        true
-                    } else {
-                        module.to_lowercase().starts_with(&m.to_lowercase())
-                    }
-                },
-                _ => module.starts_with("audit::") || level.eq_ignore_ascii_case("error"),
-            };
-
-            if level_match && module_match {
-                let message = if let Some(msg) = task.message {
-                    if !msg.is_empty() {
-                        msg
-                    } else if let Some(payload) = task.payload {
-                        format!("执行任务: {}", payload)
-                    } else {
-                        format!("执行任务")
-                    }
-                } else if let Some(payload) = task.payload {
-                    format!("执行任务: {}", payload)
-                } else {
-                    format!("执行任务")
-                };
-
-                let timestamp = if task.status == "running" {
-                    // Update running tasks to "now" so they appear at the top, or use updated_at
-                    Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-                } else {
-                    task.updated_at
-                };
-
-                filtered.push(LogEntry {
-                    timestamp,
-                    level: level.to_string(),
-                    module: module.to_string(),
-                    message,
-                    task_id: Some(task.id),
-                    task_status: Some(task.status),
-                    task_type: Some(task.task_type),
-                });
-            }
-        }
-
-        // Sort by timestamp descending
-        filtered.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-        
-        filtered
-    }).await.map_err(|e| TingError::ExternalError(e.to_string()))?;
-
-    let total = filtered_logs.len();
-    
-    let start = (query.page.saturating_sub(1)) * query.page_size;
-    let end = std::cmp::min(start + query.page_size, total);
-    
-    let page_logs = if start < total {
-        filtered_logs[start..end].to_vec()
-    } else {
-        Vec::new()
-    };
-
-    Ok(Json(LogsResponse {
-        logs: page_logs,
-        total,
-        page: query.page,
-        page_size: query.page_size,
-    }))
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ExportLogsQuery {
-    pub level: Option<String>,
-}
-
-/// Handler for GET /api/v1/system/logs/export - Export system logs
-pub async fn export_system_logs(
-    State(state): State<AppState>,
-    user: crate::auth::middleware::AuthUser,
-    Query(query): Query<ExportLogsQuery>,
-) -> Result<impl IntoResponse> {
-    if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
-    }
-
-    let config = state.config.read().await;
-    let data_dir = config.storage.data_dir.clone();
-    drop(config);
-    
-    let level_filter = query.level.clone();
-
-    let filtered_logs = tokio::task::spawn_blocking(move || {
-        let all_logs = read_api_logs(&data_dir);
-        
-        all_logs.into_iter()
-            .filter(|log| {
-                match &level_filter {
-                    Some(l) if !l.is_empty() => log.level.eq_ignore_ascii_case(l),
-                    _ => true,
-                }
-            })
-            .collect::<Vec<_>>()
-    }).await.map_err(|e| TingError::ExternalError(e.to_string()))?;
-
-    let mut output = String::new();
-    for log in filtered_logs {
-        output.push_str(&format!("[{}] [{}] [{}] {}\n", log.timestamp, log.level, log.module, log.message));
-    }
-
-    let timestamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
-    let filename = if query.level.as_deref() == Some("error") {
-        format!("error_logs_{}.txt", timestamp)
-    } else {
-        format!("system_logs_{}.txt", timestamp)
-    };
-
-    let headers = [
-        (
-            axum::http::header::CONTENT_TYPE,
-            "text/plain; charset=utf-8".to_string(),
-        ),
-        (
-            axum::http::header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"{}\"", filename),
-        ),
-    ];
-
-    Ok((headers, output).into_response())
-}
-
-#[derive(Debug, Serialize)]
-pub struct ClearSystemLogsResponse {
-    pub message: String,
-}
-
-/// Handler for DELETE /api/v1/system/logs - Clear system logs
-pub async fn clear_system_logs(
-    State(state): State<AppState>,
-    user: crate::auth::middleware::AuthUser,
-) -> Result<impl IntoResponse> {
-    if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
-    }
-
-    let config = state.config.read().await;
-    let data_dir = config.storage.data_dir.clone();
-    drop(config);
-
-    tokio::task::spawn_blocking(move || {
-        let api_log_dir = data_dir.join("logs");
-        
-        // Remove rolled files
-        for i in 1..=3 {
-            let path = api_log_dir.join(format!("system.json.{}", i));
-            if path.exists() {
-                let _ = std::fs::remove_file(path);
-            }
-        }
-        
-        // Empty the main log file by truncating it
-        let current_path = api_log_dir.join("system.json");
-        if current_path.exists() {
-            if let Ok(file) = std::fs::OpenOptions::new().write(true).truncate(true).open(&current_path) {
-                // Optionally write an initial log line to say logs were cleared
-                let _ = file;
-            }
-        }
-    }).await.map_err(|e| TingError::ExternalError(e.to_string()))?;
-
-    Ok(Json(ClearSystemLogsResponse {
-        message: "System logs cleared successfully".to_string(),
-    }))
-}
+pub use logs::{
+    clear_system_logs, export_system_logs, get_system_logs, ClearSystemLogsResponse,
+    ExportLogsQuery, LogsQuery, LogsResponse,
+};
 
 /// Handler for GET /api/v1/system/check-update - Check for updates via backend proxy
-pub async fn check_update(
-    State(_state): State<AppState>,
-) -> Result<impl IntoResponse> {
+pub async fn check_update(State(_state): State<AppState>) -> Result<impl IntoResponse> {
     let client = reqwest::Client::new();
     let response = client
         .get("https://www.tingreader.cn/api/fpk/docker")
@@ -353,10 +37,9 @@ pub async fn check_update(
         .await
         .map_err(|e| TingError::ExternalServiceError(format!("Failed to check update: {}", e)))?;
 
-    let update_info: Value = response
-        .json()
-        .await
-        .map_err(|e| TingError::ExternalServiceError(format!("Failed to parse update info: {}", e)))?;
+    let update_info: Value = response.json().await.map_err(|e| {
+        TingError::ExternalServiceError(format!("Failed to parse update info: {}", e))
+    })?;
 
     Ok(Json(update_info))
 }
@@ -368,7 +51,9 @@ pub async fn list_tasks(
     Query(query): Query<TasksQuery>,
 ) -> Result<impl IntoResponse> {
     if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
+        return Err(TingError::PermissionDenied(
+            "Admin access required".to_string(),
+        ));
     }
 
     let (task_records, _total) = state
@@ -394,7 +79,7 @@ pub async fn list_tasks(
             retries: record.retries,
             max_retries: record.max_retries,
             created_at: record.created_at,
-            started_at: None, // TODO: Add started_at to TaskRecord
+            started_at: None,  // TODO: Add started_at to TaskRecord
             finished_at: None, // TODO: Add finished_at to TaskRecord
         })
         .collect();
@@ -409,7 +94,9 @@ pub async fn get_task(
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse> {
     if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
+        return Err(TingError::PermissionDenied(
+            "Admin access required".to_string(),
+        ));
     }
 
     let task_record = state.task_queue.get_task(&id).await?;
@@ -437,7 +124,7 @@ pub async fn get_task(
         retries: task_record.retries,
         max_retries: task_record.max_retries,
         created_at: task_record.created_at,
-        started_at: None, 
+        started_at: None,
         finished_at: None,
     };
 
@@ -451,7 +138,9 @@ pub async fn cancel_task(
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse> {
     if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
+        return Err(TingError::PermissionDenied(
+            "Admin access required".to_string(),
+        ));
     }
 
     state.task_queue.cancel(&id).await?;
@@ -468,7 +157,9 @@ pub async fn delete_task(
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse> {
     if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
+        return Err(TingError::PermissionDenied(
+            "Admin access required".to_string(),
+        ));
     }
 
     state.task_queue.delete_task(&id).await?;
@@ -485,7 +176,9 @@ pub async fn clear_tasks(
     Query(query): Query<ClearTasksQuery>,
 ) -> Result<impl IntoResponse> {
     if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
+        return Err(TingError::PermissionDenied(
+            "Admin access required".to_string(),
+        ));
     }
 
     let count = state.task_queue.clear_tasks(query.status).await?;
@@ -503,7 +196,9 @@ pub async fn batch_delete_tasks(
     Json(req): Json<BatchDeleteTasksRequest>,
 ) -> Result<impl IntoResponse> {
     if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
+        return Err(TingError::PermissionDenied(
+            "Admin access required".to_string(),
+        ));
     }
 
     let count = state.task_queue.delete_tasks(req.ids).await?;
@@ -542,22 +237,18 @@ pub async fn health_check(State(state): State<AppState>) -> Result<impl IntoResp
 
 async fn check_database_health(state: &AppState) -> ComponentHealth {
     match state.book_repo.find_all().await {
-        Ok(_) => {
-            ComponentHealth {
-                status: ComponentStatus::Healthy,
-                message: Some("Database is operational".to_string()),
-                details: Some(serde_json::json!({
-                    "status": "connected",
-                })),
-            }
-        }
-        Err(e) => {
-            ComponentHealth {
-                status: ComponentStatus::Unhealthy,
-                message: Some(format!("Database error: {}", e)),
-                details: None,
-            }
-        }
+        Ok(_) => ComponentHealth {
+            status: ComponentStatus::Healthy,
+            message: Some("Database is operational".to_string()),
+            details: Some(serde_json::json!({
+                "status": "connected",
+            })),
+        },
+        Err(e) => ComponentHealth {
+            status: ComponentStatus::Unhealthy,
+            message: Some(format!("Database error: {}", e)),
+            details: None,
+        },
     }
 }
 
@@ -566,12 +257,14 @@ async fn check_plugin_system_health(state: &AppState) -> ComponentHealth {
 
     let plugins = state.plugin_manager.list_plugins().await;
     let total_plugins = plugins.len();
-    
-    let active_plugins = plugins.iter()
+
+    let active_plugins = plugins
+        .iter()
         .filter(|p| matches!(p.state, PluginState::Active))
         .count();
-    
-    let failed_plugins = plugins.iter()
+
+    let failed_plugins = plugins
+        .iter()
         .filter(|p| matches!(p.state, PluginState::Failed))
         .count();
 
@@ -608,7 +301,7 @@ pub async fn get_metrics(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("application/json");
 
-    let is_prometheus = accept_header.contains("text/plain") 
+    let is_prometheus = accept_header.contains("text/plain")
         || accept_header.contains("application/openmetrics-text");
 
     let system_metrics = collect_system_metrics(&state);
@@ -627,7 +320,10 @@ pub async fn get_metrics(
         );
 
         Ok((
-            [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "text/plain; version=0.0.4",
+            )],
             prometheus_output,
         )
             .into_response())
@@ -733,17 +429,26 @@ fn format_prometheus_metrics(
     // System metrics
     output.push_str("# HELP ting_reader_requests_total Total number of HTTP requests\n");
     output.push_str("# TYPE ting_reader_requests_total counter\n");
-    output.push_str(&format!("ting_reader_requests_total {}\n", system.total_requests));
+    output.push_str(&format!(
+        "ting_reader_requests_total {}\n",
+        system.total_requests
+    ));
     output.push_str("\n");
 
     output.push_str("# HELP ting_reader_response_time_ms Average response time in milliseconds\n");
     output.push_str("# TYPE ting_reader_response_time_ms gauge\n");
-    output.push_str(&format!("ting_reader_response_time_ms {}\n", system.avg_response_time_ms));
+    output.push_str(&format!(
+        "ting_reader_response_time_ms {}\n",
+        system.avg_response_time_ms
+    ));
     output.push_str("\n");
 
     output.push_str("# HELP ting_reader_errors_total Total number of errors\n");
     output.push_str("# TYPE ting_reader_errors_total counter\n");
-    output.push_str(&format!("ting_reader_errors_total {}\n", system.total_errors));
+    output.push_str(&format!(
+        "ting_reader_errors_total {}\n",
+        system.total_errors
+    ));
     output.push_str("\n");
 
     output.push_str("# HELP ting_reader_error_rate Error rate (errors / total requests)\n");
@@ -753,7 +458,10 @@ fn format_prometheus_metrics(
 
     output.push_str("# HELP ting_reader_uptime_seconds System uptime in seconds\n");
     output.push_str("# TYPE ting_reader_uptime_seconds counter\n");
-    output.push_str(&format!("ting_reader_uptime_seconds {}\n", system.uptime_seconds));
+    output.push_str(&format!(
+        "ting_reader_uptime_seconds {}\n",
+        system.uptime_seconds
+    ));
     output.push_str("\n");
 
     // Plugin metrics
@@ -777,7 +485,9 @@ fn format_prometheus_metrics(
     }
     output.push_str("\n");
 
-    output.push_str("# HELP ting_reader_plugin_execution_time_ms Plugin execution time in milliseconds\n");
+    output.push_str(
+        "# HELP ting_reader_plugin_execution_time_ms Plugin execution time in milliseconds\n",
+    );
     output.push_str("# TYPE ting_reader_plugin_execution_time_ms summary\n");
     for plugin in plugins {
         if let Some(min) = plugin.min_execution_time_ms {
@@ -822,38 +532,75 @@ fn format_prometheus_metrics(
     // Task queue metrics
     output.push_str("# HELP ting_reader_tasks_total Total number of tasks by status\n");
     output.push_str("# TYPE ting_reader_tasks_total gauge\n");
-    output.push_str(&format!("ting_reader_tasks_total{{status=\"queued\"}} {}\n", task_queue.queued_tasks));
-    output.push_str(&format!("ting_reader_tasks_total{{status=\"running\"}} {}\n", task_queue.running_tasks));
-    output.push_str(&format!("ting_reader_tasks_total{{status=\"completed\"}} {}\n", task_queue.completed_tasks));
-    output.push_str(&format!("ting_reader_tasks_total{{status=\"failed\"}} {}\n", task_queue.failed_tasks));
-    output.push_str(&format!("ting_reader_tasks_total{{status=\"cancelled\"}} {}\n", task_queue.cancelled_tasks));
+    output.push_str(&format!(
+        "ting_reader_tasks_total{{status=\"queued\"}} {}\n",
+        task_queue.queued_tasks
+    ));
+    output.push_str(&format!(
+        "ting_reader_tasks_total{{status=\"running\"}} {}\n",
+        task_queue.running_tasks
+    ));
+    output.push_str(&format!(
+        "ting_reader_tasks_total{{status=\"completed\"}} {}\n",
+        task_queue.completed_tasks
+    ));
+    output.push_str(&format!(
+        "ting_reader_tasks_total{{status=\"failed\"}} {}\n",
+        task_queue.failed_tasks
+    ));
+    output.push_str(&format!(
+        "ting_reader_tasks_total{{status=\"cancelled\"}} {}\n",
+        task_queue.cancelled_tasks
+    ));
     output.push_str("\n");
 
     output.push_str("# HELP ting_reader_task_failure_rate Task failure rate\n");
     output.push_str("# TYPE ting_reader_task_failure_rate gauge\n");
-    output.push_str(&format!("ting_reader_task_failure_rate {}\n", task_queue.failure_rate));
+    output.push_str(&format!(
+        "ting_reader_task_failure_rate {}\n",
+        task_queue.failure_rate
+    ));
     output.push_str("\n");
 
-    output.push_str("# HELP ting_reader_task_processing_time_ms Average task processing time in milliseconds\n");
+    output.push_str(
+        "# HELP ting_reader_task_processing_time_ms Average task processing time in milliseconds\n",
+    );
     output.push_str("# TYPE ting_reader_task_processing_time_ms gauge\n");
-    output.push_str(&format!("ting_reader_task_processing_time_ms {}\n", task_queue.avg_processing_time_ms));
+    output.push_str(&format!(
+        "ting_reader_task_processing_time_ms {}\n",
+        task_queue.avg_processing_time_ms
+    ));
     output.push_str("\n");
 
     // Database metrics
     output.push_str("# HELP ting_reader_db_connections Database connections\n");
     output.push_str("# TYPE ting_reader_db_connections gauge\n");
-    output.push_str(&format!("ting_reader_db_connections{{state=\"active\"}} {}\n", database.active_connections));
-    output.push_str(&format!("ting_reader_db_connections{{state=\"idle\"}} {}\n", database.idle_connections));
+    output.push_str(&format!(
+        "ting_reader_db_connections{{state=\"active\"}} {}\n",
+        database.active_connections
+    ));
+    output.push_str(&format!(
+        "ting_reader_db_connections{{state=\"idle\"}} {}\n",
+        database.idle_connections
+    ));
     output.push_str("\n");
 
     output.push_str("# HELP ting_reader_db_queries_total Total number of database queries\n");
     output.push_str("# TYPE ting_reader_db_queries_total counter\n");
-    output.push_str(&format!("ting_reader_db_queries_total {}\n", database.total_queries));
+    output.push_str(&format!(
+        "ting_reader_db_queries_total {}\n",
+        database.total_queries
+    ));
     output.push_str("\n");
 
-    output.push_str("# HELP ting_reader_db_query_time_ms Average database query time in milliseconds\n");
+    output.push_str(
+        "# HELP ting_reader_db_query_time_ms Average database query time in milliseconds\n",
+    );
     output.push_str("# TYPE ting_reader_db_query_time_ms gauge\n");
-    output.push_str(&format!("ting_reader_db_query_time_ms {}\n", database.avg_query_time_ms));
+    output.push_str(&format!(
+        "ting_reader_db_query_time_ms {}\n",
+        database.avg_query_time_ms
+    ));
     output.push_str("\n");
 
     output
@@ -896,7 +643,11 @@ pub async fn get_config(State(state): State<AppState>) -> Result<impl IntoRespon
             level: config.logging.level.clone(),
             format: config.logging.format.clone(),
             output: config.logging.output.clone(),
-            log_file: config.logging.log_file.as_ref().map(|p| p.display().to_string()),
+            log_file: config
+                .logging
+                .log_file
+                .as_ref()
+                .map(|p| p.display().to_string()),
             max_file_size: config.logging.max_file_size,
             max_backups: config.logging.max_backups,
         },

@@ -7,7 +7,9 @@ pub mod plugin;
 pub mod runtime;
 pub mod wrapper;
 
-pub use bindings::{JsScraperPlugin, JsPluginLogger, JsPluginEventBus, create_js_runtime_with_bindings};
-pub use plugin::{JavaScriptPluginLoader, JavaScriptPluginExecutor};
-pub use runtime::{JsRuntimeWrapper, JsError};
+pub use bindings::{
+    create_js_runtime_with_bindings, JsPluginEventBus, JsPluginLogger, JsScraperPlugin,
+};
+pub use plugin::{JavaScriptPluginExecutor, JavaScriptPluginLoader};
+pub use runtime::{JsError, JsRuntimeWrapper};
 pub use wrapper::JavaScriptPluginWrapper;

@@ -43,7 +43,9 @@ pub fn decrypt_value(encryption_key: &[u8; 32], encrypted: &str) -> Result<Strin
         .map_err(|e| TingError::ConfigError(format!("Invalid encrypted data: {}", e)))?;
 
     if combined.len() < 12 {
-        return Err(TingError::ConfigError("Invalid encrypted data length".to_string()));
+        return Err(TingError::ConfigError(
+            "Invalid encrypted data length".to_string(),
+        ));
     }
 
     let (nonce_bytes, ciphertext) = combined.split_at(12);
@@ -90,7 +92,10 @@ pub fn encrypt_sensitive_fields(
                     field_value.to_string()
                 };
                 let encrypted = encrypt_value(encryption_key, &value_str)?;
-                obj.insert(field_name.clone(), Value::String(format!("encrypted:{}", encrypted)));
+                obj.insert(
+                    field_name.clone(),
+                    Value::String(format!("encrypted:{}", encrypted)),
+                );
             }
         }
     }
@@ -127,9 +132,8 @@ pub fn decrypt_sensitive_fields(
 
 /// Validate a configuration against a JSON Schema
 pub fn validate_config(schema: &Value, config: &Value) -> Result<()> {
-    let compiled_schema = jsonschema::JSONSchema::compile(schema).map_err(|e| {
-        TingError::ConfigError(format!("Invalid configuration schema: {}", e))
-    })?;
+    let compiled_schema = jsonschema::JSONSchema::compile(schema)
+        .map_err(|e| TingError::ConfigError(format!("Invalid configuration schema: {}", e)))?;
 
     if let Err(errors) = compiled_schema.validate(config) {
         let error_messages: Vec<String> = errors.map(|e| format!("{}", e)).collect();

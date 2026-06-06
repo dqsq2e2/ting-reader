@@ -39,7 +39,7 @@ pub fn validate_token(token: &str, secret: &str) -> Result<Claims> {
 /// Validate a JWT token with multiple secrets (for key rotation)
 pub fn validate_token_with_secrets(token: &str, secrets: &[String]) -> Result<Claims> {
     let mut last_error = None;
-    
+
     // 尝试用每个密钥验证
     for secret in secrets {
         match decode::<Claims>(
@@ -51,7 +51,7 @@ pub fn validate_token_with_secrets(token: &str, secrets: &[String]) -> Result<Cl
             Err(e) => last_error = Some(e),
         }
     }
-    
+
     // 所有密钥都失败，返回错误
     if let Some(e) = last_error {
         let error_msg = e.to_string();
@@ -62,9 +62,12 @@ pub fn validate_token_with_secrets(token: &str, secrets: &[String]) -> Result<Cl
         } else if error_msg.contains("InvalidToken") {
             return Err(TingError::AuthenticationError("令牌格式无效".to_string()));
         } else {
-            return Err(TingError::AuthenticationError(format!("令牌验证失败: {}", e)));
+            return Err(TingError::AuthenticationError(format!(
+                "令牌验证失败: {}",
+                e
+            )));
         }
     }
-    
+
     Err(TingError::AuthenticationError("令牌验证失败".to_string()))
 }

@@ -1,7 +1,8 @@
-use serde::{Deserialize, Serialize};
-use crate::plugin::scraper::{BookItem, BookDetail};
-use crate::db::models::Book;
 use super::common::deserialize_tags_or_string;
+use crate::db::models::Book;
+use crate::plugin::scraper::{BookDetail, BookItem};
+use crate::plugin::types::ScraperSearchField;
+use serde::{Deserialize, Serialize};
 
 // Search and Scraper API models
 
@@ -52,7 +53,10 @@ pub struct ScraperSourcesResponse {
 #[derive(Debug, Deserialize)]
 pub struct ScraperSearchRequest {
     /// Search query
-    pub query: String,
+    pub query: Option<String>,
+    /// Structured search parameters declared by the selected plugin
+    #[serde(default)]
+    pub search_params: Option<std::collections::HashMap<String, String>>,
     /// Optional source plugin ID
     pub source: Option<String>,
     /// Page number (1-indexed)
@@ -67,6 +71,7 @@ pub struct ScraperSearchRequest {
 
 /// Information about a scraper source
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScraperSourceInfo {
     /// Plugin ID
     pub id: String,
@@ -78,23 +83,12 @@ pub struct ScraperSourceInfo {
     pub version: String,
     /// Whether the plugin is enabled
     pub enabled: bool,
-}
-
-/// Response for book detail from scraper
-#[derive(Debug, Serialize)]
-pub struct ScraperDetailResponse {
-    /// Book detail information
-    #[serde(flatten)]
-    pub detail: BookDetail,
-}
-
-/// Request body for applying scrape result to a book
-#[derive(Debug, Deserialize)]
-pub struct ScrapeBookRequest {
-    /// Source plugin ID
-    pub source: Option<String>,
-    /// External ID in the source system
-    pub external_id: Option<String>,
+    /// Whether the plugin can be used by automatic library scraping
+    pub auto_scrape: bool,
+    /// Search fields declared by the plugin
+    pub search_fields: Vec<ScraperSearchField>,
+    /// Metadata fields this plugin can return
+    pub result_fields: Vec<String>,
 }
 
 // Book API models
@@ -279,35 +273,11 @@ pub struct StatsResponse {
     pub last_scan_time: Option<String>,
 }
 
-// Merge System API models
-
-/// Response for merge suggestion
-#[derive(Debug, Serialize)]
-pub struct MergeSuggestionResponse {
-    pub id: String,
-    pub source_book_id: String,
-    pub target_book_id: String,
-    pub source_title: String,
-    pub target_title: String,
-    pub source_author: Option<String>,
-    pub target_author: Option<String>,
-    pub score: f64,
-    pub reason: String,
-    pub status: String,
-    pub created_at: String,
-}
-
 /// Request body for merging books
 #[derive(Debug, Deserialize)]
 pub struct MergeBooksRequest {
     pub source_book_id: String,
     pub target_book_id: String,
-}
-
-/// Request body for ignoring a merge suggestion
-#[derive(Debug, Deserialize)]
-pub struct IgnoreMergeSuggestionRequest {
-    pub suggestion_id: String,
 }
 
 /// Request body for updating book correction status
@@ -373,9 +343,19 @@ pub struct ChapterChangeResponse {
 
 #[derive(Debug, Deserialize)]
 pub struct ScrapeApplyRequest {
-    pub metadata: BookDetail,
+    pub metadata: Option<BookDetail>,
+    #[serde(default)]
+    pub fields: Option<std::collections::HashMap<String, ScrapeApplyField>>,
+    #[serde(default)]
     pub apply_metadata: bool,
     pub apply_chapters: Option<Vec<i32>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ScrapeApplyField {
+    pub value: serde_json::Value,
+    pub source: Option<String>,
+    pub external_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

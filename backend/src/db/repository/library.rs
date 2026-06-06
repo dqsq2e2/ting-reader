@@ -14,7 +14,7 @@ impl LibraryRepository {
     pub fn new(db: Arc<DatabaseManager>) -> Self {
         Self { db }
     }
-    
+
     /// Get all libraries
     pub async fn find_all(&self) -> Result<Vec<Library>> {
         self.db.execute(|conn| {
@@ -22,7 +22,7 @@ impl LibraryRepository {
                 "SELECT id, name, type, url, username, password, root_path, last_scanned_at, created_at, scraper_config \
                  FROM libraries ORDER BY name"
             ).map_err(TingError::DatabaseError)?;
-            
+
             let libraries = stmt.query_map([], |row| {
                 Ok(Library {
                     id: row.get(0)?,
@@ -39,7 +39,7 @@ impl LibraryRepository {
             }).map_err(TingError::DatabaseError)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(TingError::DatabaseError)?;
-            
+
             Ok(libraries)
         }).await
     }
@@ -55,7 +55,7 @@ impl LibraryRepository {
                  WHERE ula.user_id = ? \
                  ORDER BY l.name"
             ).map_err(TingError::DatabaseError)?;
-            
+
             let libraries = stmt.query_map([&user_id], |row| {
                 Ok(Library {
                     id: row.get(0)?,
@@ -72,11 +72,11 @@ impl LibraryRepository {
             }).map_err(TingError::DatabaseError)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(TingError::DatabaseError)?;
-            
+
             Ok(libraries)
         }).await
     }
-    
+
     /// Find library by ID
     pub async fn find_by_id(&self, id: &str) -> Result<Option<Library>> {
         let id = id.to_string();
@@ -103,7 +103,7 @@ impl LibraryRepository {
             .map_err(TingError::DatabaseError)
         }).await
     }
-    
+
     /// Create a new library
     pub async fn create(&self, library: &Library) -> Result<()> {
         let library = library.clone();
@@ -125,7 +125,7 @@ impl LibraryRepository {
             Ok(())
         }).await
     }
-    
+
     /// Update a library
     pub async fn update(&self, library: &Library) -> Result<()> {
         let library = library.clone();
@@ -147,7 +147,7 @@ impl LibraryRepository {
             Ok(())
         }).await
     }
-    
+
     /// Update library's last scanned time
     pub async fn update_last_scanned(&self, id: &str) -> Result<()> {
         let id = id.to_string();
@@ -159,7 +159,7 @@ impl LibraryRepository {
             Ok(())
         }).await
     }
-    
+
     /// Delete a library
     pub async fn delete(&self, id: &str) -> Result<()> {
         let id = id.to_string();

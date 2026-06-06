@@ -7,15 +7,15 @@
 //! - Authentication middleware
 //! - Automatic JWT key rotation
 
-pub mod jwt;
-pub mod password;
 pub mod handlers;
+pub mod jwt;
+pub mod key_rotation;
 pub mod middleware;
 pub mod models;
-pub mod key_rotation;
+pub mod password;
 
+pub use handlers::{get_me, login, register, update_me};
 pub use jwt::{generate_token, validate_token, validate_token_with_secrets, Claims};
-pub use password::{hash_password, verify_password};
-pub use middleware::{authenticate, AuthUser};
-pub use handlers::{register, login, get_me, update_me};
 pub use key_rotation::{JwtKeyManager, JwtKeyPair};
+pub use middleware::{authenticate, AuthUser};
+pub use password::{hash_password, verify_password};

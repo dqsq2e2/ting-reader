@@ -1,12 +1,12 @@
 //! Cover image proxy handler
 
+use crate::api::handlers::AppState;
 use crate::core::error::{Result, TingError};
 use axum::{
     extract::{Query, State},
     http::StatusCode,
     response::IntoResponse,
 };
-use crate::api::handlers::AppState;
 
 /// Query parameters for cover image proxy
 #[derive(Debug, serde::Deserialize)]
@@ -25,7 +25,9 @@ pub async fn proxy_cover(
     use axum::http::header;
 
     if params.path == "embedded://first-chapter" {
-        return Err(TingError::NotFound("Embedded cover extraction not yet implemented".to_string()));
+        return Err(TingError::NotFound(
+            "Embedded cover extraction not yet implemented".to_string(),
+        ));
     }
 
     if params.path.starts_with("http") {
@@ -37,7 +39,11 @@ pub async fn proxy_cover(
             target_url = target_url[..idx].to_string();
         }
 
-        tracing::info!("Proxying external image: {}, referer: {}", target_url, referer);
+        tracing::info!(
+            "Proxying external image: {}, referer: {}",
+            target_url,
+            referer
+        );
 
         let client = reqwest::Client::new();
         let mut req = client.get(&target_url)
@@ -49,20 +55,45 @@ pub async fn proxy_cover(
 
         match req.send().await {
             Ok(resp) if resp.status().is_success() => {
-                let content_type = resp.headers().get(reqwest::header::CONTENT_TYPE)
+                let content_type = resp
+                    .headers()
+                    .get(reqwest::header::CONTENT_TYPE)
                     .and_then(|v| v.to_str().ok())
                     .unwrap_or("application/octet-stream")
                     .to_string();
-                let bytes = resp.bytes().await.map_err(|e| TingError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-                return Ok((StatusCode::OK, [
-                    (header::CONTENT_TYPE, content_type),
-                    (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".to_string()),
-                    (header::CACHE_CONTROL, "public, max-age=31536000".to_string()),
-                    ("Cross-Origin-Resource-Policy".parse().unwrap(), "cross-origin".to_string()),
-                ], bytes.to_vec()).into_response());
+                let bytes = resp.bytes().await.map_err(|e| {
+                    TingError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e))
+                })?;
+                return Ok((
+                    StatusCode::OK,
+                    [
+                        (header::CONTENT_TYPE, content_type),
+                        (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".to_string()),
+                        (
+                            header::CACHE_CONTROL,
+                            "public, max-age=31536000".to_string(),
+                        ),
+                        (
+                            "Cross-Origin-Resource-Policy".parse().unwrap(),
+                            "cross-origin".to_string(),
+                        ),
+                    ],
+                    bytes.to_vec(),
+                )
+                    .into_response());
             }
-            Ok(resp) => return Err(TingError::NotFound(format!("Failed to fetch external cover: HTTP {}", resp.status()))),
-            Err(e) => return Err(TingError::NotFound(format!("Failed to fetch external cover: {}", e))),
+            Ok(resp) => {
+                return Err(TingError::NotFound(format!(
+                    "Failed to fetch external cover: HTTP {}",
+                    resp.status()
+                )))
+            }
+            Err(e) => {
+                return Err(TingError::NotFound(format!(
+                    "Failed to fetch external cover: {}",
+                    e
+                )))
+            }
         }
     }
 
@@ -77,22 +108,47 @@ pub async fn proxy_cover(
             abs_path
         } else if normalized_path.starts_with("./") {
             let stripped = cwd.join(&normalized_path[2..]);
-            if stripped.exists() { stripped }
-            else { return Err(TingError::NotFound(format!("Cover image not found: {}", params.path))); }
+            if stripped.exists() {
+                stripped
+            } else {
+                return Err(TingError::NotFound(format!(
+                    "Cover image not found: {}",
+                    params.path
+                )));
+            }
         } else {
-            return Err(TingError::NotFound(format!("Cover image not found: {}", params.path)));
+            return Err(TingError::NotFound(format!(
+                "Cover image not found: {}",
+                params.path
+            )));
         }
     } else {
-        return Err(TingError::NotFound(format!("Cover image not found: {}", params.path)));
+        return Err(TingError::NotFound(format!(
+            "Cover image not found: {}",
+            params.path
+        )));
     };
 
     let image_data = tokio::fs::read(&final_path).await?;
-    let mime_type = mime_guess::from_path(&final_path).first_or_octet_stream().to_string();
+    let mime_type = mime_guess::from_path(&final_path)
+        .first_or_octet_stream()
+        .to_string();
 
-    Ok((StatusCode::OK, [
-        (header::CONTENT_TYPE, mime_type),
-        (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".to_string()),
-        (header::CACHE_CONTROL, "public, max-age=31536000".to_string()),
-        ("Cross-Origin-Resource-Policy".parse().unwrap(), "cross-origin".to_string()),
-    ], image_data).into_response())
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, mime_type),
+            (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".to_string()),
+            (
+                header::CACHE_CONTROL,
+                "public, max-age=31536000".to_string(),
+            ),
+            (
+                "Cross-Origin-Resource-Policy".parse().unwrap(),
+                "cross-origin".to_string(),
+            ),
+        ],
+        image_data,
+    )
+        .into_response())
 }

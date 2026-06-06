@@ -12,9 +12,11 @@ use serde::Serialize;
 use serde_json::Value;
 use tracing::{debug, error, info, warn};
 
+use super::super::scraper::{Chapter, SearchResult};
+use super::super::types::{
+    PluginContext, PluginEventBus, PluginLogger, PluginMetadata, PluginType,
+};
 use super::plugin::JavaScriptPluginExecutor;
-use super::super::scraper::{BookDetail, Chapter, SearchResult};
-use super::super::types::{PluginContext, PluginEventBus, PluginLogger, PluginMetadata, PluginType};
 
 /// JavaScript Scraper Plugin Adapter
 ///
@@ -86,25 +88,6 @@ impl JsScraperPlugin {
             .context("Failed to call JavaScript search function")
     }
 
-    /// Get detailed information about a book
-    pub async fn get_detail(&mut self, book_id: &str) -> Result<BookDetail> {
-        debug!("JavaScript plugin get_detail: book_id={}", book_id);
-
-        #[derive(Serialize)]
-        struct DetailArgs {
-            book_id: String,
-        }
-
-        let args = DetailArgs {
-            book_id: book_id.to_string(),
-        };
-
-        self.executor
-            .call_function("getDetail", args)
-            .await
-            .context("Failed to call JavaScript getDetail function")
-    }
-
     /// Get the list of chapters for a book
     pub async fn get_chapters(&mut self, book_id: &str) -> Result<Vec<Chapter>> {
         debug!("JavaScript plugin get_chapters: book_id={}", book_id);
@@ -144,14 +127,16 @@ impl JsScraperPlugin {
             .call_function("downloadCover", args)
             .await
             .context("Failed to call JavaScript downloadCover function")?;
-            
+
         let base64_data = if let Some(data) = result_obj.get("data").and_then(|v| v.as_str()) {
             data.to_string()
         } else if let Some(s) = result_obj.as_str() {
             // Fallback for legacy plugins that return string directly
             s.to_string()
         } else {
-            return Err(anyhow::anyhow!("Invalid response format from downloadCover: missing 'data' field"));
+            return Err(anyhow::anyhow!(
+                "Invalid response format from downloadCover: missing 'data' field"
+            ));
         };
 
         // Decode base64 to bytes
@@ -267,7 +252,7 @@ impl PluginEventBus for JsPluginEventBus {
 ///
 /// This function creates a Deno runtime and injects the Ting API into the global scope.
 /// The Ting API provides logging, configuration access, and event bus functionality.
-/// 
+///
 /// # Arguments
 /// * `plugin_name` - Name of the plugin
 /// * `config` - Plugin configuration
@@ -277,7 +262,7 @@ pub fn create_js_runtime_with_bindings(
     config: Value,
     sandbox: Option<&crate::plugin::wasm::sandbox::Sandbox>,
 ) -> Result<deno_core::JsRuntime> {
-    use deno_core::{JsRuntime, RuntimeOptions, Extension, op2};
+    use deno_core::{op2, Extension, JsRuntime, RuntimeOptions};
     use std::sync::OnceLock;
 
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -296,7 +281,10 @@ pub fn create_js_runtime_with_bindings(
 
     #[op2(async)]
     #[string]
-    pub async fn op_fetch(#[string] url: String, #[serde] options: Option<Value>) -> Result<String, anyhow::Error> {
+    pub async fn op_fetch(
+        #[string] url: String,
+        #[serde] options: Option<Value>,
+    ) -> Result<String, anyhow::Error> {
         tracing::info!("op_fetch: 开始请求 {}", url);
 
         let client = get_client();
@@ -330,15 +318,19 @@ pub fn create_js_runtime_with_bindings(
                 tracing::info!("op_fetch: 获得响应状态 {}", status);
                 match resp.text().await {
                     Ok(text) => {
-                        tracing::info!("op_fetch: 对 {} 的请求已完成，主体长度: {}", url, text.len());
+                        tracing::info!(
+                            "op_fetch: 对 {} 的请求已完成，主体长度: {}",
+                            url,
+                            text.len()
+                        );
                         Ok(text)
-                    },
+                    }
                     Err(e) => {
                         tracing::error!("op_fetch: 无法从 {} 读取主体: {}", url, e);
                         Err(e.into())
                     }
                 }
-            },
+            }
             Err(e) => {
                 tracing::error!("op_fetch: 对 {} 的请求失败: {}", url, e);
                 Err(e.into())
@@ -432,9 +424,9 @@ mod tests {
         ];
         let sandbox = Sandbox::new(permissions, ResourceLimits::default());
 
-        let mut runtime = create_js_runtime_with_bindings(
-            "test-plugin".to_string(), config, Some(&sandbox)
-        ).unwrap();
+        let mut runtime =
+            create_js_runtime_with_bindings("test-plugin".to_string(), config, Some(&sandbox))
+                .unwrap();
 
         let test_code = r#"
             const allowedPaths = Ting.sandbox.allowedPaths;

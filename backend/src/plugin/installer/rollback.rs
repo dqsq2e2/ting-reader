@@ -18,7 +18,11 @@ impl InstallationBackup {
     pub(super) fn new(target_path: &Path) -> Result<Self> {
         let backup_path = if target_path.exists() {
             let backup = target_path.with_extension("backup");
-            debug!("Creating backup: {} -> {}", target_path.display(), backup.display());
+            debug!(
+                "Creating backup: {} -> {}",
+                target_path.display(),
+                backup.display()
+            );
 
             if backup.exists() {
                 fs::remove_dir_all(&backup)?;
@@ -30,13 +34,20 @@ impl InstallationBackup {
             None
         };
 
-        Ok(Self { target_path: target_path.to_path_buf(), backup_path, committed: false })
+        Ok(Self {
+            target_path: target_path.to_path_buf(),
+            backup_path,
+            committed: false,
+        })
     }
 
     pub(super) fn commit(mut self) -> Result<()> {
         self.committed = true;
         if let Some(backup) = &self.backup_path {
-            debug!("Committing installation, removing backup: {}", backup.display());
+            debug!(
+                "Committing installation, removing backup: {}",
+                backup.display()
+            );
             fs::remove_dir_all(backup)?;
         }
         Ok(())
@@ -50,7 +61,11 @@ impl InstallationBackup {
         }
 
         if let Some(backup) = &self.backup_path {
-            debug!("Restoring backup: {} -> {}", backup.display(), self.target_path.display());
+            debug!(
+                "Restoring backup: {} -> {}",
+                backup.display(),
+                self.target_path.display()
+            );
             fs::rename(backup, &self.target_path)?;
         }
 

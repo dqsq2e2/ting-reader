@@ -7,12 +7,12 @@
 //! - Data models and schemas
 
 pub mod manager;
+pub mod migrations;
 pub mod models;
 pub mod repository;
-pub mod migrations;
 
 pub use manager::DatabaseManager;
-pub use models::{Book, Chapter, PluginRecord, TaskRecord, User, Series, SeriesBook};
+pub use models::{Book, Chapter, Series, SeriesBook, TaskRecord, User};
 pub use repository::{
-    Repository, BookRepository, ChapterRepository, PluginRepository, TaskRepository, UserRepository, SeriesRepository
+    BookRepository, ChapterRepository, Repository, SeriesRepository, TaskRepository, UserRepository,
 };

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import apiClient from '../api/client';
-import type { Library } from '../types';
+import type { Library, ScraperSource } from '../types';
 import { 
   Plus, 
   Database, 
@@ -25,7 +25,7 @@ const ScraperConfigurator = ({
   libraryType
 }: { 
   configStr: string, 
-  sources: {id: string, name: string}[], 
+  sources: Pick<ScraperSource, 'id' | 'name' | 'autoScrape'>[],
   onChange: (newConfigStr: string) => void,
   libraryType: string
 }) => {
@@ -75,6 +75,10 @@ const ScraperConfigurator = ({
   // Initialize default priority if empty
   if (activeTab === 'priority' && activeIds.length === 0) {
       activeIds = ['local_metadata', 'audio_metadata', 'scraper'];
+  }
+  if (activeTab !== 'priority') {
+    const autoSourceIds = new Set(sources.map(source => source.id));
+    activeIds = activeIds.filter(id => autoSourceIds.has(id));
   }
 
   const nfoEnabled = config.nfoWritingEnabled ?? config.nfo_writing_enabled ?? false;
@@ -400,7 +404,7 @@ const AdminLibraries: React.FC = () => {
   const [availableFolders, setAvailableFolders] = useState<{name: string, path: string}[]>([]);
   const [currentBrowsePath, setCurrentBrowsePath] = useState('');
   const [isFolderMenuOpen, setIsFolderMenuOpen] = useState(false);
-  const [scraperSources, setScraperSources] = useState<{id: string, name: string}[]>([]);
+  const [scraperSources, setScraperSources] = useState<Pick<ScraperSource, 'id' | 'name' | 'autoScrape'>[]>([]);
   const [showJsonEditor, setShowJsonEditor] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
   
@@ -424,7 +428,7 @@ const AdminLibraries: React.FC = () => {
     try {
       const response = await apiClient.get('/api/scraper/sources');
       if (response.data && response.data.sources) {
-        setScraperSources(response.data.sources);
+        setScraperSources((response.data.sources as ScraperSource[]).filter(source => source.autoScrape));
       }
     } catch (err) {
       console.error('获取刮削源失败', err);

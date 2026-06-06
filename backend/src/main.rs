@@ -13,7 +13,7 @@ async fn main() -> Result<()> {
     // This must be called once at program startup to avoid race conditions
     // when multiple threads create JsRuntime instances concurrently
     deno_core::JsRuntime::init_platform(None);
-    
+
     // Load configuration (handles CLI args, env vars, and config file)
     let config = match core::config::Config::load() {
         Ok(cfg) => cfg,
@@ -58,7 +58,7 @@ async fn main() -> Result<()> {
         &config.storage.local_storage_root,
         &config.plugins.plugin_dir,
     ];
-    
+
     for dir in required_dirs {
         if !dir.exists() {
             info!("Creating directory: {:?}", dir);
@@ -90,13 +90,15 @@ async fn main() -> Result<()> {
         max_execution_time: std::time::Duration::from_secs(config.plugins.max_execution_time),
     };
     let plugin_manager = std::sync::Arc::new(plugin::PluginManager::new(plugin_config)?);
-    plugin_manager.discover_plugins(&config.plugins.plugin_dir).await?;
+    plugin_manager
+        .discover_plugins(&config.plugins.plugin_dir)
+        .await?;
 
     // Initialize API server
     info!("正在初始化 HTTP 服务器...");
     let server_url = format!("http://{}:{}", config.server.host, config.server.port);
     let server = api::ApiServer::new(config, db, plugin_manager)?;
-    
+
     info!("听书后端初始化成功");
     info!(url = %server_url, "服务器已就绪 - 开始处理请求");
 
@@ -107,9 +109,9 @@ async fn main() -> Result<()> {
 }
 
 async fn ensure_admin_user(db: std::sync::Arc<db::DatabaseManager>) -> Result<()> {
-    use ting_reader::db::repository::{Repository, UserRepository};
-    use ting_reader::db::models::User;
     use ting_reader::auth::hash_password;
+    use ting_reader::db::models::User;
+    use ting_reader::db::repository::{Repository, UserRepository};
     use uuid::Uuid;
 
     let user_repo = UserRepository::new(db);

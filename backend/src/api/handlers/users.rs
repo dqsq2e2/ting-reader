@@ -1,11 +1,12 @@
+use super::AppState;
 use crate::api::models::{
-    UserInfoResponse, CreateUserRequest, UpdateUserRequest, UserActionResponse,
-    UserSettingsResponse, UpdateUserSettingsRequest,
-    FavoriteActionResponse,
-    ProgressResponse, UpdateProgressRequest,
+    CreateUserRequest, FavoriteActionResponse, ProgressResponse, UpdateProgressRequest,
+    UpdateUserRequest, UpdateUserSettingsRequest, UserActionResponse, UserInfoResponse,
+    UserSettingsResponse,
 };
 use crate::api::require_admin;
 use crate::core::error::{Result, TingError};
+use crate::db::repository::Repository;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -13,8 +14,6 @@ use axum::{
     Json,
 };
 use uuid::Uuid;
-use super::AppState;
-use crate::db::repository::Repository;
 
 /// Handler for GET /api/users - Get all users (admin only)
 pub async fn list_users(
@@ -28,7 +27,10 @@ pub async fn list_users(
 
     for user_model in users_list {
         let mut user_resp = UserInfoResponse::from(user_model.clone());
-        user_resp.libraries_accessible = state.user_repo.get_accessible_libraries(&user_model.id).await?;
+        user_resp.libraries_accessible = state
+            .user_repo
+            .get_accessible_libraries(&user_model.id)
+            .await?;
         user_resp.books_accessible = state.user_repo.get_accessible_books(&user_model.id).await?;
         users.push(user_resp);
     }
@@ -43,13 +45,21 @@ pub async fn create_user(
     Json(req): Json<CreateUserRequest>,
 ) -> Result<impl IntoResponse> {
     if admin.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
+        return Err(TingError::PermissionDenied(
+            "Admin access required".to_string(),
+        ));
     }
 
-    if state.user_repo.find_by_username(&req.username).await?.is_some() {
-        return Err(TingError::ValidationError(
-            format!("Username '{}' already exists", req.username)
-        ));
+    if state
+        .user_repo
+        .find_by_username(&req.username)
+        .await?
+        .is_some()
+    {
+        return Err(TingError::ValidationError(format!(
+            "Username '{}' already exists",
+            req.username
+        )));
     }
 
     let password_hash = bcrypt::hash(&req.password, bcrypt::DEFAULT_COST)
@@ -65,11 +75,14 @@ pub async fn create_user(
 
     state.user_repo.create(&new_user).await?;
 
-    state.user_repo.update_permissions(
-        &new_user.id,
-        req.libraries_accessible.clone(),
-        req.books_accessible.clone()
-    ).await?;
+    state
+        .user_repo
+        .update_permissions(
+            &new_user.id,
+            req.libraries_accessible.clone(),
+            req.books_accessible.clone(),
+        )
+        .await?;
 
     let mut user_resp = UserInfoResponse::from(new_user);
     user_resp.libraries_accessible = req.libraries_accessible.unwrap_or_default();
@@ -92,26 +105,33 @@ pub async fn update_user(
     Json(req): Json<UpdateUserRequest>,
 ) -> Result<impl IntoResponse> {
     if admin.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
+        return Err(TingError::PermissionDenied(
+            "Admin access required".to_string(),
+        ));
     }
 
-    let mut user = state.user_repo.find_by_id(&user_id).await?
+    let mut user = state
+        .user_repo
+        .find_by_id(&user_id)
+        .await?
         .ok_or_else(|| TingError::NotFound(format!("User {} not found", user_id)))?;
 
     if let Some(username) = req.username {
         if let Some(existing) = state.user_repo.find_by_username(&username).await? {
             if existing.id != user_id {
-                return Err(TingError::ValidationError(
-                    format!("Username '{}' already exists", username)
-                ));
+                return Err(TingError::ValidationError(format!(
+                    "Username '{}' already exists",
+                    username
+                )));
             }
         }
         user.username = username;
     }
 
     if let Some(password) = req.password {
-        user.password_hash = bcrypt::hash(&password, bcrypt::DEFAULT_COST)
-            .map_err(|e| TingError::PluginExecutionError(format!("Failed to hash password: {}", e)))?;
+        user.password_hash = bcrypt::hash(&password, bcrypt::DEFAULT_COST).map_err(|e| {
+            TingError::PluginExecutionError(format!("Failed to hash password: {}", e))
+        })?;
     }
 
     if let Some(role) = req.role {
@@ -121,11 +141,14 @@ pub async fn update_user(
     state.user_repo.update(&user).await?;
 
     if req.libraries_accessible.is_some() || req.books_accessible.is_some() {
-        state.user_repo.update_permissions(
-            &user.id,
-            req.libraries_accessible.clone(),
-            req.books_accessible.clone()
-        ).await?;
+        state
+            .user_repo
+            .update_permissions(
+                &user.id,
+                req.libraries_accessible.clone(),
+                req.books_accessible.clone(),
+            )
+            .await?;
     }
 
     let mut user_resp = UserInfoResponse::from(user);
@@ -145,16 +168,21 @@ pub async fn delete_user(
     admin: crate::auth::middleware::AuthUser,
 ) -> Result<impl IntoResponse> {
     if admin.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
+        return Err(TingError::PermissionDenied(
+            "Admin access required".to_string(),
+        ));
     }
 
     if admin.id == user_id {
         return Err(TingError::ValidationError(
-            "Cannot delete your own account".to_string()
+            "Cannot delete your own account".to_string(),
         ));
     }
 
-    state.user_repo.find_by_id(&user_id).await?
+    state
+        .user_repo
+        .find_by_id(&user_id)
+        .await?
         .ok_or_else(|| TingError::NotFound(format!("User {} not found", user_id)))?;
 
     state.user_repo.delete(&user_id).await?;
@@ -172,7 +200,7 @@ pub async fn get_user_settings(
     match state.settings_repo.get_by_user(&user.id).await? {
         Some(settings) => {
             let mut response = UserSettingsResponse::from(settings);
-            
+
             if let Some(ref json_val) = response.settings_json {
                 if let Some(val) = json_val.get("sleepTimerDefault") {
                     if let Some(i) = val.as_i64() {
@@ -195,7 +223,7 @@ pub async fn get_user_settings(
                     }
                 }
             }
-            
+
             Ok(Json(response))
         }
         None => {
@@ -221,7 +249,7 @@ pub async fn update_user_settings(
     Json(req): Json<UpdateUserSettingsRequest>,
 ) -> Result<impl IntoResponse> {
     let existing = state.settings_repo.get_by_user(&user.id).await?;
-    
+
     let mut settings_obj = if let Some(ref s) = existing {
         if let Some(ref json_str) = s.settings_json {
             serde_json::from_str(json_str).unwrap_or(serde_json::json!({}))
@@ -241,7 +269,7 @@ pub async fn update_user_settings(
     if let Some(auto_cache) = req.auto_cache {
         settings_obj["autoCache"] = serde_json::json!(auto_cache);
     }
-    
+
     // Restricted settings (admin only)
     if user.role == "admin" {
         if let Some(widget_css) = &req.widget_css {
@@ -272,21 +300,25 @@ pub async fn update_user_settings(
 
     let settings = crate::db::models::UserSettings {
         user_id: user.id.clone(),
-        playback_speed: req.playback_speed.unwrap_or_else(|| {
-            existing.as_ref().map(|s| s.playback_speed).unwrap_or(1.0)
-        }),
+        playback_speed: req
+            .playback_speed
+            .unwrap_or_else(|| existing.as_ref().map(|s| s.playback_speed).unwrap_or(1.0)),
         theme: req.theme.unwrap_or_else(|| {
-            existing.as_ref().map(|s| s.theme.clone()).unwrap_or_else(|| "auto".to_string())
+            existing
+                .as_ref()
+                .map(|s| s.theme.clone())
+                .unwrap_or_else(|| "auto".to_string())
         }),
-        auto_play: req.auto_play.map(|v| if v { 1 } else { 0 }).unwrap_or_else(|| {
-            existing.as_ref().map(|s| s.auto_play).unwrap_or(1)
-        }),
-        skip_intro: req.skip_intro.unwrap_or_else(|| {
-            existing.as_ref().map(|s| s.skip_intro).unwrap_or(0)
-        }),
-        skip_outro: req.skip_outro.unwrap_or_else(|| {
-            existing.as_ref().map(|s| s.skip_outro).unwrap_or(0)
-        }),
+        auto_play: req
+            .auto_play
+            .map(|v| if v { 1 } else { 0 })
+            .unwrap_or_else(|| existing.as_ref().map(|s| s.auto_play).unwrap_or(1)),
+        skip_intro: req
+            .skip_intro
+            .unwrap_or_else(|| existing.as_ref().map(|s| s.skip_intro).unwrap_or(0)),
+        skip_outro: req
+            .skip_outro
+            .unwrap_or_else(|| existing.as_ref().map(|s| s.skip_outro).unwrap_or(0)),
         settings_json: Some(settings_obj.to_string()),
         updated_at: chrono::Utc::now().to_rfc3339(),
     };
@@ -326,9 +358,9 @@ pub async fn get_favorites(
     user: crate::auth::middleware::AuthUser,
 ) -> Result<impl IntoResponse> {
     let favorites_list = state.favorite_repo.get_by_user(&user.id).await?;
-    
+
     let mut books = Vec::new();
-    
+
     for fav in favorites_list {
         if let Some(book) = state.book_repo.find_by_id(&fav.book_id).await? {
             let mut book_resp = crate::api::models::BookResponse::from(book);
@@ -346,7 +378,10 @@ pub async fn add_favorite(
     Path(book_id): Path<String>,
     user: crate::auth::middleware::AuthUser,
 ) -> Result<impl IntoResponse> {
-    state.book_repo.find_by_id(&book_id).await?
+    state
+        .book_repo
+        .find_by_id(&book_id)
+        .await?
         .ok_or_else(|| TingError::NotFound(format!("Book {} not found", book_id)))?;
 
     if state.favorite_repo.is_favorited(&user.id, &book_id).await? {
@@ -394,15 +429,18 @@ pub async fn get_recent_progress(
     user: crate::auth::middleware::AuthUser,
 ) -> Result<impl IntoResponse> {
     let progress_list = state.progress_repo.get_recent_enriched(&user.id, 4).await?;
-    let progress: Vec<ProgressResponse> = progress_list.into_iter().map(|(p, b_title, c_url, l_id, c_title, c_dur)| {
-        let mut response = ProgressResponse::from(p);
-        response.book_title = b_title;
-        response.cover_url = c_url;
-        response.library_id = l_id;
-        response.chapter_title = c_title;
-        response.chapter_duration = c_dur;
-        response
-    }).collect();
+    let progress: Vec<ProgressResponse> = progress_list
+        .into_iter()
+        .map(|(p, b_title, c_url, l_id, c_title, c_dur)| {
+            let mut response = ProgressResponse::from(p);
+            response.book_title = b_title;
+            response.cover_url = c_url;
+            response.library_id = l_id;
+            response.chapter_title = c_title;
+            response.chapter_duration = c_dur;
+            response
+        })
+        .collect();
 
     Ok(Json(progress))
 }
@@ -414,12 +452,11 @@ pub async fn get_book_progress(
     user: crate::auth::middleware::AuthUser,
 ) -> Result<impl IntoResponse> {
     match state.progress_repo.get_by_book(&user.id, &book_id).await? {
-        Some(progress) => {
-            Ok(Json(ProgressResponse::from(progress)))
-        }
-        None => {
-            Err(TingError::NotFound(format!("Progress not found for book {}", book_id)))
-        }
+        Some(progress) => Ok(Json(ProgressResponse::from(progress))),
+        None => Err(TingError::NotFound(format!(
+            "Progress not found for book {}",
+            book_id
+        ))),
     }
 }
 
@@ -429,16 +466,22 @@ pub async fn update_progress(
     user: crate::auth::middleware::AuthUser,
     Json(req): Json<UpdateProgressRequest>,
 ) -> Result<impl IntoResponse> {
-    let book = state.book_repo.find_by_id(&req.book_id).await?
+    let book = state
+        .book_repo
+        .find_by_id(&req.book_id)
+        .await?
         .ok_or_else(|| TingError::NotFound(format!("Book {} not found", req.book_id)))?;
 
     if let Some(ref chapter_id) = req.chapter_id {
-        let chapter = state.chapter_repo.find_by_id(chapter_id).await?
+        let chapter = state
+            .chapter_repo
+            .find_by_id(chapter_id)
+            .await?
             .ok_or_else(|| TingError::NotFound(format!("Chapter {} not found", chapter_id)))?;
-        
+
         if chapter.book_id != book.id {
             return Err(TingError::ValidationError(
-                "Chapter does not belong to the specified book".to_string()
+                "Chapter does not belong to the specified book".to_string(),
             ));
         }
     }

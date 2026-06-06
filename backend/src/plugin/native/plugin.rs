@@ -3,26 +3,26 @@
 //! This module provides a wrapper that implements the Plugin trait for native dynamic libraries.
 //! It bridges the NativeLoader functionality with the Plugin interface.
 
-use std::sync::{Arc, RwLock};
-use serde_json::Value;
-use crate::core::error::{Result, TingError};
-use super::super::types::{Plugin, PluginMetadata, PluginType, PluginContext};
+use super::super::types::{Plugin, PluginContext, PluginMetadata, PluginType};
 use super::loader::NativeLoader;
+use crate::core::error::{Result, TingError};
+use serde_json::Value;
+use std::sync::{Arc, RwLock};
 
 /// Native plugin wrapper that implements the Plugin trait
 pub struct NativePlugin {
     /// Plugin metadata
     metadata: PluginMetadata,
-    
+
     /// Plugin ID (name@version)
     plugin_id: String,
-    
+
     /// Reference to the native loader
     native_loader: Arc<NativeLoader>,
-    
+
     /// Initialization state
     initialized: RwLock<bool>,
-    
+
     /// Plugin installation directory
     plugin_path: std::path::PathBuf,
 }
@@ -49,7 +49,7 @@ impl NativePlugin {
             plugin_path,
         }
     }
-    
+
     /// Call a method on the native plugin
     ///
     /// # Arguments
@@ -65,35 +65,34 @@ impl NativePlugin {
         // Actually, NativePlugin::initialize calls "initialize" method on the plugin.
         // But get_ffmpeg_path might be called very early.
         // Let's keep the check but ensure initialize() is called.
-        
+
         // Check if initialized
         let is_initialized = *self.initialized.read().map_err(|e| {
             TingError::PluginExecutionError(format!("Failed to check initialization state: {}", e))
         })?;
-        
+
         // Allow utility methods to be called even if not fully initialized?
         // No, we should ensure initialization first.
-        
+
         if !is_initialized {
-             // If not initialized, maybe we can try to initialize it implicitly?
-             // Or just warn.
-             // For now, strict check.
-            return Err(TingError::PluginExecutionError(
-                format!("Plugin {} is not initialized", self.plugin_id)
-            ));
+            // If not initialized, maybe we can try to initialize it implicitly?
+            // Or just warn.
+            // For now, strict check.
+            return Err(TingError::PluginExecutionError(format!(
+                "Plugin {} is not initialized",
+                self.plugin_id
+            )));
         }
-        
+
         // Call the native function through the loader in a blocking task
         let loader = self.native_loader.clone();
         let plugin_id = self.plugin_id.clone();
         let method = method.to_string();
-        
+
         // Offload to blocking thread pool to avoid blocking the async runtime
-        tokio::task::spawn_blocking(move || {
-            loader.call_function(&plugin_id, &method, params)
-        })
-        .await
-        .map_err(|e| TingError::PluginExecutionError(format!("Task join error: {}", e)))?
+        tokio::task::spawn_blocking(move || loader.call_function(&plugin_id, &method, params))
+            .await
+            .map_err(|e| TingError::PluginExecutionError(format!("Task join error: {}", e)))?
     }
 }
 
@@ -102,33 +101,33 @@ impl Plugin for NativePlugin {
     fn metadata(&self) -> &PluginMetadata {
         &self.metadata
     }
-    
+
     async fn initialize(&self, context: &PluginContext) -> Result<()> {
         tracing::info!(
             plugin_id = %self.plugin_id,
             "正在初始化原生插件"
         );
-        
+
         // Call the plugin's initialize method if it exists
         let init_params = serde_json::json!({
             "config": context.config,
             "data_dir": context.data_dir.to_string_lossy(),
             "plugin_path": self.plugin_path.to_string_lossy(),
         });
-        
+
         // Try to call initialize method (optional for plugins)
         // Since native calls are blocking, we rely on them being fast
         // or wrap in spawn_blocking if needed. For init/shutdown, direct call is usually fine.
         let loader = self.native_loader.clone();
         let plugin_id = self.plugin_id.clone();
-        
+
         // Offload to blocking thread pool
         let result = tokio::task::spawn_blocking(move || {
             loader.call_function(&plugin_id, "initialize", init_params)
         })
         .await
         .map_err(|e| TingError::PluginExecutionError(format!("Task join error: {}", e)))?;
-        
+
         match result {
             Ok(_) => {
                 tracing::debug!(
@@ -145,34 +144,34 @@ impl Plugin for NativePlugin {
                 );
             }
         }
-        
+
         // Mark as initialized
         let mut initialized = self.initialized.write().map_err(|e| {
             TingError::PluginExecutionError(format!("Failed to update initialization state: {}", e))
         })?;
         *initialized = true;
-        
+
         tracing::info!(
             plugin_id = %self.plugin_id,
             "原生插件初始化成功"
         );
-        
+
         Ok(())
     }
-    
+
     async fn shutdown(&self) -> Result<()> {
         tracing::info!(
             plugin_id = %self.plugin_id,
             "Shutting down native plugin"
         );
-        
+
         // Call the plugin's shutdown method if it exists
         let shutdown_params = serde_json::json!({});
-        
+
         // Try to call shutdown method (optional for plugins)
         let loader = self.native_loader.clone();
         let plugin_id = self.plugin_id.clone();
-        
+
         // Offload to blocking thread pool
         let result = tokio::task::spawn_blocking(move || {
             loader.call_function(&plugin_id, "shutdown", shutdown_params)
@@ -196,50 +195,47 @@ impl Plugin for NativePlugin {
                 );
             }
         }
-        
+
         // Mark as not initialized
         let mut initialized = self.initialized.write().map_err(|e| {
             TingError::PluginExecutionError(format!("Failed to update initialization state: {}", e))
         })?;
         *initialized = false;
-        
+
         tracing::info!(
             plugin_id = %self.plugin_id,
             "Native plugin shut down successfully"
         );
-        
+
         Ok(())
     }
-    
+
     async fn garbage_collect(&self) -> Result<()> {
         // Native plugins manage their own memory.
         tracing::debug!(plugin_id = %self.plugin_id, "请求本地插件进行垃圾回收");
-        
+
         // Try to call the plugin's garbage_collect method if it exists
         // We use spawn_blocking because this is a native call
         let loader = self.native_loader.clone();
         let plugin_id = self.plugin_id.clone();
-        
+
         let _ = tokio::task::spawn_blocking(move || {
             if let Ok(true) = loader.has_symbol(&plugin_id, "plugin_invoke") {
                 // We don't check if "garbage_collect" is supported by the invoke dispatch,
                 // we just try to call it. If the plugin doesn't handle it, it should return an error
                 // or ignore it.
-                let _ = loader.call_function(
-                    &plugin_id, 
-                    "garbage_collect", 
-                    serde_json::json!({})
-                );
+                let _ = loader.call_function(&plugin_id, "garbage_collect", serde_json::json!({}));
             }
-        }).await;
-        
+        })
+        .await;
+
         Ok(())
     }
 
     fn plugin_type(&self) -> PluginType {
         self.metadata.plugin_type
     }
-    
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -264,15 +260,15 @@ mod tests {
             "Test plugin".to_string(),
             "plugin.dll".to_string(),
         );
-        
+
         let loader = Arc::new(NativeLoader::new());
         let plugin = NativePlugin::new(
-            "test-plugin@1.0.0".to_string(), 
-            metadata, 
+            "test-plugin@1.0.0".to_string(),
+            metadata,
             loader,
-            std::path::PathBuf::from("/tmp/test-plugin")
+            std::path::PathBuf::from("/tmp/test-plugin"),
         );
-        
+
         assert_eq!(plugin.metadata().name, "test-plugin");
     }
 }

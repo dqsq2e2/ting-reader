@@ -16,7 +16,8 @@ pub fn generate_init_code(
     let paths_json = serde_json::to_string(allowed_paths).unwrap_or_else(|_| "[]".to_string());
     let domains_json = serde_json::to_string(allowed_domains).unwrap_or_else(|_| "[]".to_string());
 
-    format!(r#"
+    format!(
+        r#"
         "use strict";
 
         // Polyfill Headers

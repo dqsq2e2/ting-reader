@@ -2,6 +2,8 @@ mod types;
 pub use types::*;
 
 use crate::core::error::{Result, TingError};
+use id3::TagLike;
+use std::fs::File;
 use std::io::SeekFrom;
 use std::ops::Range;
 use std::path::Path;
@@ -12,9 +14,7 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
-use std::fs::File;
 use tracing::{debug, info};
-use id3::TagLike;
 
 pub struct AudioStreamer {
     cache: Arc<RwLock<AudioCache>>,
@@ -76,10 +76,11 @@ impl AudioStreamer {
         }
 
         let format = self.detect_format(file_path)?;
-        
+
         // Skip validation for .strm files (they are URL redirects, not audio files)
         if format == AudioFormat::Unknown {
-            let ext = file_path.extension()
+            let ext = file_path
+                .extension()
                 .and_then(|e| e.to_str())
                 .unwrap_or("")
                 .to_lowercase();
@@ -87,7 +88,7 @@ impl AudioStreamer {
                 return Ok(());
             }
         }
-        
+
         if !self.config.supported_formats.contains(&format) {
             return Err(TingError::InvalidRequest(format!(
                 "Unsupported audio format: {:?}",
@@ -112,13 +113,14 @@ impl AudioStreamer {
         }
 
         // Skip metadata extraction for .strm files (they are URL redirects, not audio files)
-        let ext = file_path.extension()
+        let ext = file_path
+            .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_lowercase();
         if ext == "strm" {
             return Err(TingError::InvalidRequest(
-                "Cannot extract metadata from .strm files (URL redirects)".to_string()
+                "Cannot extract metadata from .strm files (URL redirects)".to_string(),
             ));
         }
 
@@ -147,7 +149,7 @@ impl AudioStreamer {
             enable_gapless: true,
             ..Default::default()
         };
-        
+
         let metadata_opts = MetadataOptions::default();
 
         let probed = symphonia::default::get_probe()
@@ -155,21 +157,13 @@ impl AudioStreamer {
             .map_err(|e| {
                 let error_msg = e.to_string();
                 if error_msg.contains("probe limit") || error_msg.contains("unsupported format") {
-                    tracing::warn!(
-                        "音频格式探测失败: {:?}, 错误: {}",
-                        file_path,
-                        error_msg
-                    );
+                    tracing::warn!("音频格式探测失败: {:?}, 错误: {}", file_path, error_msg);
                     TingError::InvalidRequest(format!(
                         "音频文件格式探测失败（文件可能损坏或格式不支持）: {}",
                         error_msg
                     ))
                 } else {
-                    tracing::warn!(
-                        "音频格式探测失败: {:?}, 错误: {}",
-                        file_path,
-                        error_msg
-                    );
+                    tracing::warn!("音频格式探测失败: {:?}, 错误: {}", file_path, error_msg);
                     TingError::InvalidRequest(format!("音频格式探测失败: {}", error_msg))
                 }
             })?;
@@ -194,9 +188,7 @@ impl AudioStreamer {
         };
 
         // Calculate bitrate
-        let file_size = std::fs::metadata(file_path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let file_size = std::fs::metadata(file_path).map(|m| m.len()).unwrap_or(0);
         let bitrate = if duration.as_secs() > 0 {
             ((file_size * 8) / duration.as_secs()) as u32
         } else {
@@ -215,31 +207,43 @@ impl AudioStreamer {
         // Symphonia might provide multiple metadata blocks (e.g. ID3v2 and ID3v1, or iTunes metadata)
         // We process them all, preferring values found later (or earlier? usually header metadata comes first)
         // We'll fill in missing values.
-        
-        // Note: metadata() returns a MetadataLog. pop() returns the oldest? 
+
+        // Note: metadata() returns a MetadataLog. pop() returns the oldest?
         // Actually Symphonia documentation says pop() "Removes the oldest metadata from the log".
         // So we should probably process them in order.
-        
+
         while let Some(metadata_rev) = format_reader.metadata().pop() {
             for tag in metadata_rev.tags() {
                 match tag.std_key {
                     Some(symphonia::core::meta::StandardTagKey::TrackTitle) => {
-                        if title.is_none() { title = Some(tag.value.to_string()); }
+                        if title.is_none() {
+                            title = Some(tag.value.to_string());
+                        }
                     }
                     Some(symphonia::core::meta::StandardTagKey::Artist) => {
-                         if artist.is_none() { artist = Some(tag.value.to_string()); }
+                        if artist.is_none() {
+                            artist = Some(tag.value.to_string());
+                        }
                     }
                     Some(symphonia::core::meta::StandardTagKey::Album) => {
-                         if album.is_none() { album = Some(tag.value.to_string()); }
+                        if album.is_none() {
+                            album = Some(tag.value.to_string());
+                        }
                     }
                     Some(symphonia::core::meta::StandardTagKey::AlbumArtist) => {
-                         if album_artist.is_none() { album_artist = Some(tag.value.to_string()); }
+                        if album_artist.is_none() {
+                            album_artist = Some(tag.value.to_string());
+                        }
                     }
                     Some(symphonia::core::meta::StandardTagKey::Composer) => {
-                         if composer.is_none() { composer = Some(tag.value.to_string()); }
+                        if composer.is_none() {
+                            composer = Some(tag.value.to_string());
+                        }
                     }
                     Some(symphonia::core::meta::StandardTagKey::Genre) => {
-                         if genre.is_none() { genre = Some(tag.value.to_string()); }
+                        if genre.is_none() {
+                            genre = Some(tag.value.to_string());
+                        }
                     }
                     _ => {}
                 }
@@ -249,7 +253,9 @@ impl AudioStreamer {
         // Try to use id3 crate for MP3 AND M4A files as fallback if metadata is missing
         // Some M4A files might contain ID3v2 tags (non-standard but common)
         // Or the file might be an MP3 renamed as M4A
-        if (format == AudioFormat::Mp3 || format == AudioFormat::M4a) && (title.is_none() || artist.is_none() || album.is_none()) {
+        if (format == AudioFormat::Mp3 || format == AudioFormat::M4a)
+            && (title.is_none() || artist.is_none() || album.is_none())
+        {
             debug!("Using id3 crate fallback for {:?}", file_path);
             if let Ok(tag) = id3::Tag::read_from_path(file_path) {
                 if title.is_none() {
@@ -331,7 +337,7 @@ impl AudioStreamer {
             let start: u64 = parts[0].parse().map_err(|_| {
                 TingError::InvalidRequest("Invalid Range header: invalid start".to_string())
             })?;
-            
+
             let end = if parts[1].is_empty() {
                 // Open-ended range: bytes=500-
                 file_size
@@ -341,7 +347,7 @@ impl AudioStreamer {
                 })?;
                 (end_val + 1).min(file_size) // Range is inclusive, so add 1
             };
-            
+
             (start, end)
         };
 

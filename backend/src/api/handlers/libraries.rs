@@ -1,6 +1,7 @@
+use super::AppState;
 use crate::api::models::{
-    LibraryResponse, CreateLibraryRequest, UpdateLibraryRequest, LibraryScanResponse, FolderInfo,
-    TestWebDavRequest, TestWebDavResponse,
+    CreateLibraryRequest, FolderInfo, LibraryResponse, LibraryScanResponse, TestWebDavRequest,
+    TestWebDavResponse, UpdateLibraryRequest,
 };
 use crate::api::require_admin;
 use crate::core::error::{Result, TingError};
@@ -11,7 +12,6 @@ use axum::{
     Json,
 };
 use uuid::Uuid;
-use super::AppState;
 
 /// Handler for GET /api/libraries - Get all libraries
 pub async fn list_libraries(
@@ -23,7 +23,7 @@ pub async fn list_libraries(
     } else {
         state.library_repo.find_by_user_access(&user.id).await?
     };
-    
+
     let library_responses: Vec<LibraryResponse> = libraries.into_iter().map(Into::into).collect();
 
     Ok(Json(library_responses))
@@ -46,53 +46,55 @@ pub async fn create_library(
     let name_trimmed = req.name.trim();
     if name_trimmed.is_empty() {
         return Err(TingError::ValidationError(
-            "Library name cannot be empty".to_string()
+            "Library name cannot be empty".to_string(),
         ));
     }
 
     if req.library_type != "local" && req.library_type != "webdav" {
-        return Err(TingError::ValidationError(
-            format!("Invalid library type '{}'. Must be 'local' or 'webdav'", req.library_type)
-        ));
+        return Err(TingError::ValidationError(format!(
+            "Invalid library type '{}'. Must be 'local' or 'webdav'",
+            req.library_type
+        )));
     }
 
     if req.library_type == "local" {
         let config = state.config.read().await;
         let storage_root = config.storage.local_storage_root.clone();
         drop(config);
-        
+
         let full_path = storage_root.join(&url);
-        
-        let canonical_path = full_path.canonicalize()
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    TingError::ValidationError(format!("Path '{}' does not exist", url))
-                } else {
-                    TingError::IoError(e)
-                }
-            })?;
-        
-        let canonical_root = storage_root.canonicalize()
+
+        let canonical_path = full_path.canonicalize().map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                TingError::ValidationError(format!("Path '{}' does not exist", url))
+            } else {
+                TingError::IoError(e)
+            }
+        })?;
+
+        let canonical_root = storage_root
+            .canonicalize()
             .map_err(|e| TingError::IoError(e))?;
-        
+
         if !canonical_path.starts_with(&canonical_root) {
-            return Err(TingError::ValidationError(
-                "Invalid local path".to_string()
-            ));
+            return Err(TingError::ValidationError("Invalid local path".to_string()));
         }
     }
 
     if req.library_type == "webdav" {
         if !url.starts_with("http://") && !url.starts_with("https://") {
             return Err(TingError::ValidationError(
-                "WebDAV URL must start with http:// or https://".to_string()
+                "WebDAV URL must start with http:// or https://".to_string(),
             ));
         }
     }
 
     let encrypted_password = if let Some(ref password) = req.webdav_password {
         if !password.is_empty() {
-            Some(crate::core::crypto::encrypt(password, &state.encryption_key)?)
+            Some(crate::core::crypto::encrypt(
+                password,
+                &state.encryption_key,
+            )?)
         } else {
             None
         }
@@ -131,7 +133,7 @@ pub async fn create_library(
         let config = state.config.read().await;
         let storage_root = config.storage.local_storage_root.clone();
         drop(config);
-        
+
         let full_path = storage_root.join(&library.url);
         full_path.to_string_lossy().to_string()
     } else {
@@ -145,7 +147,7 @@ pub async fn create_library(
             "library_path": library_path,
         }),
     };
-    
+
     let task = crate::core::task_queue::Task::new(
         format!("library_scan_{}", library.id),
         crate::core::task_queue::Priority::Normal,
@@ -155,25 +157,27 @@ pub async fn create_library(
     if let Err(e) = state.task_queue.submit(task).await {
         tracing::error!(library_id = %library.id, error = %e, "队列初始扫描任务失败");
     }
-    
+
     // Start watching the library if it's local
     if library.library_type == "local" {
-        let scraper_config: crate::db::models::ScraperConfig = library.scraper_config
+        let scraper_config: crate::db::models::ScraperConfig = library
+            .scraper_config
             .as_ref()
             .and_then(|json| serde_json::from_str(json).ok())
             .unwrap_or_default();
-            
+
         if !scraper_config.disable_watcher {
-            if let Err(e) = state.library_watcher.watch_library(&library.id, &library_path).await {
+            if let Err(e) = state
+                .library_watcher
+                .watch_library(&library.id, &library_path)
+                .await
+            {
                 tracing::warn!("开始监视新库 {} 失败: {}", library.id, e);
             }
         }
     }
 
-    Ok((
-        StatusCode::CREATED,
-        Json(LibraryResponse::from(library)),
-    ))
+    Ok((StatusCode::CREATED, Json(LibraryResponse::from(library))))
 }
 
 /// Handler for PATCH /api/libraries/:id - Update library
@@ -185,7 +189,10 @@ pub async fn update_library(
 ) -> Result<impl IntoResponse> {
     require_admin(&user)?;
 
-    let mut library = state.library_repo.find_by_id(&library_id).await?
+    let mut library = state
+        .library_repo
+        .find_by_id(&library_id)
+        .await?
         .ok_or_else(|| TingError::NotFound(format!("Library {} not found", library_id)))?;
 
     if let Some(name) = req.name {
@@ -194,9 +201,10 @@ pub async fn update_library(
 
     if let Some(library_type) = req.library_type {
         if library_type != "local" && library_type != "webdav" {
-            return Err(TingError::ValidationError(
-                format!("Invalid library type '{}'. Must be 'local' or 'webdav'", library_type)
-            ));
+            return Err(TingError::ValidationError(format!(
+                "Invalid library type '{}'. Must be 'local' or 'webdav'",
+                library_type
+            )));
         }
         library.library_type = library_type;
     }
@@ -206,12 +214,13 @@ pub async fn update_library(
             let config = state.config.read().await;
             let storage_root = config.storage.local_storage_root.clone();
             drop(config);
-            
+
             let full_path = storage_root.join(&path);
             if !full_path.exists() {
-                return Err(TingError::ValidationError(
-                    format!("Path '{}' does not exist", path)
-                ));
+                return Err(TingError::ValidationError(format!(
+                    "Path '{}' does not exist",
+                    path
+                )));
             }
             library.url = path;
         }
@@ -239,24 +248,29 @@ pub async fn update_library(
     }
 
     state.library_repo.update(&library).await?;
-    
+
     // Update watcher
     state.library_watcher.stop_watching(&library_id).await;
     if library.library_type == "local" {
-        let scraper_config: crate::db::models::ScraperConfig = library.scraper_config
+        let scraper_config: crate::db::models::ScraperConfig = library
+            .scraper_config
             .as_ref()
             .and_then(|json| serde_json::from_str(json).ok())
             .unwrap_or_default();
-            
+
         if !scraper_config.disable_watcher {
             let config = state.config.read().await;
             let storage_root = config.storage.local_storage_root.clone();
             drop(config);
-            
+
             let full_path = storage_root.join(&library.url);
             let library_path = full_path.to_string_lossy().to_string();
-            
-            if let Err(e) = state.library_watcher.watch_library(&library.id, &library_path).await {
+
+            if let Err(e) = state
+                .library_watcher
+                .watch_library(&library.id, &library_path)
+                .await
+            {
                 tracing::warn!("更新库 {} 的监视器失败: {}", library.id, e);
             }
         }
@@ -273,7 +287,10 @@ pub async fn delete_library(
 ) -> Result<impl IntoResponse> {
     require_admin(&user)?;
 
-    let library = state.library_repo.find_by_id(&library_id).await?
+    let library = state
+        .library_repo
+        .find_by_id(&library_id)
+        .await?
         .ok_or_else(|| TingError::NotFound(format!("Library {} not found", library_id)))?;
 
     // Cancel any running tasks for this library first
@@ -283,8 +300,13 @@ pub async fn delete_library(
     }
 
     // Get books to clean up covers before deleting library
-    let books = state.book_repo.find_by_library(&library_id).await.unwrap_or_default();
-    let covers_to_delete: Vec<String> = books.into_iter()
+    let books = state
+        .book_repo
+        .find_by_library(&library_id)
+        .await
+        .unwrap_or_default();
+    let covers_to_delete: Vec<String> = books
+        .into_iter()
         .filter_map(|b| b.cover_url)
         .filter(|url| url.contains("temp/covers") || url.contains("storage/cache/covers"))
         .collect();
@@ -302,21 +324,21 @@ pub async fn delete_library(
         // Normalize path just in case
         let path_str = cover_path.replace('\\', "/");
         let path = std::path::Path::new(&path_str);
-        
+
         // Security check: ensure we are deleting from allowed directories
         if path_str.contains("/temp/covers/") || path_str.contains("/storage/cache/covers/") {
             if path.exists() {
-                 if let Err(e) = std::fs::remove_file(path) {
-                     tracing::warn!("删除封面缓存 {} 失败: {}", cover_path, e);
-                 } else {
-                     tracing::info!("已删除孤立的封面缓存: {}", cover_path);
-                 }
+                if let Err(e) = std::fs::remove_file(path) {
+                    tracing::warn!("删除封面缓存 {} 失败: {}", cover_path, e);
+                } else {
+                    tracing::info!("已删除孤立的封面缓存: {}", cover_path);
+                }
             }
-   }
+        }
     }
 
     state.library_watcher.stop_watching(&library_id).await;
-    
+
     tracing::info!(
         target: "audit::library",
         "管理员 '{}' 删除了存储库 '{}' (ID: {})",
@@ -339,14 +361,17 @@ pub async fn scan_library(
 ) -> Result<impl IntoResponse> {
     require_admin(&user)?;
 
-    let library = state.library_repo.find_by_id(&library_id).await?
+    let library = state
+        .library_repo
+        .find_by_id(&library_id)
+        .await?
         .ok_or_else(|| TingError::NotFound(format!("Library {} not found", library_id)))?;
 
     let library_path = if library.library_type == "local" {
         let config = state.config.read().await;
         let storage_root = config.storage.local_storage_root.clone();
         drop(config);
-        
+
         let full_path = storage_root.join(&library.url);
         full_path.to_string_lossy().to_string()
     } else {
@@ -360,14 +385,17 @@ pub async fn scan_library(
             "library_path": library_path,
         }),
     };
-    
+
     let task = crate::core::task_queue::Task::new(
         format!("library_scan_{}", library.id),
         crate::core::task_queue::Priority::Normal,
         task_payload,
     );
 
-    let submitted_task_id = state.task_queue.submit(task).await
+    let submitted_task_id = state
+        .task_queue
+        .submit(task)
+        .await
         .map_err(|e| TingError::TaskError(format!("Failed to queue scan task: {}", e)))?;
 
     Ok((
@@ -391,14 +419,17 @@ pub async fn get_storage_folders(
     let config = state.config.read().await;
     let storage_root = config.storage.local_storage_root.clone();
     drop(config);
-    
-    let sub_path = params.get("subPath")
+
+    let sub_path = params
+        .get("subPath")
         .or_else(|| params.get("path"))
         .map(|s| s.as_str())
         .unwrap_or("");
-    
+
     if sub_path.contains("..") {
-        return Err(TingError::ValidationError("Invalid path: contains '..'".to_string()));
+        return Err(TingError::ValidationError(
+            "Invalid path: contains '..'".to_string(),
+        ));
     }
 
     let target_path = if sub_path.is_empty() {
@@ -412,25 +443,33 @@ pub async fn get_storage_folders(
             return Err(TingError::IoError(e));
         }
     }
-    
+
     if !target_path.exists() {
-         return Err(TingError::ValidationError(format!("Path '{}' does not exist", sub_path)));
+        return Err(TingError::ValidationError(format!(
+            "Path '{}' does not exist",
+            sub_path
+        )));
     }
-    
+
     if !target_path.is_dir() {
-        return Err(TingError::ValidationError(format!("Path '{}' is not a directory", sub_path)));
+        return Err(TingError::ValidationError(format!(
+            "Path '{}' is not a directory",
+            sub_path
+        )));
     }
 
     let mut folders = Vec::new();
 
-    let entries = std::fs::read_dir(&target_path)
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::PermissionDenied {
-                TingError::ValidationError(format!("Permission denied: Cannot access directory '{}'", sub_path))
-            } else {
-                TingError::IoError(e)
-            }
-        })?;
+    let entries = std::fs::read_dir(&target_path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::PermissionDenied {
+            TingError::ValidationError(format!(
+                "Permission denied: Cannot access directory '{}'",
+                sub_path
+            ))
+        } else {
+            TingError::IoError(e)
+        }
+    })?;
 
     for entry in entries {
         let entry = match entry {
@@ -438,7 +477,7 @@ pub async fn get_storage_folders(
             Err(_) => continue,
         };
         let entry_path = entry.path();
-        
+
         if entry_path.is_dir() {
             if let Some(name) = entry_path.file_name().and_then(|n| n.to_str()) {
                 if !name.starts_with('.') {
@@ -447,7 +486,7 @@ pub async fn get_storage_folders(
                     } else {
                         format!("{}/{}", sub_path.replace("\\", "/"), name)
                     };
-                    
+
                     folders.push(FolderInfo {
                         name: name.to_string(),
                         path: relative_path,
@@ -508,16 +547,16 @@ pub async fn test_webdav_connection(
     // 尝试多种方法以兼容不同的 WebDAV 实现（如 Alist）
     let methods = vec![
         ("PROPFIND", Some("0")), // 标准 WebDAV 方法
-        ("OPTIONS", None),        // 备用方法 1
-        ("HEAD", None),           // 备用方法 2
+        ("OPTIONS", None),       // 备用方法 1
+        ("HEAD", None),          // 备用方法 2
     ];
 
     let mut last_error = String::new();
-    
+
     for (method_name, depth_header) in methods {
         let mut request = client.request(
-            reqwest::Method::from_bytes(method_name.as_bytes()).unwrap(), 
-            &test_url
+            reqwest::Method::from_bytes(method_name.as_bytes()).unwrap(),
+            &test_url,
         );
 
         if let Some(depth) = depth_header {
@@ -533,7 +572,7 @@ pub async fn test_webdav_connection(
         match request.send().await {
             Ok(res) => {
                 let status = res.status().as_u16();
-                
+
                 // 成功的状态码
                 if res.status().is_success() || status == 207 {
                     return Ok(Json(TestWebDavResponse {
@@ -541,7 +580,7 @@ pub async fn test_webdav_connection(
                         message: format!("连接成功 (使用 {} 方法)", method_name),
                     }));
                 }
-                
+
                 // 认证失败
                 if status == 401 {
                     return Ok(Json(TestWebDavResponse {
@@ -549,16 +588,16 @@ pub async fn test_webdav_connection(
                         message: "连接失败: 认证失败 (401 Unauthorized)".to_string(),
                     }));
                 }
-                
+
                 // 405 表示方法不支持，尝试下一个方法
                 if status == 405 {
                     last_error = format!("{} 方法不支持 (HTTP 405)", method_name);
                     continue;
                 }
-                
+
                 // 其他错误
                 last_error = format!("HTTP {} (使用 {} 方法)", status, method_name);
-            },
+            }
             Err(e) => {
                 last_error = format!("{} (使用 {} 方法)", e, method_name);
             }

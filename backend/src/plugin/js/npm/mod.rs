@@ -93,9 +93,13 @@ impl NpmManager {
             if let Some(deps_obj) = npm_deps.as_object() {
                 for (name, version) in deps_obj {
                     if let Some(version_str) = version.as_str() {
-                        dependencies.push(NpmDependency::new(name.clone(), version_str.to_string()));
+                        dependencies
+                            .push(NpmDependency::new(name.clone(), version_str.to_string()));
                     } else {
-                        warn!("npm dependency version format invalid {}: {:?}", name, version);
+                        warn!(
+                            "npm dependency version format invalid {}: {:?}",
+                            name, version
+                        );
                     }
                 }
             } else if let Some(deps_array) = npm_deps.as_array() {
@@ -105,7 +109,8 @@ impl NpmManager {
                             dep_obj.get("name").and_then(|v| v.as_str()),
                             dep_obj.get("version").and_then(|v| v.as_str()),
                         ) {
-                            dependencies.push(NpmDependency::new(name.to_string(), version.to_string()));
+                            dependencies
+                                .push(NpmDependency::new(name.to_string(), version.to_string()));
                         } else {
                             warn!("npm dependency missing name or version: {:?}", dep);
                         }
@@ -134,7 +139,13 @@ impl NpmManager {
         npm_dependencies: &[NpmDependency],
     ) -> Result<PathBuf> {
         package_json::generate_package_json(
-            plugin_dir, plugin_name, plugin_version, description, author, license, npm_dependencies,
+            plugin_dir,
+            plugin_name,
+            plugin_version,
+            description,
+            author,
+            license,
+            npm_dependencies,
         )
     }
 
@@ -144,8 +155,16 @@ impl NpmManager {
     }
 
     /// Install npm dependencies for a plugin with logging
-    pub fn install_dependencies_with_name(&self, plugin_dir: &Path, plugin_name: &str) -> Result<()> {
-        info!("Installing npm dependencies for plugin '{}' in: {}", plugin_name, plugin_dir.display());
+    pub fn install_dependencies_with_name(
+        &self,
+        plugin_dir: &Path,
+        plugin_name: &str,
+    ) -> Result<()> {
+        info!(
+            "Installing npm dependencies for plugin '{}' in: {}",
+            plugin_name,
+            plugin_dir.display()
+        );
         let start_time = std::time::Instant::now();
 
         let package_json_path = plugin_dir.join("package.json");
@@ -157,7 +176,8 @@ impl NpmManager {
 
         let package_json = PackageJson::read_from_file(&package_json_path)?;
         let dependencies: Vec<NpmDependency> = package_json
-            .dependencies.iter()
+            .dependencies
+            .iter()
             .map(|(name, version)| NpmDependency::new(name.clone(), version.clone()))
             .collect();
 
@@ -181,13 +201,17 @@ impl NpmManager {
 
         debug!("Executing: npm install in {}", plugin_dir.display());
         let mut cmd = Command::new(&self.npm_path);
-        cmd.arg("install").arg("--production").arg("--no-fund").current_dir(plugin_dir);
+        cmd.arg("install")
+            .arg("--production")
+            .arg("--no-fund")
+            .current_dir(plugin_dir);
         if !self.security_config.enable_audit {
             cmd.arg("--no-audit");
         }
 
-        let output = cmd.output()
-            .with_context(|| format!("Failed to execute npm install in {}", plugin_dir.display()))?;
+        let output = cmd.output().with_context(|| {
+            format!("Failed to execute npm install in {}", plugin_dir.display())
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -197,12 +221,18 @@ impl NpmManager {
             return Err(TingError::PluginLoadError(error_msg).into());
         }
 
-        debug!("npm install output: {}", String::from_utf8_lossy(&output.stdout));
+        debug!(
+            "npm install output: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
 
         let audit_result = if self.security_config.enable_audit {
             match self.run_npm_audit(plugin_dir) {
                 Ok(result) => {
-                    info!("npm audit completed: {} total vulnerabilities", result.total);
+                    info!(
+                        "npm audit completed: {} total vulnerabilities",
+                        result.total
+                    );
                     if self.security_config.fail_on_audit_vulnerabilities && !result.passed {
                         let error_msg = format!(
                             "npm audit found vulnerabilities above threshold ({}): {} total",
@@ -210,7 +240,13 @@ impl NpmManager {
                             result.total
                         );
                         error!("{}", error_msg);
-                        self.log_installation(plugin_name, &dependencies, false, Some(&error_msg), Some(result))?;
+                        self.log_installation(
+                            plugin_name,
+                            &dependencies,
+                            false,
+                            Some(&error_msg),
+                            Some(result),
+                        )?;
                         return Err(TingError::PluginLoadError(error_msg).into());
                     }
                     Some(result)
@@ -242,7 +278,11 @@ impl NpmManager {
             return Ok(());
         }
 
-        info!("Installing {} dependencies for plugin '{}' with caching", dependencies.len(), plugin_name);
+        info!(
+            "Installing {} dependencies for plugin '{}' with caching",
+            dependencies.len(),
+            plugin_name
+        );
 
         if self.cache_dir.is_none() {
             debug!("Cache not enabled, falling back to regular installation");
@@ -256,15 +296,27 @@ impl NpmManager {
 
         let mut uncached_deps = Vec::new();
         for dep in dependencies {
-            if cache::is_cached(&self.cache_dir, &self.cache_registry, &dep.name, &dep.version) {
+            if cache::is_cached(
+                &self.cache_dir,
+                &self.cache_registry,
+                &dep.name,
+                &dep.version,
+            ) {
                 let target_path = node_modules_path.join(&dep.name);
                 match cache::link_from_cache(
-                    &self.cache_registry, &self.cache_stats,
-                    &dep.name, &dep.version, plugin_name, &target_path,
+                    &self.cache_registry,
+                    &self.cache_stats,
+                    &dep.name,
+                    &dep.version,
+                    plugin_name,
+                    &target_path,
                 ) {
                     Ok(_) => info!("Linked cached dependency: {}@{}", dep.name, dep.version),
                     Err(e) => {
-                        warn!("Failed to link cached dependency {}@{}: {}", dep.name, dep.version, e);
+                        warn!(
+                            "Failed to link cached dependency {}@{}: {}",
+                            dep.name, dep.version, e
+                        );
                         uncached_deps.push(dep.clone());
                     }
                 }
@@ -276,7 +328,12 @@ impl NpmManager {
         if !uncached_deps.is_empty() {
             info!("Installing {} uncached dependencies", uncached_deps.len());
             let temp_package_json = PackageJson::from_plugin_metadata(
-                plugin_name, "1.0.0", None, None, None, &uncached_deps,
+                plugin_name,
+                "1.0.0",
+                None,
+                None,
+                None,
+                &uncached_deps,
             );
             temp_package_json.write_to_file(&plugin_dir.join("package.json"))?;
             self.install_dependencies_with_name(plugin_dir, plugin_name)?;
@@ -285,8 +342,13 @@ impl NpmManager {
                 let installed_path = node_modules_path.join(&dep.name);
                 if installed_path.exists() {
                     if let Err(e) = cache::add_to_cache(
-                        &self.cache_dir, &self.cache_registry, &self.cache_stats,
-                        &dep.name, &dep.version, plugin_name, &installed_path,
+                        &self.cache_dir,
+                        &self.cache_registry,
+                        &self.cache_stats,
+                        &dep.name,
+                        &dep.version,
+                        plugin_name,
+                        &installed_path,
                     ) {
                         warn!("Failed to cache dependency {}: {}", dep.name, e);
                     }
@@ -294,7 +356,10 @@ impl NpmManager {
             }
         }
 
-        info!("All dependencies installed successfully for plugin: {}", plugin_name);
+        info!(
+            "All dependencies installed successfully for plugin: {}",
+            plugin_name
+        );
         Ok(())
     }
 
@@ -312,8 +377,12 @@ impl NpmManager {
         let node_modules_path = self.get_node_modules_path(plugin_dir);
         if node_modules_path.exists() {
             info!("Cleaning node_modules in: {}", plugin_dir.display());
-            std::fs::remove_dir_all(&node_modules_path)
-                .with_context(|| format!("Failed to remove node_modules at {}", node_modules_path.display()))?;
+            std::fs::remove_dir_all(&node_modules_path).with_context(|| {
+                format!(
+                    "Failed to remove node_modules at {}",
+                    node_modules_path.display()
+                )
+            })?;
         }
         Ok(())
     }
@@ -325,7 +394,12 @@ impl NpmManager {
     }
 
     pub fn cleanup_cache_for_plugin(&self, plugin_name: &str) -> Result<usize> {
-        cache::cleanup_cache_for_plugin(&self.cache_dir, &self.cache_registry, &self.cache_stats, plugin_name)
+        cache::cleanup_cache_for_plugin(
+            &self.cache_dir,
+            &self.cache_registry,
+            &self.cache_stats,
+            plugin_name,
+        )
     }
 
     pub fn cleanup_all_unused(&self) -> Result<usize> {
@@ -343,12 +417,20 @@ impl NpmManager {
     // ── Private helpers ──
 
     fn check_npm_available(&self) -> Result<()> {
-        let output = Command::new(&self.npm_path).arg("--version").output()
+        let output = Command::new(&self.npm_path)
+            .arg("--version")
+            .output()
             .context("Failed to execute npm --version")?;
         if !output.status.success() {
-            return Err(TingError::PluginLoadError("npm is not available or not in PATH".to_string()).into());
+            return Err(TingError::PluginLoadError(
+                "npm is not available or not in PATH".to_string(),
+            )
+            .into());
         }
-        info!("npm version: {}", String::from_utf8_lossy(&output.stdout).trim());
+        info!(
+            "npm version: {}",
+            String::from_utf8_lossy(&output.stdout).trim()
+        );
         Ok(())
     }
 
@@ -367,8 +449,10 @@ impl NpmManager {
 
         if !blocked.is_empty() {
             return Err(TingError::PluginLoadError(format!(
-                "The following dependencies are not whitelisted: {}", blocked.join(", ")
-            )).into());
+                "The following dependencies are not whitelisted: {}",
+                blocked.join(", ")
+            ))
+            .into());
         }
 
         Ok(())
@@ -377,13 +461,15 @@ impl NpmManager {
     fn run_npm_audit(&self, plugin_dir: &Path) -> Result<NpmAuditResult> {
         info!("Running npm audit in: {}", plugin_dir.display());
         let output = Command::new(&self.npm_path)
-            .arg("audit").arg("--json").current_dir(plugin_dir)
+            .arg("audit")
+            .arg("--json")
+            .current_dir(plugin_dir)
             .output()
             .context("Failed to execute npm audit")?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let audit_json: Value = serde_json::from_str(&stdout)
-            .context("Failed to parse npm audit output")?;
+        let audit_json: Value =
+            serde_json::from_str(&stdout).context("Failed to parse npm audit output")?;
 
         let mut vulnerabilities = std::collections::HashMap::new();
         let mut total = 0;
@@ -400,11 +486,20 @@ impl NpmManager {
             }
         }
 
-        let passed = vulnerabilities.iter()
-            .filter(|(sev, count)| **sev > self.security_config.max_vulnerability_severity && **count > 0)
-            .count() == 0;
+        let passed = vulnerabilities
+            .iter()
+            .filter(|(sev, count)| {
+                **sev > self.security_config.max_vulnerability_severity && **count > 0
+            })
+            .count()
+            == 0;
 
-        Ok(NpmAuditResult { vulnerabilities, total, passed, raw_output: stdout.to_string() })
+        Ok(NpmAuditResult {
+            vulnerabilities,
+            total,
+            passed,
+            raw_output: stdout.to_string(),
+        })
     }
 
     fn log_installation(
@@ -425,9 +520,18 @@ impl NpmManager {
         };
 
         if success {
-            info!(plugin = plugin_name, dep_count = dependencies.len(), "Dependency installation succeeded");
+            info!(
+                plugin = plugin_name,
+                dep_count = dependencies.len(),
+                "Dependency installation succeeded"
+            );
         } else {
-            error!(plugin = plugin_name, dep_count = dependencies.len(), error = error.unwrap_or("unknown"), "Dependency installation failed");
+            error!(
+                plugin = plugin_name,
+                dep_count = dependencies.len(),
+                error = error.unwrap_or("unknown"),
+                "Dependency installation failed"
+            );
         }
 
         if let Some(log_dir) = &self.log_dir {

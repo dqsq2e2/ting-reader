@@ -112,7 +112,7 @@ export interface Plugin {
   state: 'active' | 'inactive' | 'loading' | 'failed';
   runtime?: string;
   license?: string;
-  homepage?: string;
+  repo?: string;
   descriptionEn?: string;
   isEnabled?: boolean;
   entryPoint?: string;
@@ -126,6 +126,47 @@ export interface Plugin {
   successRate?: number;
   stats?: PluginStats;
   error?: string;
+}
+
+export interface ScraperSearchField {
+  key: string;
+  label: string;
+  required?: boolean;
+  type?: string;
+  fieldType?: string;
+  placeholder?: string;
+  defaultFrom?: string;
+}
+
+export interface ScraperSource {
+  id: string;
+  name: string;
+  description?: string;
+  version: string;
+  enabled: boolean;
+  autoScrape: boolean;
+  searchFields: ScraperSearchField[];
+  resultFields: string[];
+}
+
+export interface ScraperSearchItem {
+  id: string;
+  title?: string;
+  author?: string;
+  narrator?: string | null;
+  coverUrl?: string | null;
+  cover_url?: string | null;
+  intro?: string | null;
+  description?: string | null;
+  tags?: string[];
+  genre?: string | null;
+  subtitle?: string | null;
+  publishedYear?: string | null;
+  published_year?: string | null;
+  duration?: number | null;
+  chapterCount?: number | null;
+  chapter_count?: number | null;
+  [key: string]: unknown;
 }
 
 export interface StorePlugin {
@@ -143,7 +184,6 @@ export interface StorePlugin {
   dependencies?: string[];
   runtime?: string;
   license?: string;
-  homepage?: string;
   author?: string;
   descriptionEn?: string;
   permissions?: string[];
@@ -151,18 +191,11 @@ export interface StorePlugin {
   supportedExtensions?: string[];
   minCoreVersion?: string;
   downloads?: { name: string; url: string }[];
-}
-
-export interface MergeSuggestion {
-  id: string;
-  source_book_id: string;
-  source_book_title: string;
-  target_book_id: string;
-  target_book_title: string;
-  score: number;
-  reason: string;
-  status: 'pending' | 'merged' | 'ignored';
-  created_at: string;
+  scraper?: {
+    autoScrape?: boolean;
+    searchFields?: ScraperSearchField[];
+    resultFields?: string[];
+  };
 }
 
 export interface BookMetadata {

@@ -21,7 +21,7 @@ mod models;
 #[cfg(test)]
 mod tests;
 
-pub use models::{BookMetadata, Tags, ChapterMetadata};
+pub use models::{BookMetadata, ChapterMetadata, Tags};
 
 use crate::core::error::{Result, TingError};
 use quick_xml::de::from_str;
@@ -99,7 +99,7 @@ impl NfoManager {
     /// Result indicating success or failure
     pub fn ensure_book_dir(&self, book_id: i64) -> Result<PathBuf> {
         let book_dir = self.get_book_dir(book_id);
-        
+
         if !book_dir.exists() {
             std::fs::create_dir_all(&book_dir).map_err(|e| {
                 TingError::IoError(std::io::Error::new(
@@ -112,7 +112,7 @@ impl NfoManager {
                 ))
             })?;
         }
-        
+
         Ok(book_dir)
     }
 
@@ -155,7 +155,11 @@ impl NfoManager {
         fs::write(&nfo_path, xml_with_declaration).map_err(|e| {
             TingError::IoError(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("Failed to write book NFO file {}: {}", nfo_path.display(), e),
+                format!(
+                    "Failed to write book NFO file {}: {}",
+                    nfo_path.display(),
+                    e
+                ),
             ))
         })?;
 
@@ -205,7 +209,11 @@ impl NfoManager {
         fs::write(&nfo_path, xml_with_declaration).map_err(|e| {
             TingError::IoError(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("Failed to write book NFO file {}: {}", nfo_path.display(), e),
+                format!(
+                    "Failed to write book NFO file {}: {}",
+                    nfo_path.display(),
+                    e
+                ),
             ))
         })?;
 
@@ -367,7 +375,11 @@ impl NfoManager {
         let entries = fs::read_dir(&book_dir).map_err(|e| {
             TingError::IoError(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("Failed to read book directory {}: {}", book_dir.display(), e),
+                format!(
+                    "Failed to read book directory {}: {}",
+                    book_dir.display(),
+                    e
+                ),
             ))
         })?;
 

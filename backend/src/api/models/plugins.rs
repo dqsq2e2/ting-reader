@@ -44,9 +44,9 @@ pub struct PluginInfoResponse {
     /// Plugin license
     #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
-    /// Plugin homepage
+    /// Plugin repository
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub homepage: Option<String>,
+    pub repo: Option<String>,
 }
 
 /// Plugin statistics response
@@ -82,8 +82,9 @@ pub struct PluginDetailResponse {
     pub description: Option<String>,
     /// Plugin license
     pub license: Option<String>,
-    /// Plugin homepage
-    pub homepage: Option<String>,
+    /// Plugin repository
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
     /// Whether the plugin is enabled
     pub is_enabled: bool,
     /// Plugin state

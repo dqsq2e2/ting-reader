@@ -54,7 +54,12 @@ pub fn get_cache_key(package_name: &str, version: &str) -> String {
     format!("{}@{}", package_name, version)
 }
 
-pub fn is_cached(cache_dir: &Option<PathBuf>, cache_registry: &CacheRegistry, package_name: &str, version: &str) -> bool {
+pub fn is_cached(
+    cache_dir: &Option<PathBuf>,
+    cache_registry: &CacheRegistry,
+    package_name: &str,
+    version: &str,
+) -> bool {
     if cache_dir.is_none() {
         return false;
     }
@@ -65,7 +70,11 @@ pub fn is_cached(cache_dir: &Option<PathBuf>, cache_registry: &CacheRegistry, pa
 
 pub fn update_hit_rate(stats: &mut CacheStatistics) {
     let total = stats.cache_hits + stats.cache_misses;
-    stats.hit_rate = if total > 0 { stats.cache_hits as f64 / total as f64 } else { 0.0 };
+    stats.hit_rate = if total > 0 {
+        stats.cache_hits as f64 / total as f64
+    } else {
+        0.0
+    };
 }
 
 pub fn add_to_cache(
@@ -96,8 +105,8 @@ pub fn add_to_cache(
         info!("Caching dependency: {}", cache_key);
         fs_utils::copy_dir_recursive(source_path, &cache_path)
             .context("Failed to copy dependency to cache")?;
-        let size_bytes = fs_utils::calculate_dir_size(&cache_path)
-            .context("Failed to calculate cache size")?;
+        let size_bytes =
+            fs_utils::calculate_dir_size(&cache_path).context("Failed to calculate cache size")?;
 
         let mut used_by = HashSet::new();
         used_by.insert(plugin_name.to_string());
@@ -146,11 +155,15 @@ pub fn link_from_cache(
 ) -> Result<()> {
     let cache_key = get_cache_key(package_name, version);
     let registry = cache_registry.read().unwrap();
-    let entry = registry.get(&cache_key).ok_or_else(|| {
-        anyhow::anyhow!("Dependency not found in cache: {}", cache_key)
-    })?;
+    let entry = registry
+        .get(&cache_key)
+        .ok_or_else(|| anyhow::anyhow!("Dependency not found in cache: {}", cache_key))?;
 
-    info!("Linking cached dependency {} to {}", cache_key, target_path.display());
+    info!(
+        "Linking cached dependency {} to {}",
+        cache_key,
+        target_path.display()
+    );
 
     if let Some(parent) = target_path.parent() {
         if !parent.exists() {
@@ -214,7 +227,10 @@ pub fn clear_cache(
 
     cache_registry.write().unwrap().clear();
     let mut stats = cache_stats.write().unwrap();
-    *stats = CacheStatistics { last_cleanup: Some(chrono::Utc::now().to_rfc3339()), ..Default::default() };
+    *stats = CacheStatistics {
+        last_cleanup: Some(chrono::Utc::now().to_rfc3339()),
+        ..Default::default()
+    };
 
     info!("Cache cleared successfully");
     Ok(())
@@ -238,7 +254,11 @@ pub fn cleanup_cache_for_plugin(
         for (cache_key, entry) in registry.iter_mut() {
             entry.used_by.remove(plugin_name);
             if entry.used_by.is_empty() {
-                packages_to_remove.push((cache_key.clone(), entry.cache_path.clone(), entry.size_bytes));
+                packages_to_remove.push((
+                    cache_key.clone(),
+                    entry.cache_path.clone(),
+                    entry.size_bytes,
+                ));
             }
         }
     }
@@ -246,8 +266,12 @@ pub fn cleanup_cache_for_plugin(
     for (cache_key, cache_path, size_bytes) in packages_to_remove {
         info!("Removing unused cached package: {}", cache_key);
         if cache_path.exists() {
-            std::fs::remove_dir_all(&cache_path)
-                .with_context(|| format!("Failed to remove cached package at {}", cache_path.display()))?;
+            std::fs::remove_dir_all(&cache_path).with_context(|| {
+                format!(
+                    "Failed to remove cached package at {}",
+                    cache_path.display()
+                )
+            })?;
         }
         cache_registry.write().unwrap().remove(&cache_key);
         let mut stats = cache_stats.write().unwrap();
@@ -280,7 +304,11 @@ pub fn cleanup_all_unused(
         let registry = cache_registry.read().unwrap();
         for (cache_key, entry) in registry.iter() {
             if entry.used_by.is_empty() {
-                packages_to_remove.push((cache_key.clone(), entry.cache_path.clone(), entry.size_bytes));
+                packages_to_remove.push((
+                    cache_key.clone(),
+                    entry.cache_path.clone(),
+                    entry.size_bytes,
+                ));
             }
         }
     }
@@ -288,8 +316,12 @@ pub fn cleanup_all_unused(
     for (cache_key, cache_path, size_bytes) in packages_to_remove {
         info!("Removing unused cached package: {}", cache_key);
         if cache_path.exists() {
-            std::fs::remove_dir_all(&cache_path)
-                .with_context(|| format!("Failed to remove cached package at {}", cache_path.display()))?;
+            std::fs::remove_dir_all(&cache_path).with_context(|| {
+                format!(
+                    "Failed to remove cached package at {}",
+                    cache_path.display()
+                )
+            })?;
         }
         cache_registry.write().unwrap().remove(&cache_key);
         let mut stats = cache_stats.write().unwrap();

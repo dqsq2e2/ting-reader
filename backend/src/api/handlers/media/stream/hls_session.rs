@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tokio::process::Child;
 use std::sync::Arc;
+use tokio::process::Child;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -48,11 +48,12 @@ impl HlsSessionManager {
     ) -> Result<String, String> {
         // 先清理已完成的会话（FFmpeg 进程已退出）
         self.cleanup_finished_sessions().await;
-        
+
         let sessions = self.sessions.read().await;
-        
+
         // 检查并发限制：只计算真正在运行的进程
-        let active_count = sessions.values()
+        let active_count = sessions
+            .values()
             .filter(|s| {
                 if let Some(child) = &s.ffmpeg_process {
                     // 检查进程是否还在运行
@@ -62,18 +63,22 @@ impl HlsSessionManager {
                 }
             })
             .count();
-        
+
         if active_count >= self.max_concurrent {
-            tracing::warn!("并发限制: 当前活跃会话数 {}/{}", active_count, self.max_concurrent);
+            tracing::warn!(
+                "并发限制: 当前活跃会话数 {}/{}",
+                active_count,
+                self.max_concurrent
+            );
             return Err("Too many concurrent transcoding sessions".to_string());
         }
-        
+
         drop(sessions);
-        
+
         // 生成会话 ID
         let session_id = Uuid::new_v4().to_string();
         let temp_dir = self.base_temp_dir.join(&session_id);
-        
+
         // 创建临时目录
         std::fs::create_dir_all(&temp_dir)
             .map_err(|e| format!("Failed to create temp directory: {}", e))?;
@@ -92,8 +97,16 @@ impl HlsSessionManager {
             original_url: url,
         };
 
-        self.sessions.write().await.insert(session_id.clone(), session);
-        tracing::info!("创建 HLS 会话: {} (活跃: {}/{})", session_id, active_count, self.max_concurrent);
+        self.sessions
+            .write()
+            .await
+            .insert(session_id.clone(), session);
+        tracing::info!(
+            "创建 HLS 会话: {} (活跃: {}/{})",
+            session_id,
+            active_count,
+            self.max_concurrent
+        );
         Ok(session_id)
     }
 
@@ -142,7 +155,7 @@ impl HlsSessionManager {
     async fn cleanup_finished_sessions(&self) {
         let mut sessions = self.sessions.write().await;
         let mut finished = Vec::new();
-        
+
         for (id, session) in sessions.iter_mut() {
             if let Some(child) = &mut session.ffmpeg_process {
                 // 尝试检查进程状态（非阻塞）
@@ -161,24 +174,24 @@ impl HlsSessionManager {
                 }
             }
         }
-        
+
         // 清理已完成的会话
         for id in finished {
             if let Some(mut session) = sessions.remove(&id) {
                 session.ffmpeg_process = None;
                 tracing::info!("清理已完成的 HLS 会话: {}", id);
-                
+
                 // 重新插入会话（保留会话信息，但移除进程）
                 sessions.insert(id, session);
             }
         }
     }
-    
+
     /// 清理过期的会话（30 分钟未访问）
     pub async fn cleanup_expired(&self) {
         let mut sessions = self.sessions.write().await;
         let now = std::time::Instant::now();
-        
+
         // 找出过期的会话
         let expired: Vec<String> = sessions
             .iter()
@@ -193,28 +206,48 @@ impl HlsSessionManager {
                 if let Some(mut child) = session.ffmpeg_process.take() {
                     let _ = child.kill().await;
                 }
-                
+
                 // 删除临时文件
                 let _ = std::fs::remove_dir_all(&session.temp_dir);
-                
+
                 tracing::info!("清理过期 HLS 会话: {}", id);
             }
         }
     }
 
     /// 获取会话信息（用于调试和监控）
-    pub async fn get_session_info(&self, session_id: &str) -> Option<(String, String, String, String, bool, u32, std::time::Instant)> {
+    pub async fn get_session_info(
+        &self,
+        session_id: &str,
+    ) -> Option<(
+        String,
+        String,
+        String,
+        String,
+        bool,
+        u32,
+        std::time::Instant,
+    )> {
         let sessions = self.sessions.read().await;
         sessions.get(session_id).map(|s| {
-            (s.session_id.clone(), s.chapter_id.clone(), s.library_id.clone(), s.book_id.clone(), s.is_strm, s.seq, s.created_at)
+            (
+                s.session_id.clone(),
+                s.chapter_id.clone(),
+                s.library_id.clone(),
+                s.book_id.clone(),
+                s.is_strm,
+                s.seq,
+                s.created_at,
+            )
         })
     }
-    
+
     /// 获取所有活跃会话的统计信息
     pub async fn get_stats(&self) -> (usize, usize) {
         let sessions = self.sessions.read().await;
         let total = sessions.len();
-        let active = sessions.values()
+        let active = sessions
+            .values()
             .filter(|s| {
                 if let Some(child) = &s.ffmpeg_process {
                     child.id().is_some()
@@ -225,18 +258,29 @@ impl HlsSessionManager {
             .count();
         (total, active)
     }
-    
+
     /// 获取会话的原始 URL（用于重新启动转码）
     pub async fn get_original_url(&self, session_id: &str) -> Option<String> {
         let sessions = self.sessions.read().await;
-        sessions.get(session_id).and_then(|s| s.original_url.clone())
+        sessions
+            .get(session_id)
+            .and_then(|s| s.original_url.clone())
     }
-    
+
     /// 获取会话的完整信息（用于 Seek 重启）
-    pub async fn get_session_data(&self, session_id: &str) -> Option<(String, String, String, bool, Option<String>)> {
+    pub async fn get_session_data(
+        &self,
+        session_id: &str,
+    ) -> Option<(String, String, String, bool, Option<String>)> {
         let sessions = self.sessions.read().await;
         sessions.get(session_id).map(|s| {
-            (s.chapter_id.clone(), s.library_id.clone(), s.book_id.clone(), s.is_strm, s.original_url.clone())
+            (
+                s.chapter_id.clone(),
+                s.library_id.clone(),
+                s.book_id.clone(),
+                s.is_strm,
+                s.original_url.clone(),
+            )
         })
     }
 }

@@ -5,12 +5,14 @@
 pub mod metadata;
 pub mod stats;
 
+use crate::core::error::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
-use crate::core::error::Result;
 
-pub use stats::{PluginStats, PerformanceThresholds, PerformanceAlert, AlertType, PerformanceComparison};
+pub use stats::{
+    AlertType, PerformanceAlert, PerformanceComparison, PerformanceThresholds, PluginStats,
+};
 
 /// Unique identifier for a plugin instance
 pub type PluginId = String;
@@ -21,7 +23,9 @@ pub trait Plugin: Send + Sync {
     fn metadata(&self) -> &PluginMetadata;
     async fn initialize(&self, context: &PluginContext) -> Result<()>;
     async fn shutdown(&self) -> Result<()>;
-    async fn garbage_collect(&self) -> Result<()> { Ok(()) }
+    async fn garbage_collect(&self) -> Result<()> {
+        Ok(())
+    }
     fn plugin_type(&self) -> PluginType;
     fn as_any(&self) -> &dyn std::any::Any;
 }
@@ -61,7 +65,7 @@ pub struct PluginMetadata {
     #[serde(default)]
     pub license: Option<String>,
     #[serde(default)]
-    pub homepage: Option<String>,
+    pub repo: Option<String>,
     pub entry_point: String,
     /// Runtime type: "wasm", "javascript", or "native" (auto-detected if absent)
     #[serde(default)]
@@ -78,6 +82,77 @@ pub struct PluginMetadata {
     pub min_core_version: Option<String>,
     #[serde(default)]
     pub supported_extensions: Option<Vec<String>>,
+    #[serde(default)]
+    pub scraper: Option<ScraperCapabilities>,
+}
+
+/// Scraper-specific capability declaration from plugin.json.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ScraperCapabilities {
+    #[serde(default)]
+    pub auto_scrape: bool,
+    #[serde(default)]
+    pub search_fields: Vec<ScraperSearchField>,
+    #[serde(default)]
+    pub result_fields: Vec<String>,
+}
+
+/// Search field shown in the manual scraping UI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScraperSearchField {
+    pub key: String,
+    pub label: String,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default, rename = "type")]
+    pub field_type: Option<String>,
+    #[serde(default)]
+    pub placeholder: Option<String>,
+    #[serde(default)]
+    pub default_from: Option<String>,
+}
+
+impl ScraperCapabilities {
+    pub fn legacy_default() -> Self {
+        Self {
+            auto_scrape: true,
+            search_fields: vec![
+                ScraperSearchField {
+                    key: "title".to_string(),
+                    label: "书名".to_string(),
+                    required: true,
+                    field_type: Some("text".to_string()),
+                    placeholder: None,
+                    default_from: Some("book.title".to_string()),
+                },
+                ScraperSearchField {
+                    key: "author".to_string(),
+                    label: "作者".to_string(),
+                    required: false,
+                    field_type: Some("text".to_string()),
+                    placeholder: None,
+                    default_from: Some("book.author".to_string()),
+                },
+                ScraperSearchField {
+                    key: "narrator".to_string(),
+                    label: "演播".to_string(),
+                    required: false,
+                    field_type: Some("text".to_string()),
+                    placeholder: None,
+                    default_from: Some("book.narrator".to_string()),
+                },
+            ],
+            result_fields: vec![
+                "title".to_string(),
+                "author".to_string(),
+                "narrator".to_string(),
+                "cover_url".to_string(),
+                "description".to_string(),
+                "tags".to_string(),
+                "genre".to_string(),
+            ],
+        }
+    }
 }
 
 /// Plan for decrypting a file stream
@@ -94,21 +169,42 @@ pub enum DecryptionSegment {
     #[serde(rename = "plain")]
     Plain { offset: u64, length: i64 },
     #[serde(rename = "encrypted")]
-    Encrypted { offset: u64, length: i64, params: serde_json::Value },
+    Encrypted {
+        offset: u64,
+        length: i64,
+        params: serde_json::Value,
+    },
 }
 
 impl PluginMetadata {
     pub fn new(
-        id: String, name: String, version: String, plugin_type: PluginType,
-        author: String, description: String, entry_point: String,
+        id: String,
+        name: String,
+        version: String,
+        plugin_type: PluginType,
+        author: String,
+        description: String,
+        entry_point: String,
     ) -> Self {
         Self {
-            id, name, version, plugin_type, author, description,
-            description_en: None, license: None, homepage: None,
-            entry_point, runtime: None,
-            dependencies: Vec::new(), npm_dependencies: Vec::new(),
-            permissions: Vec::new(), config_schema: None,
-            min_core_version: None, supported_extensions: None,
+            id,
+            name,
+            version,
+            plugin_type,
+            author,
+            description,
+            description_en: None,
+            license: None,
+            repo: None,
+            entry_point,
+            runtime: None,
+            dependencies: Vec::new(),
+            npm_dependencies: Vec::new(),
+            permissions: Vec::new(),
+            config_schema: None,
+            min_core_version: None,
+            supported_extensions: None,
+            scraper: None,
         }
     }
 
@@ -159,21 +255,36 @@ pub struct PluginDependency {
 #[serde(untagged)]
 enum PluginDependencyDef {
     Simple(String),
-    Detailed { plugin_name: String, version_requirement: String },
+    Detailed {
+        plugin_name: String,
+        version_requirement: String,
+    },
 }
 
 impl From<PluginDependencyDef> for PluginDependency {
     fn from(def: PluginDependencyDef) -> Self {
         match def {
-            PluginDependencyDef::Simple(name) => PluginDependency { plugin_name: name, version_requirement: "*".to_string() },
-            PluginDependencyDef::Detailed { plugin_name, version_requirement } => PluginDependency { plugin_name, version_requirement },
+            PluginDependencyDef::Simple(name) => PluginDependency {
+                plugin_name: name,
+                version_requirement: "*".to_string(),
+            },
+            PluginDependencyDef::Detailed {
+                plugin_name,
+                version_requirement,
+            } => PluginDependency {
+                plugin_name,
+                version_requirement,
+            },
         }
     }
 }
 
 impl PluginDependency {
     pub fn new(plugin_name: String, version_requirement: String) -> Self {
-        Self { plugin_name, version_requirement }
+        Self {
+            plugin_name,
+            version_requirement,
+        }
     }
 }
 
@@ -188,10 +299,17 @@ pub struct PluginContext {
 
 impl PluginContext {
     pub fn new(
-        config: serde_json::Value, data_dir: PathBuf,
-        logger: Arc<dyn PluginLogger>, event_bus: Arc<dyn PluginEventBus>,
+        config: serde_json::Value,
+        data_dir: PathBuf,
+        logger: Arc<dyn PluginLogger>,
+        event_bus: Arc<dyn PluginEventBus>,
     ) -> Self {
-        Self { config, data_dir, logger, event_bus }
+        Self {
+            config,
+            data_dir,
+            logger,
+            event_bus,
+        }
     }
 }
 
@@ -206,7 +324,11 @@ pub trait PluginLogger: Send + Sync {
 /// Plugin event bus trait
 pub trait PluginEventBus: Send + Sync {
     fn publish(&self, event_type: &str, data: serde_json::Value) -> Result<()>;
-    fn subscribe(&self, event_type: &str, handler: Box<dyn Fn(serde_json::Value) + Send + Sync>) -> Result<String>;
+    fn subscribe(
+        &self,
+        event_type: &str,
+        handler: Box<dyn Fn(serde_json::Value) + Send + Sync>,
+    ) -> Result<String>;
     fn unsubscribe(&self, subscription_id: &str) -> Result<()>;
 }
 

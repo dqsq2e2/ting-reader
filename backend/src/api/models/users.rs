@@ -120,10 +120,12 @@ impl From<crate::db::models::UserSettings> for UserSettingsResponse {
             skip_intro: settings.skip_intro,
             skip_outro: settings.skip_outro,
             sleep_timer_default: 0, // Default value, will be filled if in settings_json
-            auto_preload: true, // Default value, will be filled if in settings_json
-            auto_cache: false, // Default value
-            widget_css: None, // Default value, will be filled if in settings_json
-            settings_json: settings.settings_json.and_then(|s| serde_json::from_str(&s).ok()),
+            auto_preload: true,     // Default value, will be filled if in settings_json
+            auto_cache: false,      // Default value
+            widget_css: None,       // Default value, will be filled if in settings_json
+            settings_json: settings
+                .settings_json
+                .and_then(|s| serde_json::from_str(&s).ok()),
             updated_at: settings.updated_at,
         }
     }
@@ -173,7 +175,7 @@ impl From<crate::db::models::User> for UserInfoResponse {
             role: user.role,
             created_at: user.created_at,
             libraries_accessible: Vec::new(), // To be filled by handler
-            books_accessible: Vec::new(), // To be filled by handler
+            books_accessible: Vec::new(),     // To be filled by handler
         }
     }
 }

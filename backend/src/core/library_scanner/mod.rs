@@ -3,15 +3,18 @@
 //! This module provides functionality to scan library directories
 //! and discover audiobook files, creating book and chapter records.
 
-use crate::core::error::{Result, TingError};
-use crate::db::repository::{BookRepository, ChapterRepository, LibraryRepository, TaskRepository, SeriesRepository, Repository};
-use crate::core::services::ScraperService;
-use crate::core::merge_service::MergeService;
-use crate::core::text_cleaner::TextCleaner;
-use crate::core::nfo_manager::NfoManager;
 use crate::core::audio_streamer::AudioStreamer;
+use crate::core::error::{Result, TingError};
+use crate::core::merge_service::MergeService;
+use crate::core::nfo_manager::NfoManager;
+use crate::core::services::ScraperService;
+use crate::core::text_cleaner::TextCleaner;
 use crate::core::StorageService;
-use crate::plugin::manager::{PluginManager, FormatMethod};
+use crate::db::repository::{
+    BookRepository, ChapterRepository, LibraryRepository, Repository, SeriesRepository,
+    TaskRepository,
+};
+use crate::plugin::manager::{FormatMethod, PluginManager};
 use crate::plugin::types::PluginType;
 use std::path::Path;
 use std::sync::Arc;
@@ -23,10 +26,14 @@ pub mod webdav;
 
 /// Supported audio file extensions
 // Removed hardcoded encrypted extensions. Plugins should declare their supported extensions.
-pub const AUDIO_EXTENSIONS: &[&str] = &["mp3", "m4a", "m4b", "flac", "ogg", "wav", "opus", "wma", "aac", "strm"];
+pub const AUDIO_EXTENSIONS: &[&str] = &[
+    "mp3", "m4a", "m4b", "flac", "ogg", "wav", "opus", "wma", "aac", "strm",
+];
 
 /// Standard audio extensions that can be handled by the default audio streamer
-pub const STANDARD_EXTENSIONS: &[&str] = &["mp3", "m4a", "m4b", "flac", "ogg", "wav", "opus", "wma", "aac", "strm"];
+pub const STANDARD_EXTENSIONS: &[&str] = &[
+    "mp3", "m4a", "m4b", "flac", "ogg", "wav", "opus", "wma", "aac", "strm",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MetadataSource {
@@ -168,9 +175,12 @@ impl LibraryScanner {
     /// Get all supported extensions including those from plugins
     pub(crate) async fn get_supported_extensions(&self) -> Vec<String> {
         let mut extensions: Vec<String> = AUDIO_EXTENSIONS.iter().map(|&s| s.to_string()).collect();
-        
+
         // Get extensions from Format plugins
-        let plugins = self.plugin_manager.find_plugins_by_type(PluginType::Format).await;
+        let plugins = self
+            .plugin_manager
+            .find_plugins_by_type(PluginType::Format)
+            .await;
         for plugin in plugins {
             if let Some(exts) = &plugin.supported_extensions {
                 for ext in exts {
@@ -181,21 +191,31 @@ impl LibraryScanner {
                 }
             }
         }
-        
+
         extensions
     }
 
     /// Scan a library directory and discover audiobooks
-    pub async fn scan_library(&self, library_id: &str, library_path: &str, task_id: Option<&str>) -> Result<ScanResult> {
+    pub async fn scan_library(
+        &self,
+        library_id: &str,
+        library_path: &str,
+        task_id: Option<&str>,
+    ) -> Result<ScanResult> {
         info!(target: "audit::scan", "开始扫描存储库: {} (ID: {})", library_path, library_id);
-        self.update_progress(task_id, format!("开始扫描存储库: {}", library_path)).await;
+        self.update_progress(task_id, format!("开始扫描存储库: {}", library_path))
+            .await;
         self.check_cancellation(task_id).await?;
 
         // Fetch library to get configuration and type
-        let library = self.library_repo.find_by_id(library_id).await?
+        let library = self
+            .library_repo
+            .find_by_id(library_id)
+            .await?
             .ok_or_else(|| TingError::NotFound(format!("Library not found: {}", library_id)))?;
-        
-        let scraper_config: crate::db::models::ScraperConfig = library.scraper_config
+
+        let scraper_config: crate::db::models::ScraperConfig = library
+            .scraper_config
             .as_ref()
             .and_then(|json| serde_json::from_str(json).ok())
             .unwrap_or_default();
@@ -203,14 +223,15 @@ impl LibraryScanner {
         let last_scanned = if let Some(ref date_str) = library.last_scanned_at {
             chrono::DateTime::parse_from_rfc3339(date_str)
                 .map(|dt| dt.with_timezone(&chrono::Utc))
-                .ok() 
+                .ok()
         } else {
             None
         };
 
         // Dispatch based on library type
         let scan_result = if library.library_type == "webdav" {
-            self.scan_webdav_library(&library, task_id, &scraper_config).await?
+            self.scan_webdav_library(&library, task_id, &scraper_config)
+                .await?
         } else {
             // Local library scan
             let path = Path::new(library_path);
@@ -228,7 +249,8 @@ impl LibraryScanner {
                 )));
             }
 
-            self.scan_local_library(library_id, path, task_id, last_scanned, &scraper_config).await?
+            self.scan_local_library(library_id, path, task_id, last_scanned, &scraper_config)
+                .await?
         };
 
         // Update library last_scanned_at
@@ -241,11 +263,19 @@ impl LibraryScanner {
             "存储库 '{}' 扫描完成：共 {} 本书，新增 {} 本，更新 {} 本，错误 {} 个",
             library_path, scan_result.total_books, scan_result.books_created, scan_result.books_updated, scan_result.errors.len()
         );
-        self.update_progress(task_id, format!("扫描完成。处理了 {} 本书。", scan_result.books_created + scan_result.books_updated)).await;
+        self.update_progress(
+            task_id,
+            format!(
+                "扫描完成。处理了 {} 本书。",
+                scan_result.books_created + scan_result.books_updated
+            ),
+        )
+        .await;
 
         // Trigger Merge Suggestions
         if let Some(merge_service) = &self.merge_service {
-            self.update_progress(task_id, "正在处理自动合并...".to_string()).await;
+            self.update_progress(task_id, "正在处理自动合并...".to_string())
+                .await;
             if let Err(e) = merge_service.process_auto_merges().await {
                 warn!("Failed to process auto-merges: {}", e);
             }
@@ -254,26 +284,54 @@ impl LibraryScanner {
         Ok(scan_result)
     }
 
-    pub(crate) async fn extract_chapter_metadata(&self, path: &Path, cloud_mode: bool) -> (String, String, Option<String>, Option<String>, Option<String>, i32) {
+    pub(crate) async fn extract_chapter_metadata(
+        &self,
+        path: &Path,
+        cloud_mode: bool,
+    ) -> (
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        i32,
+    ) {
         // Returns: (album, title, author, narrator, cover_url, duration)
-        
+
         // Try NFO
         let nfo_path = path.with_extension("nfo");
         if let Ok(meta) = self.nfo_manager.read_chapter_nfo(&nfo_path) {
-            return (String::new(), meta.title, None, None, None, meta.duration.unwrap_or(0) as i32);
+            return (
+                String::new(),
+                meta.title,
+                None,
+                None,
+                None,
+                meta.duration.unwrap_or(0) as i32,
+            );
         }
 
         // Check if it is a standard audio file
-        let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let ext = path
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
         let is_standard = STANDARD_EXTENSIONS.contains(&ext.as_str());
 
         // Handle .strm files explicitly
         if ext == "strm" {
-            let t = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+            let t = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
 
             // In cloud/drive mode for local libraries, we do not probe remote URLs or durations
             if cloud_mode {
-                tracing::info!("Cloud mode enabled, skipping metadata extraction for strm file: {}", path.display());
+                tracing::info!(
+                    "Cloud mode enabled, skipping metadata extraction for strm file: {}",
+                    path.display()
+                );
                 return (String::new(), t, None, None, None, 0);
             }
 
@@ -286,12 +344,12 @@ impl LibraryScanner {
                     return (String::new(), t, None, None, None, 0);
                 }
             };
-            
+
             if url.is_empty() || !url.starts_with("http") {
                 tracing::warn!("strm 文件 {} 包含无效的 URL: {}", path.display(), url);
                 return (String::new(), t, None, None, None, 0);
             }
-            
+
             // Try to get duration using FFprobe (derive from FFmpeg path)
             let duration = if let Some(ffmpeg_path) = self.plugin_manager.get_ffmpeg_path().await {
                 let ffprobe_path = {
@@ -303,7 +361,7 @@ impl LibraryScanner {
                         } else {
                             "ffprobe"
                         };
-                        
+
                         let probe = dir.join(ffprobe_name);
                         if probe.exists() {
                             Some(probe.to_string_lossy().to_string())
@@ -314,15 +372,15 @@ impl LibraryScanner {
                         None
                     }
                 };
-                
+
                 if let Some(ffprobe_path) = ffprobe_path {
                     tracing::info!("使用 FFprobe 获取 strm 文件时长: {}", url);
-                
-                // Add small delay to avoid overwhelming the server
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                
-                // Add User-Agent and other headers to avoid being blocked
-                match tokio::process::Command::new(&ffprobe_path)
+
+                    // Add small delay to avoid overwhelming the server
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+                    // Add User-Agent and other headers to avoid being blocked
+                    match tokio::process::Command::new(&ffprobe_path)
                     .arg("-v").arg("error")
                     .arg("-user_agent").arg("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                     .arg("-headers").arg("Accept: */*")
@@ -363,33 +421,38 @@ impl LibraryScanner {
                 tracing::warn!("未找到 FFmpeg 插件，strm 文件时长将设为 0");
                 0
             };
-            
+
             tracing::info!("检测到 strm 文件: {}, 时长: {} 秒", t, duration);
-            
+
             return (String::new(), t, None, None, None, duration);
         }
 
         // Smart metadata extraction strategy
         // 策略：优先使用格式插件（支持更多格式，对部分文件更友好）
         // 只有在插件不支持时才回退到 Symphonia
-        
+
         let mut duration = 0i32;
         let mut album = String::new();
         let mut title = String::new();
         let mut author = None;
         let mut narrator = None;
         let mut cover_url = None;
-        
+
         // 1. 优先尝试格式插件
-        let plugins = self.plugin_manager.find_plugins_by_type(PluginType::Format).await;
+        let plugins = self
+            .plugin_manager
+            .find_plugins_by_type(PluginType::Format)
+            .await;
         let mut plugin_handled = false;
-        
+
         for plugin in plugins {
             // 检查插件是否声明支持该扩展名
-            let supports_ext = plugin.supported_extensions.as_ref()
+            let supports_ext = plugin
+                .supported_extensions
+                .as_ref()
                 .map(|exts| exts.iter().any(|e| e.eq_ignore_ascii_case(&ext)))
                 .unwrap_or(false);
-            
+
             if !supports_ext {
                 continue;
             }
@@ -398,29 +461,39 @@ impl LibraryScanner {
                 "file_path": path.to_string_lossy(),
                 "extract_cover": false
             });
-            
+
             // 交由格式插件处理
-            if let Ok(result) = self.plugin_manager.call_format(
-                &plugin.id, 
-                FormatMethod::ExtractMetadata, 
-                params
-            ).await {
+            if let Ok(result) = self
+                .plugin_manager
+                .call_format(&plugin.id, FormatMethod::ExtractMetadata, params)
+                .await
+            {
                 tracing::debug!("使用格式插件 {} 处理 {} 文件", plugin.name, ext);
-                
+
                 if let Some(t) = result.get("title").and_then(|v| v.as_str()) {
-                    if !t.trim().is_empty() { title = t.to_string(); }
+                    if !t.trim().is_empty() {
+                        title = t.to_string();
+                    }
                 }
                 if let Some(a) = result.get("album").and_then(|v| v.as_str()) {
-                    if !a.trim().is_empty() { album = a.to_string(); }
+                    if !a.trim().is_empty() {
+                        album = a.to_string();
+                    }
                 }
                 if let Some(au) = result.get("artist").and_then(|v| v.as_str()) {
-                    if !au.trim().is_empty() { author = Some(au.to_string()); }
+                    if !au.trim().is_empty() {
+                        author = Some(au.to_string());
+                    }
                 }
                 if let Some(aa) = result.get("album_artist").and_then(|v| v.as_str()) {
-                    if !aa.trim().is_empty() { author = Some(aa.to_string()); }
+                    if !aa.trim().is_empty() {
+                        author = Some(aa.to_string());
+                    }
                 }
                 if let Some(n) = result.get("narrator").and_then(|v| v.as_str()) {
-                    if !n.trim().is_empty() { narrator = Some(n.to_string()); }
+                    if !n.trim().is_empty() {
+                        narrator = Some(n.to_string());
+                    }
                 }
                 if let Some(dur) = result.get("duration").and_then(|v| v.as_f64()) {
                     duration = dur.round() as i32;
@@ -429,20 +502,23 @@ impl LibraryScanner {
                     }
                 }
                 if let Some(c) = result.get("cover_url").and_then(|v| v.as_str()) {
-                    if !c.trim().is_empty() { cover_url = Some(c.to_string()); }
+                    if !c.trim().is_empty() {
+                        cover_url = Some(c.to_string());
+                    }
                 }
-                
+
                 plugin_handled = true;
                 break;
             }
         }
-        
+
         // 2. 如果插件没有处理，且是标准格式，尝试 Symphonia（仅用于完整文件）
         if !plugin_handled && is_standard {
-            let file_size = tokio::fs::metadata(path).await
+            let file_size = tokio::fs::metadata(path)
+                .await
                 .map(|m| m.len())
                 .unwrap_or(0);
-            
+
             // MP3 files: prioritize ID3 tags
             if ext == "mp3" {
                 if let Ok(id3_duration) = self.get_id3_duration(path).await {
@@ -456,19 +532,26 @@ impl LibraryScanner {
                 // Other formats: compare ID3 with file size estimation
                 let id3_duration = self.get_id3_duration(path).await.unwrap_or(0);
                 let estimated_duration = self.estimate_duration_by_size(file_size, &ext);
-                
+
                 if id3_duration > 0 && estimated_duration > 0 {
-                    let diff_ratio = (id3_duration as f64 - estimated_duration as f64).abs() / estimated_duration as f64;
-                    if diff_ratio < 0.15 {  // 差距小于15%，信任ID3
+                    let diff_ratio = (id3_duration as f64 - estimated_duration as f64).abs()
+                        / estimated_duration as f64;
+                    if diff_ratio < 0.15 {
+                        // 差距小于15%，信任ID3
                         duration = id3_duration;
-                        tracing::debug!("使用 ID3 获取 {} 时长: {} 秒 (估算: {} 秒, 差距: {:.1}%)", 
-                                      ext, duration, estimated_duration, diff_ratio * 100.0);
+                        tracing::debug!(
+                            "使用 ID3 获取 {} 时长: {} 秒 (估算: {} 秒, 差距: {:.1}%)",
+                            ext,
+                            duration,
+                            estimated_duration,
+                            diff_ratio * 100.0
+                        );
                     } else {
                         tracing::debug!("ID3 时长差距过大 (ID3: {} 秒, 估算: {} 秒, 差距: {:.1}%), 将使用 FFprobe", 
                                       id3_duration, estimated_duration, diff_ratio * 100.0);
                     }
                 }
-                
+
                 // If ID3 is unreliable or missing, use Symphonia as fallback
                 if duration == 0 {
                     if let Ok(meta) = self.audio_streamer.read_metadata(path) {
@@ -477,7 +560,7 @@ impl LibraryScanner {
                     }
                 }
             }
-            
+
             // 提取其他元数据（如果插件没有提供）
             if duration > 0 && (title.is_empty() || album.is_empty()) {
                 if let Ok(meta) = self.audio_streamer.read_metadata(path) {
@@ -487,12 +570,12 @@ impl LibraryScanner {
                     if album.is_empty() {
                         album = meta.album.unwrap_or_default();
                     }
-                 
+
                     // Standard metadata extraction for author/narrator
                     if author.is_none() {
                         author = meta.album_artist;
                     }
-                 
+
                     if let Some(a) = meta.artist {
                         if !a.trim().is_empty() {
                             if author.is_none() {
@@ -502,7 +585,7 @@ impl LibraryScanner {
                             }
                         }
                     }
-                 
+
                     if let Some(c) = meta.composer {
                         if !c.trim().is_empty() && narrator.is_none() {
                             narrator = Some(c);
@@ -511,12 +594,12 @@ impl LibraryScanner {
                 }
             }
         }
-        
+
         // 3. 返回提取的元数据
         if !title.is_empty() || !album.is_empty() || duration > 0 {
             return (album, title, author, narrator, cover_url, duration);
         }
-        
+
         // 4. 如果都失败了，返回空值
         (String::new(), String::new(), None, None, None, 0)
     }
@@ -524,37 +607,38 @@ impl LibraryScanner {
     /// Get ID3 duration from audio file
     async fn get_id3_duration(&self, path: &Path) -> Result<i32> {
         use id3::TagLike;
-        
+
         let tag = id3::Tag::read_from_path(path)
             .map_err(|e| TingError::InvalidRequest(format!("Failed to read ID3 tag: {}", e)))?;
         if let Some(duration_ms) = tag.duration() {
             Ok((duration_ms / 1000) as i32)
         } else {
-            Err(TingError::InvalidRequest("No duration in ID3 tag".to_string()))
+            Err(TingError::InvalidRequest(
+                "No duration in ID3 tag".to_string(),
+            ))
         }
     }
-    
+
     /// Estimate duration based on file size and format
     fn estimate_duration_by_size(&self, file_size: u64, ext: &str) -> i32 {
         if file_size == 0 {
             return 0;
         }
-        
+
         // Rough bitrate estimates for different formats (in kbps)
         let estimated_bitrate = match ext {
-            "mp3" => 128,      // Common MP3 bitrate
+            "mp3" => 128,         // Common MP3 bitrate
             "m4a" | "aac" => 96,  // AAC is more efficient
-            "flac" => 800,     // Lossless, much higher bitrate
-            "ogg" | "opus" => 96,  // Similar to AAC
-            "wma" => 128,      // Similar to MP3
-            _ => 128,          // Default fallback
+            "flac" => 800,        // Lossless, much higher bitrate
+            "ogg" | "opus" => 96, // Similar to AAC
+            "wma" => 128,         // Similar to MP3
+            _ => 128,             // Default fallback
         };
-        
+
         // Calculate estimated duration: file_size_bits / bitrate_bps
         let file_size_bits = file_size * 8;
         let bitrate_bps = estimated_bitrate * 1000;
-        
+
         (file_size_bits / bitrate_bps as u64) as i32
     }
-
 }

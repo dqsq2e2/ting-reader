@@ -43,7 +43,7 @@ interface ProgressBarProps {
   onSeekEnd: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
-const ProgressBar: React.FC<ProgressBarProps> = ({ 
+const ProgressBar: React.FC<ProgressBarProps> = ({
   isMini = false,
   isSeeking,
   seekTime,
@@ -121,10 +121,25 @@ const ProgressBar: React.FC<ProgressBarProps> = ({
   );
 };
 
+const isAppleMobileBrowser = () => {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  const isiPhoneOrIPad = /iPad|iPhone|iPod/.test(ua);
+  const isModernIPad = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+  return isiPhoneOrIPad || isModernIPad;
+};
+
+const isStrmPath = (path?: string) => path?.toLowerCase().split('?')[0].endsWith('.strm') ?? false;
+
 const Player: React.FC = () => {
   const { token, activeUrl } = useAuthStore();
   const API_BASE_URL = activeUrl || import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? '' : 'http://localhost:3000');
-  
+  const toAbsoluteMediaUrl = (url: string) => {
+    if (/^https?:\/\//i.test(url)) return url;
+    const base = API_BASE_URL || window.location.origin;
+    return `${base.replace(/\/$/, '')}${url.startsWith('/') ? url : `/${url}`}`;
+  };
+
   const getStreamUrl = (chapterId: string) => {
     let url = '';
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -318,8 +333,15 @@ const Player: React.FC = () => {
   const [retryCount, setRetryCount] = useState(0);
   const [shouldTranscode, setShouldTranscode] = useState(false);
   const [seekOffset, setSeekOffset] = useState<number | null>(null);
+  const [hlsStreamUrl, setHlsStreamUrl] = useState<string | null>(null);
+  const [hlsSessionId, setHlsSessionId] = useState<string | null>(null);
+  const [hlsChapterId, setHlsChapterId] = useState<string | null>(null);
+  const [hlsSeekOffset, setHlsSeekOffset] = useState(0);
   const isInitialLoadRef = useRef(true);
   const preloadAudioRef = useRef<HTMLAudioElement | null>(null);
+  const hlsRequestIdRef = useRef(0);
+  const shouldUseHlsForCurrentChapter = isAppleMobileBrowser() && isStrmPath(currentChapter?.path) && !shouldTranscode;
+  const isUsingHlsForCurrentChapter = shouldUseHlsForCurrentChapter && hlsChapterId === currentChapter?.id && !!hlsStreamUrl;
 
   const tryTranscodeFallback = () => {
     if (shouldTranscode || retryCount >= 3) return;
@@ -400,6 +422,11 @@ const Player: React.FC = () => {
     isInitialLoadRef.current = true;
     setShouldTranscode(false);
     setSeekOffset(null);
+    setHlsStreamUrl(null);
+    setHlsSessionId(null);
+    setHlsChapterId(null);
+    setHlsSeekOffset(0);
+    hlsRequestIdRef.current += 1;
     setTimeout(() => {
       setBufferedTime(0);
       setRetryCount(0);
@@ -424,6 +451,56 @@ const Player: React.FC = () => {
     }
   }, [currentChapter?.duration, setDuration]);
 
+  useEffect(() => {
+    if (!currentChapter || !shouldUseHlsForCurrentChapter) {
+      setHlsStreamUrl(null);
+      setHlsSessionId(null);
+      setHlsChapterId(null);
+      setHlsSeekOffset(0);
+      return;
+    }
+
+    const requestId = ++hlsRequestIdRef.current;
+    let startAt = Math.max(0, usePlayerStore.getState().currentTime || 0);
+    if (isInitialLoadRef.current && currentBook?.skipIntro && startAt < currentBook.skipIntro) {
+      startAt = currentBook.skipIntro;
+    }
+
+    setHlsChapterId(currentChapter.id);
+    setHlsStreamUrl(null);
+    setHlsSessionId(null);
+    setHlsSeekOffset(startAt);
+    setCurrentTime(startAt);
+    isInitialLoadRef.current = false;
+
+    const params: Record<string, string | number> = { transcode: 'hls' };
+    if (token) params.token = token;
+    if (startAt > 0) params.seek = startAt;
+
+    apiClient.get(`/api/stream/${currentChapter.id}`, { params }).then(res => {
+      if (requestId !== hlsRequestIdRef.current) return;
+      const playlistUrl = res.data?.playlistUrl || res.data?.playlist_url;
+      const sessionId = res.data?.sessionId || res.data?.session_id;
+      if (!playlistUrl || !sessionId) {
+        throw new Error('HLS response missing playlist URL or session ID');
+      }
+      setHlsSessionId(sessionId);
+      setHlsStreamUrl(toAbsoluteMediaUrl(playlistUrl));
+    }).catch(err => {
+      if (requestId !== hlsRequestIdRef.current) return;
+      console.error('HLS stream initialization failed', err);
+      setHlsStreamUrl(null);
+      setHlsSessionId(null);
+      setHlsChapterId(null);
+      tryTranscodeFallback();
+    });
+
+    return () => {
+      hlsRequestIdRef.current += 1;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentChapter?.id, currentChapter?.path, shouldUseHlsForCurrentChapter, currentBook?.skipIntro, token]);
+
   // Reset initial load ref when retrying (to allow resume logic to run again)
   useEffect(() => {
     if (retryCount > 0) {
@@ -434,6 +511,7 @@ const Player: React.FC = () => {
   // Sync state with audio element
   useEffect(() => {
     if (!audioRef.current || !currentChapter) return;
+    if (shouldUseHlsForCurrentChapter && !hlsStreamUrl) return;
     setTimeout(() => setError(null), 0); // Clear error on source change
     
     // Reset retry count when chapter changes (this is also handled in another effect, but safe to double check)
@@ -466,7 +544,7 @@ const Player: React.FC = () => {
       audioRef.current.pause();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlaying, currentChapter?.id, retryCount, shouldTranscode, seekOffset]);
+  }, [isPlaying, currentChapter?.id, retryCount, shouldTranscode, seekOffset, hlsStreamUrl, hlsSeekOffset]);
 
   // Some browsers may report "playing" while decode hasn't actually advanced.
   // Detect "stuck at start" by checking that currentTime does not move after a delay,
@@ -539,11 +617,13 @@ const Player: React.FC = () => {
   // Handle Skip Intro and Outro
   const handleTimeUpdate = () => {
     if (!audioRef.current) return;
-    
+
     const rawTime = audioRef.current.currentTime;
-    // For transcoded streams with server-side seek, add the seekOffset
-    // because FFmpeg -ss output starts from 0 but represents audio at seekOffset
-    const time = (shouldTranscode && seekOffset !== null && seekOffset > 0) ? rawTime + seekOffset : rawTime;
+    // Server-side seeked streams start from 0 but represent audio at an offset.
+    const mediaOffset = isUsingHlsForCurrentChapter
+      ? hlsSeekOffset
+      : ((shouldTranscode && seekOffset !== null && seekOffset > 0) ? seekOffset : 0);
+    const time = rawTime + mediaOffset;
     
     // Prevent overwriting persisted progress with 0 on initial load
     // If we are at the very beginning (time < 0.5) but store has significant progress (> 2s),
@@ -564,7 +644,7 @@ const Player: React.FC = () => {
       // Find the range that contains the current time
       let currentRangeEnd = 0;
       for (let i = 0; i < audioRef.current.buffered.length; i++) {
-        if (audioRef.current.buffered.start(i) <= time && audioRef.current.buffered.end(i) >= time) {
+        if (audioRef.current.buffered.start(i) <= rawTime && audioRef.current.buffered.end(i) >= rawTime) {
           currentRangeEnd = audioRef.current.buffered.end(i);
           break;
         }
@@ -573,14 +653,14 @@ const Player: React.FC = () => {
       // If no range contains current time, just use the end of the last range before current time
       if (currentRangeEnd === 0) {
         for (let i = audioRef.current.buffered.length - 1; i >= 0; i--) {
-          if (audioRef.current.buffered.start(i) <= time) {
+          if (audioRef.current.buffered.start(i) <= rawTime) {
             currentRangeEnd = audioRef.current.buffered.end(i);
             break;
           }
         }
       }
-      
-      setBufferedTime(currentRangeEnd);
+
+      setBufferedTime(currentRangeEnd + mediaOffset);
     }
 
     // Handle Skip Intro
@@ -605,23 +685,26 @@ const Player: React.FC = () => {
 
   const handleProgress = () => {
     if (audioRef.current && audioRef.current.buffered.length > 0) {
-      const time = audioRef.current.currentTime;
+      const rawTime = audioRef.current.currentTime;
+      const mediaOffset = isUsingHlsForCurrentChapter
+        ? hlsSeekOffset
+        : ((shouldTranscode && seekOffset !== null && seekOffset > 0) ? seekOffset : 0);
       let currentRangeEnd = 0;
       for (let i = 0; i < audioRef.current.buffered.length; i++) {
-        if (audioRef.current.buffered.start(i) <= time && audioRef.current.buffered.end(i) >= time) {
+        if (audioRef.current.buffered.start(i) <= rawTime && audioRef.current.buffered.end(i) >= rawTime) {
           currentRangeEnd = audioRef.current.buffered.end(i);
           break;
         }
       }
       if (currentRangeEnd === 0) {
         for (let i = audioRef.current.buffered.length - 1; i >= 0; i--) {
-          if (audioRef.current.buffered.start(i) <= time) {
+          if (audioRef.current.buffered.start(i) <= rawTime) {
             currentRangeEnd = audioRef.current.buffered.end(i);
             break;
           }
         }
       }
-      setBufferedTime(currentRangeEnd);
+      setBufferedTime(currentRangeEnd + mediaOffset);
     }
   };
 
@@ -787,7 +870,7 @@ const Player: React.FC = () => {
       setDuration(browserDuration);
 
       // Resume position from store if this is the initial load for this chapter
-      if (isInitialLoadRef.current) {
+      if (isInitialLoadRef.current && !isUsingHlsForCurrentChapter) {
         const resumePosition = usePlayerStore.getState().currentTime;
         if (resumePosition > 0) {
           // If progress is very close to the end (e.g., within 2 seconds or > 99%), start from the beginning
@@ -826,6 +909,10 @@ const Player: React.FC = () => {
     const time = parseFloat(e.target.value);
     setSeekTime(time);
     if (!isSeeking) {
+      if (isUsingHlsForCurrentChapter) {
+        setCurrentTime(time);
+        return;
+      }
       if (audioRef.current) {
         audioRef.current.currentTime = time;
       }
@@ -838,27 +925,55 @@ const Player: React.FC = () => {
     setSeekTime(currentTime);
   };
 
-  const handleSeekEnd = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const time = parseFloat(e.target.value);
-    setIsSeeking(false);
-    
+  const seekToTime = (time: number) => {
+    const targetTime = Math.max(0, duration > 0 ? Math.min(time, duration) : time);
+
     if (audioRef.current) {
+      if (isUsingHlsForCurrentChapter && hlsSessionId) {
+        const requestId = ++hlsRequestIdRef.current;
+        setHlsSeekOffset(targetTime);
+        setCurrentTime(targetTime);
+        isInitialLoadRef.current = false;
+
+        apiClient.post(`/api/stream/hls/${hlsSessionId}/seek`, null, {
+          params: { seek: targetTime }
+        }).then(res => {
+          if (requestId !== hlsRequestIdRef.current) return;
+          const playlistUrl = res.data?.playlistUrl || res.data?.playlist_url;
+          if (!playlistUrl) {
+            throw new Error('HLS seek response missing playlist URL');
+          }
+          setHlsStreamUrl(toAbsoluteMediaUrl(playlistUrl));
+        }).catch(err => {
+          if (requestId !== hlsRequestIdRef.current) return;
+          console.error('HLS seek failed', err);
+          tryTranscodeFallback();
+        });
+        return;
+      }
+
       // For transcoded streams, native seeking won't work (no Range support)
       // Detect by checking if seekable ranges are empty or if we're in transcode mode
       const isNonSeekable = shouldTranscode || audioRef.current.seekable.length === 0;
-      
+
       if (isNonSeekable && shouldTranscode) {
         // Reload audio with seek parameter (server-side seek via FFmpeg -ss)
-        setSeekOffset(time);
-        setCurrentTime(time);
+        setSeekOffset(targetTime);
+        setCurrentTime(targetTime);
         isInitialLoadRef.current = false;
       } else {
-        audioRef.current.currentTime = time;
-        setCurrentTime(time);
+        audioRef.current.currentTime = targetTime;
+        setCurrentTime(targetTime);
       }
     } else {
-      setCurrentTime(time);
+      setCurrentTime(targetTime);
     }
+  };
+
+  const handleSeekEnd = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const time = parseFloat(e.target.value);
+    setIsSeeking(false);
+    seekToTime(time);
   };
 
   const formatTime = (time: number) => {
@@ -954,12 +1069,16 @@ const Player: React.FC = () => {
 
   if (!currentChapter) return null;
 
-  const miniPlayerStyle = !isExpanded ? { 
+  const miniPlayerStyle = !isExpanded ? {
     bottom: isWidgetMode ? '0' : 'var(--mini-player-offset)',
     height: isWidgetMode ? '100%' : (isCollapsed ? '64px' : 'var(--player-h)'),
     left: isWidgetMode ? '0' : undefined,
     right: isWidgetMode ? '0' : undefined,
   } : {};
+
+  const audioSrc = shouldUseHlsForCurrentChapter
+    ? (hlsChapterId === currentChapter.id ? (hlsStreamUrl || '') : '')
+    : getStreamUrl(currentChapter.id);
 
   const handleEnded = () => {
     if (currentBook && currentChapter) {
@@ -989,7 +1108,7 @@ const Player: React.FC = () => {
     >
       <audio
         ref={audioRef}
-        src={getStreamUrl(currentChapter.id)}
+        src={audioSrc || undefined}
         crossOrigin="anonymous"
         onTimeUpdate={handleTimeUpdate}
         onProgress={handleProgress}
@@ -1138,8 +1257,8 @@ const Player: React.FC = () => {
                 >
                   <SkipBack size={20} fill="currentColor" />
                 </button>
-                <button 
-                  onClick={() => { if (audioRef.current) audioRef.current.currentTime -= 15; }}
+                <button
+                  onClick={() => seekToTime(currentTime - 15)}
                   className="text-slate-400 dark:text-slate-300 hover:scale-110 transition-all"
                   style={{ color: (miniPlayerThemeColor && !useDarkControls) ? (isLight(miniPlayerThemeColor) ? '#475569' : setAlpha(miniPlayerThemeColor, 0.6)) : undefined }}
                 >
@@ -1156,8 +1275,8 @@ const Player: React.FC = () => {
                   >
                   {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
                 </button>
-                <button 
-                  onClick={() => { if (audioRef.current) audioRef.current.currentTime += 30; }}
+                <button
+                  onClick={() => seekToTime(currentTime + 30)}
                   className="text-slate-400 dark:text-slate-300 hover:scale-110 transition-all"
                   style={{ color: (miniPlayerThemeColor && !useDarkControls) ? (isLight(miniPlayerThemeColor) ? '#475569' : setAlpha(miniPlayerThemeColor, 0.6)) : undefined }}
                 >
@@ -1209,8 +1328,8 @@ const Player: React.FC = () => {
               <div className="flex items-center gap-1 shrink-0">
                 {isWidgetMode && (
                   <div className="flex items-center gap-1">
-                    <button 
-                    onClick={() => { if (audioRef.current) audioRef.current.currentTime -= 15; }}
+                    <button
+                    onClick={() => seekToTime(currentTime - 15)}
                     className={`p-1.5 transition-colors hover:text-primary-500 ${useDarkControls ? 'text-slate-200' : 'text-slate-400 dark:text-slate-300'}`}
                     style={{ color: (miniPlayerThemeColor && !useDarkControls) ? (isLight(miniPlayerThemeColor) ? '#475569' : setAlpha(miniPlayerThemeColor, 0.6)) : undefined }}
                   >
@@ -1246,8 +1365,8 @@ const Player: React.FC = () => {
                     >
                       <SkipForward size={16} fill="currentColor" />
                     </button>
-                    <button 
-                      onClick={() => { if (audioRef.current) audioRef.current.currentTime += 30; }}
+                    <button
+                      onClick={() => seekToTime(currentTime + 30)}
                       className={`p-1.5 transition-colors hover:text-primary-500 ${useDarkControls ? 'text-slate-200' : 'text-slate-400 dark:text-slate-300'}`}
                       style={{ color: (miniPlayerThemeColor && !useDarkControls) ? (isLight(miniPlayerThemeColor) ? '#475569' : setAlpha(miniPlayerThemeColor, 0.6)) : undefined }}
                     >
@@ -1534,8 +1653,8 @@ const Player: React.FC = () => {
 
               {/* Main Controls */}
               <div className="flex items-center justify-center gap-4 sm:gap-10 md:gap-14">
-                <button 
-                  onClick={() => { if (audioRef.current) audioRef.current.currentTime -= 15; }}
+                <button
+                  onClick={() => seekToTime(currentTime - 15)}
                   className="text-slate-600 dark:text-slate-400 p-1.5 sm:p-2 hover:scale-110 transition-transform"
                 >
                   <div className="relative">
@@ -1567,8 +1686,8 @@ const Player: React.FC = () => {
                 >
                   <SkipForward size={28} className="sm:w-9 sm:h-9" fill="currentColor" />
                 </button>
-                <button 
-                  onClick={() => { if (audioRef.current) audioRef.current.currentTime += 15; }}
+                <button
+                  onClick={() => seekToTime(currentTime + 15)}
                   className="text-slate-600 dark:text-slate-400 p-1.5 sm:p-2 hover:scale-110 transition-transform"
                 >
                   <div className="relative">

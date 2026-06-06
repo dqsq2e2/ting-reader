@@ -120,9 +120,7 @@ async fn test_handler_isolation() {
 
     // First handler that fails
     let handler1: EventHandler = Arc::new(move |_event| {
-        Box::pin(async move {
-            Err(TingError::EventError("Handler 1 failed".to_string()))
-        })
+        Box::pin(async move { Err(TingError::EventError("Handler 1 failed".to_string())) })
     });
 
     // Second handler that succeeds
@@ -175,7 +173,11 @@ async fn test_event_filter_by_source() {
         "plugin1".to_string(),
         json!({}),
     );
-    let event3 = Event::user(EventType::Custom("test".to_string()), "user1".to_string(), json!({}));
+    let event3 = Event::user(
+        EventType::Custom("test".to_string()),
+        "user1".to_string(),
+        json!({}),
+    );
 
     bus.publish(event1).await.unwrap();
     bus.publish(event2).await.unwrap();
@@ -272,9 +274,12 @@ async fn test_event_export() {
     let bus = EventBus::new();
 
     // Publish some events
-    bus.publish(Event::system(EventType::SystemStarted, json!({ "test": "data" })))
-        .await
-        .unwrap();
+    bus.publish(Event::system(
+        EventType::SystemStarted,
+        json!({ "test": "data" }),
+    ))
+    .await
+    .unwrap();
     bus.publish(Event::plugin(
         EventType::PluginLoaded("plugin1".to_string()),
         "plugin1".to_string(),

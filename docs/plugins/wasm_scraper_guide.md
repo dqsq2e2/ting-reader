@@ -26,7 +26,23 @@ serde_json = "1.0"
 # 其他依赖...
 ```
 
-提供插件配置文件 `plugin.json`（详情请参考 [插件开发指南](./plugin-dev.md)）。
+提供插件配置文件 `plugin.json`（详情请参考 [插件开发指南](./plugin-dev.md)）。刮削插件应声明 `scraper.search_fields` 和 `scraper.result_fields`，例如：
+
+```json
+"scraper": {
+  "auto_scrape": true,
+  "search_fields": [
+    { "key": "title", "label": "书名", "required": true, "default_from": "book.title" },
+    { "key": "author", "label": "作者", "required": false, "default_from": "book.author" },
+    { "key": "narrator", "label": "演播", "required": false, "default_from": "book.narrator" }
+  ],
+  "result_fields": ["title", "author", "narrator", "cover_url", "description", "tags"]
+}
+```
+
+`auto_scrape: true` 表示该插件可以用于存储库自动刮削。自动刮削插件必须声明必填书名字段；仅用于手动刮削的插件可以省略或设为 `false`，但仍至少需要一个搜索字段。
+
+`result_fields` 只声明插件实际能稳定返回的字段。
 
 ### 1.2 核心代码 (src/lib.rs)
 ```rust
@@ -92,13 +108,26 @@ pub extern "C" fn dealloc(ptr: *mut u8, len: usize) {
     }
 }
 
+#[derive(Deserialize)]
+struct SearchParams {
+    // title 来自 plugin.json 中 scraper.search_fields 的书名字段。
+    // query 会与 title 同步传入，用于兼容旧插件。
+    title: Option<String>,
+    query: String,
+    author: Option<String>,
+    narrator: Option<String>,
+    page: u32,
+    page_size: Option<u32>,
+}
+
 // 4. 业务逻辑实现
 fn handle_search(params_json: &str) -> Result<SearchResult, String> {
     // 解析 JSON 参数
     let params: SearchParams = serde_json::from_str(params_json).map_err(|e| e.to_string())?;
+    let keyword = params.title.as_deref().unwrap_or(&params.query);
     
     // 发起 HTTP 请求 (需自行封装宿主提供的 http_request)
-    let url = format!("https://api.example.com/search?q={}", params.query);
+    let url = format!("https://api.example.com/search?q={}", keyword);
     let body = fetch_url(&url)?;
     
     // 解析响应并构造结果

@@ -5,16 +5,16 @@
 //! and sandboxing.
 
 use anyhow::{Context, Result};
-use deno_core::{JsRuntime, v8};
+use deno_core::{v8, JsRuntime};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tracing::{debug, info};
 
-use super::bindings::create_js_runtime_with_bindings;
-use super::super::wasm::sandbox::{ResourceLimits, Sandbox};
 use super::super::types::PluginMetadata;
+use super::super::wasm::sandbox::{ResourceLimits, Sandbox};
+use super::bindings::create_js_runtime_with_bindings;
 
 /// JavaScript Runtime wrapper for executing JavaScript plugins
 pub struct JsRuntimeWrapper {
@@ -40,7 +40,11 @@ impl JsRuntimeWrapper {
     ///
     /// # Returns
     /// A new JsRuntimeWrapper instance
-    pub fn new(plugin_path: PathBuf, metadata: PluginMetadata, config: Option<Value>) -> Result<Self> {
+    pub fn new(
+        plugin_path: PathBuf,
+        metadata: PluginMetadata,
+        config: Option<Value>,
+    ) -> Result<Self> {
         debug!("Creating JavaScript runtime for plugin: {}", metadata.name);
 
         // Create sandbox from plugin permissions
@@ -53,11 +57,8 @@ impl JsRuntimeWrapper {
 
         // Create runtime with plugin bindings and sandbox
         let config = config.unwrap_or(Value::Object(serde_json::Map::new()));
-        let runtime = create_js_runtime_with_bindings(
-            metadata.name.clone(),
-            config,
-            sandbox.as_ref(),
-        )?;
+        let runtime =
+            create_js_runtime_with_bindings(metadata.name.clone(), config, sandbox.as_ref())?;
 
         Ok(Self {
             runtime,
@@ -79,16 +80,16 @@ impl JsRuntimeWrapper {
         );
 
         // Read the JavaScript file
-        let code = std::fs::read_to_string(&self.plugin_path)
-            .with_context(|| {
-                format!(
-                    "Failed to read JavaScript plugin file: {}",
-                    self.plugin_path.display()
-                )
-            })?;
+        let code = std::fs::read_to_string(&self.plugin_path).with_context(|| {
+            format!(
+                "Failed to read JavaScript plugin file: {}",
+                self.plugin_path.display()
+            )
+        })?;
 
         // Create a module name from the file path
-        let module_name = self.plugin_path
+        let module_name = self
+            .plugin_path
             .file_name()
             .and_then(|n| n.to_str())
             .map(|s| s.to_string())
@@ -129,8 +130,8 @@ impl JsRuntimeWrapper {
         self.start_execution();
 
         // Serialize arguments to JSON
-        let args_json = serde_json::to_string(&args)
-            .context("Failed to serialize function arguments")?;
+        let args_json =
+            serde_json::to_string(&args).context("Failed to serialize function arguments")?;
 
         // Call _ting_invoke using V8 API to avoid compiling new scripts for arguments
         {
@@ -140,14 +141,15 @@ impl JsRuntimeWrapper {
 
             // Get _ting_invoke function
             let invoke_name = v8::String::new(scope, "_ting_invoke").unwrap();
-            let invoke_val = global.get(scope, invoke_name.into())
+            let invoke_val = global
+                .get(scope, invoke_name.into())
                 .ok_or_else(|| anyhow::anyhow!("_ting_invoke not found"))?;
             let invoke_func = v8::Local::<v8::Function>::try_from(invoke_val)
                 .map_err(|_| anyhow::anyhow!("_ting_invoke is not a function"))?;
 
             // Prepare arguments: [function_name, args_value]
             let func_name_v8 = v8::String::new(scope, function_name).unwrap();
-            
+
             // Parse args JSON to V8 value
             let args_json_v8 = v8::String::new(scope, &args_json).unwrap();
             let args_val = v8::json::parse(scope, args_json_v8)
@@ -163,7 +165,9 @@ impl JsRuntimeWrapper {
         }
 
         // Drive the event loop until completion
-        self.runtime.run_event_loop(Default::default()).await
+        self.runtime
+            .run_event_loop(Default::default())
+            .await
             .context("Failed to run event loop")?;
 
         let (status, result_or_error) = {
@@ -172,35 +176,33 @@ impl JsRuntimeWrapper {
             let global = context.global(scope);
 
             // Helper to get string from global object
-            let get_global_string = |scope: &mut deno_core::v8::HandleScope, key: &str| -> Option<String> {
-                let key_str = deno_core::v8::String::new(scope, key)?;
-                let val = global.get(scope, key_str.into())?;
-                if val.is_undefined() || val.is_null() {
-                    return None;
-                }
-                Some(val.to_string(scope)?.to_rust_string_lossy(scope))
-            };
+            let get_global_string =
+                |scope: &mut deno_core::v8::HandleScope, key: &str| -> Option<String> {
+                    let key_str = deno_core::v8::String::new(scope, key)?;
+                    let val = global.get(scope, key_str.into())?;
+                    if val.is_undefined() || val.is_null() {
+                        return None;
+                    }
+                    Some(val.to_string(scope)?.to_rust_string_lossy(scope))
+                };
 
             let status = get_global_string(scope, "_ting_status")
                 .ok_or_else(|| anyhow::anyhow!("Failed to retrieve execution status"))?;
 
             let result = match status.as_str() {
                 "success" => {
-                    let res = get_global_string(scope, "_ting_result")
-                        .ok_or_else(|| anyhow::anyhow!("Function finished successfully but returned no result"))?;
+                    let res = get_global_string(scope, "_ting_result").ok_or_else(|| {
+                        anyhow::anyhow!("Function finished successfully but returned no result")
+                    })?;
                     Ok(res)
-                },
+                }
                 "error" => {
                     let err = get_global_string(scope, "_ting_error")
                         .unwrap_or_else(|| "Unknown error".to_string());
                     Err(err)
-                },
-                "pending" => {
-                    Err("Event loop finished but function is still pending".to_string())
-                },
-                s => {
-                    Err(format!("Invalid execution status: {}", s))
                 }
+                "pending" => Err("Event loop finished but function is still pending".to_string()),
+                s => Err(format!("Invalid execution status: {}", s)),
             };
             (status, result)
         };
@@ -213,7 +215,9 @@ impl JsRuntimeWrapper {
             globalThis._ting_result = undefined;
             globalThis._ting_error = undefined;
             globalThis._ting_status = undefined;
-            "#.to_string().into()
+            "#
+            .to_string()
+            .into(),
         );
 
         // Stop tracking execution time
@@ -222,19 +226,20 @@ impl JsRuntimeWrapper {
         match result_or_error {
             Ok(result_str) => {
                 // Deserialize the result
-                let result: R = serde_json::from_str(&result_str)
-                    .with_context(|| format!("Failed to deserialize function result: {}", result_str))?;
-                
+                let result: R = serde_json::from_str(&result_str).with_context(|| {
+                    format!("Failed to deserialize function result: {}", result_str)
+                })?;
+
                 debug!("Function call completed successfully");
                 Ok(result)
-            },
+            }
             Err(err_msg) => {
                 if status == "pending" {
-                     Err(anyhow::anyhow!(err_msg))
+                    Err(anyhow::anyhow!(err_msg))
                 } else if status == "error" {
-                     Err(JsError::FunctionCallError(err_msg).into())
+                    Err(JsError::FunctionCallError(err_msg).into())
                 } else {
-                     Err(anyhow::anyhow!(err_msg))
+                    Err(anyhow::anyhow!(err_msg))
                 }
             }
         }
@@ -293,7 +298,11 @@ impl JsRuntimeWrapper {
     }
 
     /// Check file access permission
-    pub fn check_file_access(&self, path: &Path, access: super::super::wasm::sandbox::FileAccess) -> Result<()> {
+    pub fn check_file_access(
+        &self,
+        path: &Path,
+        access: super::super::wasm::sandbox::FileAccess,
+    ) -> Result<()> {
         if let Some(sandbox) = &self.sandbox {
             sandbox.check_file_access(path, access)?;
         }
@@ -352,8 +361,8 @@ impl From<anyhow::Error> for JsError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[tokio::test]
     async fn test_js_runtime_creation() {
@@ -385,7 +394,8 @@ mod tests {
         );
 
         let temp_file = NamedTempFile::new().unwrap();
-        let mut runtime = JsRuntimeWrapper::new(temp_file.path().to_path_buf(), metadata, None).unwrap();
+        let mut runtime =
+            JsRuntimeWrapper::new(temp_file.path().to_path_buf(), metadata, None).unwrap();
 
         let result = runtime.execute_script("const x = 1 + 1;");
         assert!(result.is_ok());
@@ -408,7 +418,8 @@ mod tests {
         writeln!(temp_file, "function hello() {{ return 'Hello, World!'; }}").unwrap();
         temp_file.flush().unwrap();
 
-        let mut runtime = JsRuntimeWrapper::new(temp_file.path().to_path_buf(), metadata, None).unwrap();
+        let mut runtime =
+            JsRuntimeWrapper::new(temp_file.path().to_path_buf(), metadata, None).unwrap();
         let result = runtime.load_module().await;
         assert!(result.is_ok());
     }
@@ -426,7 +437,8 @@ mod tests {
         );
 
         let temp_file = NamedTempFile::new().unwrap();
-        let mut runtime = JsRuntimeWrapper::new(temp_file.path().to_path_buf(), metadata, None).unwrap();
+        let mut runtime =
+            JsRuntimeWrapper::new(temp_file.path().to_path_buf(), metadata, None).unwrap();
 
         // This should fail due to syntax error
         let result = runtime.execute_script("const x = ;");
@@ -436,7 +448,7 @@ mod tests {
     #[tokio::test]
     async fn test_sandbox_network_access_check() {
         use super::super::super::wasm::sandbox::Permission;
-        
+
         let mut metadata = PluginMetadata::new(
             "test-plugin".to_string(),
             "test-plugin".to_string(),
@@ -446,14 +458,13 @@ mod tests {
             "Test plugin".to_string(),
             "plugin.js".to_string(),
         );
-        
+
         // Add network permission
-        metadata.permissions = vec![
-            Permission::NetworkAccess("*.example.com".to_string()),
-        ];
+        metadata.permissions = vec![Permission::NetworkAccess("*.example.com".to_string())];
 
         let temp_file = NamedTempFile::new().unwrap();
-        let runtime = JsRuntimeWrapper::new(temp_file.path().to_path_buf(), metadata, None).unwrap();
+        let runtime =
+            JsRuntimeWrapper::new(temp_file.path().to_path_buf(), metadata, None).unwrap();
 
         // Check allowed URL
         let result = runtime.check_network_access("https://api.example.com/data");
@@ -466,9 +477,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_sandbox_file_access_check() {
-        use super::super::super::wasm::sandbox::{Permission, FileAccess};
+        use super::super::super::wasm::sandbox::{FileAccess, Permission};
         use std::path::PathBuf;
-        
+
         let mut metadata = PluginMetadata::new(
             "test-plugin".to_string(),
             "test-plugin".to_string(),
@@ -478,7 +489,7 @@ mod tests {
             "Test plugin".to_string(),
             "plugin.js".to_string(),
         );
-        
+
         // Add file permissions
         metadata.permissions = vec![
             Permission::FileRead(PathBuf::from("./data/cache")),
@@ -486,41 +497,34 @@ mod tests {
         ];
 
         let temp_file = NamedTempFile::new().unwrap();
-        let runtime = JsRuntimeWrapper::new(temp_file.path().to_path_buf(), metadata, None).unwrap();
+        let runtime =
+            JsRuntimeWrapper::new(temp_file.path().to_path_buf(), metadata, None).unwrap();
 
         // Check allowed read
-        let result = runtime.check_file_access(
-            &PathBuf::from("./data/cache/file.txt"),
-            FileAccess::Read
-        );
+        let result =
+            runtime.check_file_access(&PathBuf::from("./data/cache/file.txt"), FileAccess::Read);
         assert!(result.is_ok());
 
         // Check allowed write
-        let result = runtime.check_file_access(
-            &PathBuf::from("./data/output/file.txt"),
-            FileAccess::Write
-        );
+        let result =
+            runtime.check_file_access(&PathBuf::from("./data/output/file.txt"), FileAccess::Write);
         assert!(result.is_ok());
 
         // Check disallowed read (wrong path)
-        let result = runtime.check_file_access(
-            &PathBuf::from("./data/secret/file.txt"),
-            FileAccess::Read
-        );
+        let result =
+            runtime.check_file_access(&PathBuf::from("./data/secret/file.txt"), FileAccess::Read);
         assert!(result.is_err());
 
         // Check disallowed write (read-only path)
-        let result = runtime.check_file_access(
-            &PathBuf::from("./data/cache/file.txt"),
-            FileAccess::Write
-        );
+        let result =
+            runtime.check_file_access(&PathBuf::from("./data/cache/file.txt"), FileAccess::Write);
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn test_sandbox_memory_limit_check() {
         use super::super::super::wasm::sandbox::Permission;
-        
+
         let mut metadata = PluginMetadata::new(
             "test-plugin".to_string(),
             "test-plugin".to_string(),
@@ -530,12 +534,13 @@ mod tests {
             "Test plugin".to_string(),
             "plugin.js".to_string(),
         );
-        
+
         // Add a permission to trigger sandbox creation
         metadata.permissions = vec![Permission::NetworkAccess("example.com".to_string())];
 
         let temp_file = NamedTempFile::new().unwrap();
-        let runtime = JsRuntimeWrapper::new(temp_file.path().to_path_buf(), metadata, None).unwrap();
+        let runtime =
+            JsRuntimeWrapper::new(temp_file.path().to_path_buf(), metadata, None).unwrap();
 
         // Check within limit
         let result = runtime.check_memory_limit(100 * 1024 * 1024); // 100 MB
@@ -548,9 +553,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_sandbox_cpu_time_tracking() {
-        use std::time::Duration;
         use super::super::super::wasm::sandbox::Permission;
-        
+        use std::time::Duration;
+
         let mut metadata = PluginMetadata::new(
             "test-plugin".to_string(),
             "test-plugin".to_string(),
@@ -565,18 +570,19 @@ mod tests {
         metadata.permissions = vec![Permission::NetworkAccess("example.com".to_string())];
 
         let temp_file = NamedTempFile::new().unwrap();
-        let mut runtime = JsRuntimeWrapper::new(temp_file.path().to_path_buf(), metadata, None).unwrap();
+        let mut runtime =
+            JsRuntimeWrapper::new(temp_file.path().to_path_buf(), metadata, None).unwrap();
 
         // Start tracking
         runtime.start_execution();
-        
+
         // Simulate some work
         std::thread::sleep(Duration::from_millis(10));
-        
+
         // Check CPU time (should be OK for short duration)
         let result = runtime.check_cpu_time_limit();
         assert!(result.is_ok());
-        
+
         // Stop tracking
         runtime.stop_execution();
     }

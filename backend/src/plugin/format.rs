@@ -11,12 +11,12 @@
 //! - Extracting metadata from audio files
 //! - Reporting progress for long-running operations
 
+use super::Plugin;
+use crate::core::error::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
-use crate::core::error::Result;
-use super::Plugin;
 
 /// Format plugin trait
 ///
@@ -51,12 +51,7 @@ pub trait FormatPlugin: Plugin {
     /// - The input file is corrupted or in an incorrect format
     /// - The output file cannot be written
     /// - Decryption fails for any reason
-    async fn decrypt(
-        &self,
-        input: &Path,
-        output: &Path,
-        progress: ProgressCallback,
-    ) -> Result<()>;
+    async fn decrypt(&self, input: &Path, output: &Path, progress: ProgressCallback) -> Result<()>;
 
     /// Transcode an audio file to a different format
     ///
@@ -111,17 +106,17 @@ pub type ProgressCallback = Arc<dyn Fn(f32) + Send + Sync>;
 pub struct TranscodeOptions {
     /// Target output format
     pub output_format: AudioFormat,
-    
+
     /// Target bitrate in bits per second (optional)
     /// If not specified, a default bitrate for the format will be used
     #[serde(default)]
     pub bitrate: Option<u32>,
-    
+
     /// Target sample rate in Hz (optional)
     /// If not specified, the original sample rate will be preserved
     #[serde(default)]
     pub sample_rate: Option<u32>,
-    
+
     /// Number of audio channels (optional)
     /// If not specified, the original channel count will be preserved
     #[serde(default)]
@@ -136,19 +131,19 @@ pub struct TranscodeOptions {
 pub enum AudioFormat {
     /// MP3 format
     Mp3,
-    
+
     /// M4A/AAC format
     M4a,
-    
+
     /// Ogg Vorbis format
     Ogg,
-    
+
     /// FLAC lossless format
     Flac,
-    
+
     /// WMA format
     Wma,
-    
+
     /// OPUS format
     Opus,
 }
@@ -187,24 +182,24 @@ pub struct AudioMetadata {
     /// Track title (optional)
     #[serde(default)]
     pub title: Option<String>,
-    
+
     /// Artist name (optional)
     #[serde(default)]
     pub artist: Option<String>,
-    
+
     /// Album name (optional)
     #[serde(default)]
     pub album: Option<String>,
-    
+
     /// Duration in seconds
     pub duration: u64,
-    
+
     /// Bitrate in bits per second
     pub bitrate: u32,
-    
+
     /// Sample rate in Hz
     pub sample_rate: u32,
-    
+
     /// Number of audio channels (1 for mono, 2 for stereo, etc.)
     pub channels: u8,
 }

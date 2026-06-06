@@ -2,13 +2,13 @@
 //!
 //! Reads and validates plugin.json, producing a PluginMetadata struct.
 
-use std::path::Path;
 use serde_json::Value;
+use std::path::Path;
 use tracing::warn;
 
 use super::super::js::npm::NpmManager;
 use super::super::wasm::sandbox::Permission;
-use super::{PluginMetadata, PluginType, PluginDependency};
+use super::{PluginDependency, PluginMetadata, PluginType, ScraperCapabilities};
 use crate::core::error::TingError;
 
 /// Read plugin metadata from a plugin.json file in the given directory
@@ -17,7 +17,8 @@ pub fn read_plugin_metadata(path: &Path) -> Result<PluginMetadata, TingError> {
 
     if !metadata_path.exists() {
         return Err(TingError::PluginLoadError(format!(
-            "plugin.json not found in: {}", path.display()
+            "plugin.json not found in: {}",
+            path.display()
         )));
     }
 
@@ -26,53 +27,72 @@ pub fn read_plugin_metadata(path: &Path) -> Result<PluginMetadata, TingError> {
     })?;
 
     let json: Value = serde_json::from_str(&content).map_err(|e| {
-        TingError::PluginLoadError(format!("Invalid JSON in {}: {}", metadata_path.display(), e))
+        TingError::PluginLoadError(format!(
+            "Invalid JSON in {}: {}",
+            metadata_path.display(),
+            e
+        ))
     })?;
 
     let name = json["name"]
         .as_str()
-        .ok_or_else(|| TingError::PluginLoadError("Missing 'name' field in plugin.json".to_string()))?
+        .ok_or_else(|| {
+            TingError::PluginLoadError("Missing 'name' field in plugin.json".to_string())
+        })?
         .to_string();
 
     let version = json["version"]
         .as_str()
-        .ok_or_else(|| TingError::PluginLoadError("Missing 'version' field in plugin.json".to_string()))?
+        .ok_or_else(|| {
+            TingError::PluginLoadError("Missing 'version' field in plugin.json".to_string())
+        })?
         .to_string();
 
-    let plugin_type_str = json["plugin_type"]
-        .as_str()
-        .ok_or_else(|| TingError::PluginLoadError("Missing 'plugin_type' field in plugin.json".to_string()))?;
+    let plugin_type_str = json["plugin_type"].as_str().ok_or_else(|| {
+        TingError::PluginLoadError("Missing 'plugin_type' field in plugin.json".to_string())
+    })?;
 
     let plugin_type = match plugin_type_str {
         "scraper" => PluginType::Scraper,
         "format" => PluginType::Format,
         "utility" => PluginType::Utility,
-        _ => return Err(TingError::PluginLoadError(format!(
-            "Invalid plugin_type: {}. Must be 'scraper', 'format', or 'utility'",
-            plugin_type_str
-        ))),
+        _ => {
+            return Err(TingError::PluginLoadError(format!(
+                "Invalid plugin_type: {}. Must be 'scraper', 'format', or 'utility'",
+                plugin_type_str
+            )))
+        }
     };
 
     let author = json["author"]
         .as_str()
-        .ok_or_else(|| TingError::PluginLoadError("Missing 'author' field in plugin.json".to_string()))?
+        .ok_or_else(|| {
+            TingError::PluginLoadError("Missing 'author' field in plugin.json".to_string())
+        })?
         .to_string();
 
     let description = json["description"]
         .as_str()
-        .ok_or_else(|| TingError::PluginLoadError("Missing 'description' field in plugin.json".to_string()))?
+        .ok_or_else(|| {
+            TingError::PluginLoadError("Missing 'description' field in plugin.json".to_string())
+        })?
         .to_string();
 
     let entry_point = json["entry_point"]
         .as_str()
-        .ok_or_else(|| TingError::PluginLoadError("Missing 'entry_point' field in plugin.json".to_string()))?
+        .ok_or_else(|| {
+            TingError::PluginLoadError("Missing 'entry_point' field in plugin.json".to_string())
+        })?
         .to_string();
 
     // Optional fields
-    let id = json.get("id").and_then(|v| v.as_str()).map(|s| s.to_string())
+    let id = json
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
         .unwrap_or_else(|| name.clone());
     let license = json["license"].as_str().map(|s| s.to_string());
-    let homepage = json["homepage"].as_str().map(|s| s.to_string());
+    let repo = json["repo"].as_str().map(|s| s.to_string());
     let min_core_version = json["min_core_version"].as_str().map(|s| s.to_string());
     let description_en = json["description_en"].as_str().map(|s| s.to_string());
 
@@ -82,7 +102,10 @@ pub fn read_plugin_metadata(path: &Path) -> Result<PluginMetadata, TingError> {
             Some("wasm".to_string())
         } else if entry_point.ends_with(".js") {
             Some("javascript".to_string())
-        } else if entry_point.ends_with(".dll") || entry_point.ends_with(".so") || entry_point.ends_with(".dylib") {
+        } else if entry_point.ends_with(".dll")
+            || entry_point.ends_with(".so")
+            || entry_point.ends_with(".dylib")
+        {
             Some("native".to_string())
         } else {
             None
@@ -94,6 +117,22 @@ pub fn read_plugin_metadata(path: &Path) -> Result<PluginMetadata, TingError> {
             .filter_map(|v| v.as_str().map(|s| s.to_string()))
             .collect()
     });
+
+    let scraper = match json.get("scraper") {
+        Some(value) => Some(
+            serde_json::from_value::<ScraperCapabilities>(value.clone()).map_err(|e| {
+                TingError::PluginLoadError(format!(
+                    "Invalid 'scraper' capability declaration: {}",
+                    e
+                ))
+            })?,
+        ),
+        None => None,
+    };
+
+    if plugin_type == PluginType::Scraper {
+        validate_scraper_capabilities(scraper.as_ref())?;
+    }
 
     // Parse dependencies — supports both simple strings and detailed objects
     let dependencies = parse_dependencies(&json);
@@ -114,7 +153,7 @@ pub fn read_plugin_metadata(path: &Path) -> Result<PluginMetadata, TingError> {
         description,
         description_en,
         license,
-        homepage,
+        repo,
         entry_point,
         runtime,
         dependencies,
@@ -123,7 +162,44 @@ pub fn read_plugin_metadata(path: &Path) -> Result<PluginMetadata, TingError> {
         config_schema,
         min_core_version,
         supported_extensions,
+        scraper,
     })
+}
+
+fn validate_scraper_capabilities(scraper: Option<&ScraperCapabilities>) -> Result<(), TingError> {
+    let legacy;
+    let capabilities = match scraper {
+        Some(capabilities) => capabilities,
+        None => {
+            legacy = ScraperCapabilities::legacy_default();
+            &legacy
+        }
+    };
+
+    if capabilities.search_fields.is_empty() {
+        return Err(TingError::PluginLoadError(
+            "Scraper plugins must declare at least one search field in scraper.search_fields"
+                .to_string(),
+        ));
+    }
+
+    if capabilities.auto_scrape {
+        let has_required_title = capabilities.search_fields.iter().any(|field| {
+            field.required
+                && (field.key == "title"
+                    || field.key == "query"
+                    || field.default_from.as_deref() == Some("book.title"))
+        });
+
+        if !has_required_title {
+            return Err(TingError::PluginLoadError(
+                "Scraper plugins with scraper.auto_scrape=true must declare a required title search field"
+                    .to_string(),
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 /// Parse plugin dependencies from plugin.json.

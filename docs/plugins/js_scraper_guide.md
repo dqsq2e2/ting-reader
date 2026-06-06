@@ -22,13 +22,15 @@ function shutdown() {
 
 // 2. 搜索书籍
 async function search(args) {
-    // args 包含 query (关键词), page (页码), narrator (演播者筛选), author (作者筛选)
-    const { query, page, narrator, author } = args;
+    // args 会包含 plugin.json 中 scraper.search_fields 声明的字段。
+    // title 会同步写入 query，用于兼容旧插件。
+    const { title, query, page, narrator, author } = args;
+    const keyword = title || query;
     
-    Ting.log.info(`搜索: ${query}, 页码: ${page}`);
+    Ting.log.info(`搜索: ${keyword}, 页码: ${page}`);
 
     // 发送请求 (fetch 是内置的)
-    const resp = await fetch(`https://api.example.com/search?q=${encodeURIComponent(query)}&page=${page}`);
+    const resp = await fetch(`https://api.example.com/search?q=${encodeURIComponent(keyword)}&page=${page}`);
     const data = await resp.json();
     
     // 转换数据结构
@@ -105,6 +107,29 @@ globalThis.initialize = initialize;
 globalThis.shutdown = shutdown;
 globalThis.search = search;
 ```
+
+### 1.3 plugin.json 中的 scraper 声明
+
+刮削插件应在 `plugin.json` 中声明搜索字段和可返回字段。手动刮削弹窗会根据这些声明渲染输入框和字段选择按钮。
+
+如果插件要出现在存储库自动刮削配置中，需要声明 `auto_scrape: true`，并且必须有必填书名字段。仅用于手动刮削的插件可以省略 `auto_scrape`，但仍至少需要一个搜索字段。
+
+```json
+{
+  "plugin_type": "scraper",
+  "scraper": {
+    "auto_scrape": true,
+    "search_fields": [
+      { "key": "title", "label": "书名", "required": true, "default_from": "book.title" },
+      { "key": "author", "label": "作者", "required": false, "default_from": "book.author" },
+      { "key": "narrator", "label": "演播", "required": false, "default_from": "book.narrator" }
+    ],
+    "result_fields": ["title", "author", "narrator", "cover_url", "description", "tags"]
+  }
+}
+```
+
+`result_fields` 要按插件实际能力填写。比如插件不能稳定返回作者，就不要声明 `author`；前端也不会展示作者的采用按钮。
 
 ## 2. API 参考
 

@@ -2,7 +2,6 @@
 #[derive(Debug, Clone, Copy)]
 pub enum ScraperMethod {
     Search,
-    GetDetail,
     GetChapterList,
     GetChapterDetail,
     DownloadCover,

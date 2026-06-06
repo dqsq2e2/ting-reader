@@ -14,7 +14,7 @@ impl UserSettingsRepository {
     pub fn new(db: Arc<DatabaseManager>) -> Self {
         Self { db }
     }
-    
+
     /// Get settings for a user
     pub async fn get_by_user(&self, user_id: &str) -> Result<Option<UserSettings>> {
         let user_id = user_id.to_string();
@@ -39,7 +39,7 @@ impl UserSettingsRepository {
             .map_err(TingError::DatabaseError)
         }).await
     }
-    
+
     /// Upsert user settings
     pub async fn upsert(&self, settings: &UserSettings) -> Result<()> {
         let settings = settings.clone();

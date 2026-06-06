@@ -85,7 +85,7 @@ impl Default for StreamerConfig {
         Self {
             cache_enabled: true,
             cache_size: 100 * 1024 * 1024, // 100 MB
-            buffer_size: 64 * 1024,         // 64 KB
+            buffer_size: 64 * 1024,        // 64 KB
             supported_formats: vec![
                 AudioFormat::Mp3,
                 AudioFormat::M4a,

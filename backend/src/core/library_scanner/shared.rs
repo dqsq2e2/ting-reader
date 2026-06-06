@@ -3,8 +3,8 @@
 use std::collections::{HashMap, HashSet};
 use tracing::{info, warn};
 
-use crate::db::repository::Repository;
 use super::{LibraryScanner, ScanResult};
+use crate::db::repository::Repository;
 
 /// Pre-fetched book lookup data
 pub struct PrefetchedBooks {
@@ -19,7 +19,9 @@ pub struct PrefetchedBooks {
 impl LibraryScanner {
     /// Pre-fetch all existing books for a library and build lookup maps
     pub(crate) async fn prefetch_books(&self, library_id: &str) -> PrefetchedBooks {
-        let all_books = self.book_repo.find_all_minimal_by_library(library_id)
+        let all_books = self
+            .book_repo
+            .find_all_minimal_by_library(library_id)
             .await
             .unwrap_or_default();
 
@@ -27,11 +29,21 @@ impl LibraryScanner {
         let mut hash_map = HashMap::new();
 
         for (id, path, hash, manual_corrected, match_pattern) in &all_books {
-            path_map.insert(path.clone(), (id.clone(), *manual_corrected, match_pattern.clone()));
-            hash_map.insert(hash.clone(), (id.clone(), *manual_corrected, match_pattern.clone()));
+            path_map.insert(
+                path.clone(),
+                (id.clone(), *manual_corrected, match_pattern.clone()),
+            );
+            hash_map.insert(
+                hash.clone(),
+                (id.clone(), *manual_corrected, match_pattern.clone()),
+            );
         }
 
-        PrefetchedBooks { path_map, hash_map, all_books }
+        PrefetchedBooks {
+            path_map,
+            hash_map,
+            all_books,
+        }
     }
 
     /// Handle deletion of books not found during scan
@@ -65,6 +77,4 @@ impl LibraryScanner {
             }
         }
     }
-
 }
-

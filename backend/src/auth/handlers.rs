@@ -9,12 +9,7 @@ use crate::auth::password::{hash_password, verify_password};
 use crate::core::error::{Result, TingError};
 use crate::db::models::User;
 use crate::db::repository::Repository;
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    Json,
-};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use uuid::Uuid;
 
 /// Handler for POST /api/auth/register - User registration
@@ -50,16 +45,11 @@ pub async fn register(
                 target: "audit::login",
                 "用户 '{}' 注册成功, 角色: {}", req.username, role
             );
-            Ok((
-                StatusCode::CREATED,
-                Json(SuccessResponse { success: true }),
-            ))
+            Ok((StatusCode::CREATED, Json(SuccessResponse { success: true })))
         }
         Err(e) => {
             tracing::warn!(target: "audit::login", "用户 '{}' 注册失败: {}", req.username, e);
-            Err(TingError::InvalidRequest(
-                "用户名已存在".to_string(),
-            ))
+            Err(TingError::InvalidRequest("用户名已存在".to_string()))
         }
     }
 }
@@ -82,7 +72,9 @@ pub async fn login(
     let is_valid = verify_password(&req.password, &user.password_hash)?;
     if !is_valid {
         tracing::warn!(target: "audit::login", "用户 '{}' 登录失败：密码错误", req.username);
-        return Err(TingError::AuthenticationError("用户名或密码错误".to_string()));
+        return Err(TingError::AuthenticationError(
+            "用户名或密码错误".to_string(),
+        ));
     }
 
     // Generate JWT token
@@ -115,7 +107,10 @@ pub async fn get_me(
     tracing::debug!(user_id = %user.id, username = %user.username, "获取当前用户信息");
 
     // Fetch full user info from database
-    let db_user = state.user_repo.find_by_id(&user.id).await?
+    let db_user = state
+        .user_repo
+        .find_by_id(&user.id)
+        .await?
         .ok_or_else(|| TingError::AuthenticationError("用户不存在".to_string()))?;
 
     Ok(Json(UserInfo {
@@ -134,7 +129,10 @@ pub async fn update_me(
     tracing::info!(user_id = %user.id, username = %user.username, "更新当前用户信息");
 
     // Fetch current user
-    let mut db_user = state.user_repo.find_by_id(&user.id).await?
+    let mut db_user = state
+        .user_repo
+        .find_by_id(&user.id)
+        .await?
         .ok_or_else(|| TingError::AuthenticationError("用户不存在".to_string()))?;
 
     // Update username if provided

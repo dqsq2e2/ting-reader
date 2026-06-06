@@ -1,0 +1,384 @@
+use super::super::LibraryScanner;
+use crate::core::error::{Result, TingError};
+use crate::db::models::Chapter;
+use crate::db::repository::Repository;
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use tracing::{info, warn};
+use uuid::Uuid;
+
+impl LibraryScanner {
+    pub(crate) async fn process_chapters(
+        &self,
+        book_id: &str,
+        files: &[PathBuf],
+        last_scanned: Option<chrono::DateTime<chrono::Utc>>,
+        task_id: Option<&str>,
+        use_filename_as_title: bool,
+        cloud_mode: bool,
+        json_chapters: Option<Vec<crate::core::metadata_writer::AudiobookshelfChapter>>,
+    ) -> Result<bool> {
+        let mut has_changes = false;
+        let total_files = files.len();
+
+        // Use JSON chapters if available and count matches
+        let use_json_chapters = if let Some(ref chapters) = json_chapters {
+            if chapters.len() == total_files {
+                info!("Using metadata.json chapters for book_id: {}", book_id);
+                true
+            } else {
+                if !chapters.is_empty() {
+                    warn!("metadata.json chapter count ({}) does not match file count ({}) for book {}. Ignoring JSON chapters.", chapters.len(), total_files, book_id);
+                }
+                false
+            }
+        } else {
+            false
+        };
+
+        // Fetch book to check for regex rule
+        let book = self
+            .book_repo
+            .find_by_id(book_id)
+            .await?
+            .ok_or_else(|| TingError::NotFound("Book not found".to_string()))?;
+
+        let chapter_regex = if let Some(pattern) = &book.chapter_regex {
+            regex::Regex::new(pattern).ok()
+        } else {
+            None
+        };
+
+        // Pre-fetch existing chapters to support efficient incremental scanning
+        // Map Path -> Chapter
+        let existing_chapters = self.chapter_repo.find_by_book(book_id).await?;
+        let mut chapter_map: HashMap<PathBuf, Chapter> = HashMap::new();
+        for ch in existing_chapters {
+            let p = PathBuf::from(&ch.path);
+            chapter_map.insert(p, ch);
+        }
+
+        let mut main_counter = 0;
+        let mut extra_counter = 0;
+
+        // Track processed chapter IDs to find deleted ones
+        let mut processed_chapter_ids = HashSet::new();
+
+        for (index, file_path) in files.iter().enumerate() {
+            if index % 5 == 0 {
+                // Check cancellation and log progress
+                self.check_cancellation(task_id).await?;
+                self.update_progress(task_id, format!("处理章节 {}/{}", index + 1, total_files))
+                    .await;
+            }
+
+            // Incremental Scan Logic
+            // Check if file exists in DB
+            let mut existing_chapter = chapter_map.get(file_path).cloned();
+
+            // Check if file has changed
+            let is_modified = if let Some(last_scan) = last_scanned {
+                if let Ok(metadata) = std::fs::metadata(file_path) {
+                    if let Ok(mtime) = metadata.modified() {
+                        let mtime_utc: chrono::DateTime<chrono::Utc> = mtime.into();
+                        mtime_utc > last_scan
+                    } else {
+                        true // Can't read mtime, force check
+                    }
+                } else {
+                    true // Can't read metadata, force check
+                }
+            } else {
+                true // No last scan, force check
+            };
+
+            // Common Logic: Calculate Regex/Filename properties
+            let filename_str = file_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Unknown")
+                .to_string();
+            let mut regex_idx = None;
+            let mut regex_title = None;
+
+            if let Some(re) = &chapter_regex {
+                if let Some(caps) = re.captures(&filename_str) {
+                    if let Some(m) = caps.get(1) {
+                        if let Ok(idx) = m.as_str().parse::<i32>() {
+                            regex_idx = Some(idx);
+                        }
+                    }
+                    if let Some(m) = caps.get(2) {
+                        regex_title = Some(m.as_str().to_string());
+                    }
+                }
+            }
+
+            // Optimization: If chapter exists and file is not modified, skip processing!
+            if let Some(ref ch) = existing_chapter {
+                if !is_modified {
+                    // Update index if needed (e.g. reordering files), but skip hashing/metadata
+                    // Also respect manual_corrected if we were to update anything else
+
+                    let is_extra_ch = ch.is_extra == 1;
+                    let idx_from_counter = if is_extra_ch {
+                        extra_counter += 1;
+                        extra_counter
+                    } else {
+                        main_counter += 1;
+                        main_counter
+                    };
+
+                    // Final Index (Regex overrides counter)
+                    let target_idx = regex_idx.unwrap_or(idx_from_counter);
+
+                    // Check if we need to update Title or Index
+                    // Cases to update even if not modified:
+                    // 1. Regex applied/changed and provides new title/index.
+                    // 2. use_filename_as_title is TRUE and current title != filename.
+                    // 3. Index changed due to reordering.
+
+                    let mut should_update = false;
+                    let mut new_title = ch.title.clone();
+                    let mut new_idx = ch.chapter_index;
+
+                    // Check Index
+                    if new_idx != Some(target_idx) {
+                        new_idx = Some(target_idx);
+                        should_update = true;
+                    }
+
+                    // Check Title
+                    // If JSON chapters used, we don't touch title here (it's from JSON)
+                    // If Regex Title exists, use it.
+                    // If use_filename_as_title, use filename.
+                    if !use_json_chapters && ch.manual_corrected == 0 {
+                        let target_title = if let Some(rt) = regex_title.clone() {
+                            // Apply text cleaner to regex result as requested
+                            let (cleaned, _) = self
+                                .text_cleaner
+                                .clean_chapter_title(&rt, book.title.as_deref());
+                            cleaned
+                        } else if use_filename_as_title {
+                            let (cleaned, _) = self
+                                .text_cleaner
+                                .clean_chapter_title(&filename_str, book.title.as_deref());
+                            cleaned
+                        } else {
+                            // If not forced and no regex, keep existing title (audio or whatever it was)
+                            // Unless we want to re-run text cleaner?
+                            // Let's assume existing title is fine if no config change.
+                            ch.title.clone().unwrap_or_default()
+                        };
+
+                        if ch.title.as_deref() != Some(&target_title) {
+                            // Only update if we are forcing filename OR regex provided a title
+                            if use_filename_as_title || regex_title.is_some() {
+                                new_title = Some(target_title);
+                                should_update = true;
+                            }
+                        }
+                    }
+
+                    if should_update && ch.manual_corrected == 0 {
+                        let mut updated_ch = ch.clone();
+                        updated_ch.chapter_index = new_idx;
+                        updated_ch.title = new_title;
+                        self.chapter_repo.update(&updated_ch).await?;
+                        has_changes = true;
+                    }
+                    processed_chapter_ids.insert(ch.id.clone());
+                    continue;
+                }
+            }
+
+            // If we are here, either it's a new file OR it's modified.
+
+            // Calculate content-based hash
+            let file_hash = self.calculate_file_hash(file_path)?;
+
+            // Check if chapter exists by Hash (Global Deduplication)
+            // But we must be careful: if we already found it by Path, we know it's that chapter.
+            // If we found by Path, but Hash changed, it's an update.
+            // If we didn't find by Path, we check Hash to see if it's a move/rename.
+
+            if existing_chapter.is_none() {
+                if let Ok(Some(ch)) = self.chapter_repo.find_by_hash(&file_hash).await {
+                    // Found by hash (Rename/Move case)
+                    // But we are processing a specific book_id here.
+                    // If the found chapter belongs to another book, we might be stealing it?
+                    // Or it's a duplicate file (e.g. same intro file in multiple books).
+                    // If it's the same book, we treat it as the "existing chapter".
+                    if ch.book_id == book_id {
+                        existing_chapter = Some(ch);
+                    }
+                    // If different book, we create a new chapter record (duplicate content allowed across books)
+                }
+            }
+
+            // Extract metadata
+            // If using JSON chapters, calculate duration from JSON (end - start)
+            let duration = if use_json_chapters {
+                if let Some(ref chapters) = json_chapters {
+                    if index < chapters.len() {
+                        let chapter = &chapters[index];
+                        ((chapter.end - chapter.start).round() as i32).max(0)
+                    } else {
+                        // Fallback to file extraction
+                        let (_, _, _, _, _, d) =
+                            self.extract_chapter_metadata(file_path, cloud_mode).await;
+                        d
+                    }
+                } else {
+                    // Fallback to file extraction
+                    let (_, _, _, _, _, d) =
+                        self.extract_chapter_metadata(file_path, cloud_mode).await;
+                    d
+                }
+            } else {
+                // Extract from file
+                let (_, _, _, _, _, d) = self.extract_chapter_metadata(file_path, cloud_mode).await;
+                d
+            };
+
+            // Extract title (only if not using JSON chapters)
+            let extracted_title = if !use_json_chapters {
+                let (_, t, _, _, _, _) = self.extract_chapter_metadata(file_path, cloud_mode).await;
+                t
+            } else {
+                String::new()
+            };
+
+            // Determine initial title based on preference
+            let mut title = if use_json_chapters {
+                // Priority 1: metadata.json (if count matches)
+                if let Some(ref chapters) = json_chapters {
+                    if index < chapters.len() {
+                        chapters[index].title.clone()
+                    } else {
+                        // Should not happen if use_json_chapters is true
+                        filename_str.clone()
+                    }
+                } else {
+                    filename_str.clone()
+                }
+            } else if use_filename_as_title {
+                filename_str.clone()
+            } else if !extracted_title.is_empty() {
+                // Default: Audio Title
+                extracted_title
+            } else {
+                filename_str.clone()
+            };
+
+            // Regex Title Override (if not using JSON)
+            if !use_json_chapters {
+                if let Some(rt) = regex_title {
+                    title = rt;
+                }
+            }
+
+            // Apply text cleaner to title
+            let raw_title = title;
+
+            let (final_title, is_extra) = if use_json_chapters {
+                (raw_title, false)
+            } else {
+                self.text_cleaner
+                    .clean_chapter_title(&raw_title, book.title.as_deref())
+            };
+
+            // Calculate Index using counters
+            let counter_idx = if is_extra {
+                extra_counter += 1;
+                extra_counter
+            } else {
+                main_counter += 1;
+                main_counter
+            };
+
+            // Final Index
+            let chapter_idx = regex_idx.unwrap_or(counter_idx);
+
+            if let Some(mut ch) = existing_chapter {
+                // Update Existing
+                // Check Lock
+                if ch.manual_corrected == 0 {
+                    ch.title = Some(final_title);
+                    ch.chapter_index = Some(chapter_idx);
+                    ch.is_extra = if is_extra { 1 } else { 0 };
+                }
+                // Always update duration/path/hash if file changed
+                ch.path = file_path.to_string_lossy().to_string();
+                ch.duration = Some(duration);
+                ch.hash = Some(file_hash);
+                ch.book_id = book_id.to_string();
+
+                self.chapter_repo.update(&ch).await?;
+                has_changes = true;
+                processed_chapter_ids.insert(ch.id.clone());
+            } else {
+                // Create New
+                let chapter_id = Uuid::new_v4().to_string();
+                let chapter = Chapter {
+                    id: chapter_id.clone(),
+                    book_id: book_id.to_string(),
+                    title: Some(final_title),
+                    path: file_path.to_string_lossy().to_string(),
+                    duration: Some(duration),
+                    chapter_index: Some(chapter_idx),
+                    is_extra: if is_extra { 1 } else { 0 },
+                    hash: Some(file_hash),
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                    manual_corrected: 0,
+                };
+
+                match self.chapter_repo.create(&chapter).await {
+                    Ok(_) => {
+                        has_changes = true;
+                        processed_chapter_ids.insert(chapter_id);
+                    }
+                    Err(e) => warn!("Failed to create chapter: {}", e),
+                }
+            }
+        }
+
+        // Handle deleted chapters
+        for (path, ch) in chapter_map {
+            if !processed_chapter_ids.contains(&ch.id) {
+                // The chapter file is missing, remove from DB
+                if !path.exists() {
+                    info!("Removing missing chapter from DB: {:?}", path);
+                    if let Err(e) = self.chapter_repo.delete(&ch.id).await {
+                        warn!("Failed to delete missing chapter {}: {}", ch.id, e);
+                    } else {
+                        has_changes = true;
+                    }
+                }
+            }
+        }
+
+        Ok(has_changes)
+    }
+
+    fn calculate_file_hash(&self, path: &Path) -> Result<String> {
+        let mut file = std::fs::File::open(path).map_err(|e| TingError::IoError(e))?;
+        let metadata = file.metadata().map_err(|e| TingError::IoError(e))?;
+        let len = metadata.len();
+
+        let mut buffer = vec![0; 16384]; // 16KB
+        let n = file.read(&mut buffer).map_err(|e| TingError::IoError(e))?;
+
+        let mut hasher = Sha256::new();
+        hasher.update(&buffer[..n]);
+        hasher.update(len.to_le_bytes());
+        // Also include filename to distinguish different chapters with same content/size (unlikely but possible)
+        if let Some(name) = path.file_name() {
+            hasher.update(name.to_string_lossy().as_bytes());
+        }
+
+        Ok(format!("{:x}", hasher.finalize()))
+    }
+}

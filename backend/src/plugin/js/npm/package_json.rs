@@ -50,8 +50,8 @@ impl PackageJson {
     }
 
     pub fn write_to_file(&self, path: &Path) -> Result<()> {
-        let json = serde_json::to_string_pretty(self)
-            .context("Failed to serialize package.json")?;
+        let json =
+            serde_json::to_string_pretty(self).context("Failed to serialize package.json")?;
         std::fs::write(path, json)
             .with_context(|| format!("Failed to write package.json to {}", path.display()))?;
         info!("Generated package.json at: {}", path.display());
@@ -61,8 +61,8 @@ impl PackageJson {
     pub fn read_from_file(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read package.json from {}", path.display()))?;
-        let package_json: PackageJson = serde_json::from_str(&content)
-            .context("Failed to parse package.json")?;
+        let package_json: PackageJson =
+            serde_json::from_str(&content).context("Failed to parse package.json")?;
         Ok(package_json)
     }
 }
@@ -79,7 +79,12 @@ pub fn generate_package_json(
 ) -> Result<PathBuf> {
     info!("Generating package.json for plugin: {}", plugin_name);
     let package_json = PackageJson::from_plugin_metadata(
-        plugin_name, plugin_version, description, author, license, npm_dependencies,
+        plugin_name,
+        plugin_version,
+        description,
+        author,
+        license,
+        npm_dependencies,
     );
     let path = plugin_dir.join("package.json");
     package_json.write_to_file(&path)?;

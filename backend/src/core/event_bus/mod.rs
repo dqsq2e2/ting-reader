@@ -86,9 +86,8 @@ pub enum EventSource {
 }
 
 /// Event handler function type
-pub type EventHandler = Arc<
-    dyn Fn(Event) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + Sync,
->;
+pub type EventHandler =
+    Arc<dyn Fn(Event) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + Sync>;
 
 /// Subscriber information
 #[derive(Clone)]
@@ -136,11 +135,7 @@ impl EventBus {
     /// Subscribe to an event type with a handler
     ///
     /// Returns a subscription ID that can be used to unsubscribe
-    pub async fn subscribe(
-        &self,
-        event_type: EventType,
-        handler: EventHandler,
-    ) -> SubscriptionId {
+    pub async fn subscribe(&self, event_type: EventType, handler: EventHandler) -> SubscriptionId {
         let subscription_id = Uuid::new_v4().to_string();
         let subscriber = Subscriber {
             id: subscription_id.clone(),
@@ -469,4 +464,3 @@ impl Default for EventFilter {
         Self::new()
     }
 }
-

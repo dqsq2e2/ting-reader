@@ -1,5 +1,5 @@
-use crate::plugin::types::PluginEventBus;
 use crate::core::error::Result;
+use crate::plugin::types::PluginEventBus;
 use serde_json::Value;
 
 pub struct DefaultPluginEventBus;
@@ -15,7 +15,11 @@ impl PluginEventBus for DefaultPluginEventBus {
         // TODO: Implement event bus
         Ok(())
     }
-    fn subscribe(&self, _event_type: &str, _handler: Box<dyn Fn(Value) + Send + Sync>) -> Result<String> {
+    fn subscribe(
+        &self,
+        _event_type: &str,
+        _handler: Box<dyn Fn(Value) + Send + Sync>,
+    ) -> Result<String> {
         Ok("subscription_id".to_string())
     }
     fn unsubscribe(&self, _subscription_id: &str) -> Result<()> {

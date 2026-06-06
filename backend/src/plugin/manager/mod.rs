@@ -1,23 +1,26 @@
 //! Plugin manager - core orchestration for the plugin system
 
-pub mod enums;
 pub mod discovery;
-pub mod lifecycle;
 pub mod dispatch;
+pub mod enums;
+pub mod lifecycle;
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{RwLock, Semaphore};
-use serde::{Serialize, Deserialize};
 use tracing::info;
 
 use crate::core::error::{Result, TingError};
 use crate::plugin::config::PluginConfigManager;
-use crate::plugin::types::{Plugin, PluginMetadata, PluginId, PluginType, PluginState, PluginContext, PluginDependency};
+use crate::plugin::types::{
+    Plugin, PluginContext, PluginDependency, PluginId, PluginMetadata, PluginState, PluginType,
+    ScraperCapabilities,
+};
 use crate::plugin::wasm::WasmRuntime;
 
-pub use enums::{ScraperMethod, FormatMethod, UtilityMethod};
+pub use enums::{FormatMethod, ScraperMethod, UtilityMethod};
 
 /// Configuration for the plugin manager
 #[derive(Debug, Clone)]
@@ -81,7 +84,9 @@ pub struct PluginInfo {
     #[serde(default)]
     pub license: Option<String>,
     #[serde(default)]
-    pub homepage: Option<String>,
+    pub repo: Option<String>,
+    #[serde(default)]
+    pub scraper: Option<ScraperCapabilities>,
 }
 
 impl PluginInfo {
@@ -104,11 +109,16 @@ impl PluginInfo {
             config_schema: metadata.config_schema.clone(),
             permissions: metadata.permissions.iter().map(|p| p.to_string()).collect(),
             license: metadata.license.clone(),
-            homepage: metadata.homepage.clone(),
+            repo: metadata.repo.clone(),
+            scraper: metadata.scraper.clone(),
         }
     }
 
-    pub fn from_metadata_with_error(metadata: &PluginMetadata, state: &PluginState, error: String) -> Self {
+    pub fn from_metadata_with_error(
+        metadata: &PluginMetadata,
+        state: &PluginState,
+        error: String,
+    ) -> Self {
         let mut info = Self::from_metadata(metadata, state);
         info.error = Some(error);
         info
@@ -129,13 +139,21 @@ impl FailedPlugin {
 
 #[async_trait::async_trait]
 impl Plugin for FailedPlugin {
-    fn metadata(&self) -> &PluginMetadata { &self.metadata }
+    fn metadata(&self) -> &PluginMetadata {
+        &self.metadata
+    }
     async fn initialize(&self, _context: &PluginContext) -> Result<()> {
         Err(TingError::PluginLoadError(self.error.clone()))
     }
-    async fn shutdown(&self) -> Result<()> { Ok(()) }
-    fn plugin_type(&self) -> PluginType { self.metadata.plugin_type }
-    fn as_any(&self) -> &dyn std::any::Any { self }
+    async fn shutdown(&self) -> Result<()> {
+        Ok(())
+    }
+    fn plugin_type(&self) -> PluginType {
+        self.metadata.plugin_type
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Manager for the plugin system
@@ -145,7 +163,8 @@ pub struct PluginManager {
     pub(crate) metadata_cache: Arc<RwLock<HashMap<PluginId, PathBuf>>>,
     pub(crate) wasm_runtime: Arc<WasmRuntime>,
     pub(crate) http_client: reqwest::Client,
-    pub(crate) _event_subscribers: Arc<RwLock<Vec<Box<dyn Fn(crate::plugin::types::PluginStateEvent) + Send + Sync>>>>,
+    pub(crate) _event_subscribers:
+        Arc<RwLock<Vec<Box<dyn Fn(crate::plugin::types::PluginStateEvent) + Send + Sync>>>>,
     pub(crate) load_semaphore: Arc<Semaphore>,
     pub(crate) store_cache: Arc<crate::plugin::store::PluginCache>,
     pub(crate) config_manager: std::sync::RwLock<Option<Arc<PluginConfigManager>>>,
@@ -192,22 +211,28 @@ impl PluginManager {
 
         tokio::task::spawn_blocking(|| {
             crate::core::utils::release_memory();
-        }).await.unwrap_or_else(|e| tracing::warn!("释放内存失败: {}", e));
+        })
+        .await
+        .unwrap_or_else(|e| tracing::warn!("释放内存失败: {}", e));
     }
 
     /// List all installed plugins
     pub async fn list_plugins(&self) -> Vec<PluginInfo> {
         let registry = self.registry.read().await;
-        registry.values().map(|entry| {
-            if entry.state == PluginState::Failed {
-                PluginInfo::from_metadata_with_error(
-                    &entry.metadata, &entry.state,
-                    entry.load_error.clone().unwrap_or_default()
-                )
-            } else {
-                PluginInfo::from_metadata(&entry.metadata, &entry.state)
-            }
-        }).collect()
+        registry
+            .values()
+            .map(|entry| {
+                if entry.state == PluginState::Failed {
+                    PluginInfo::from_metadata_with_error(
+                        &entry.metadata,
+                        &entry.state,
+                        entry.load_error.clone().unwrap_or_default(),
+                    )
+                } else {
+                    PluginInfo::from_metadata(&entry.metadata, &entry.state)
+                }
+            })
+            .collect()
     }
 
     /// Get the list of plugins from the store
@@ -217,19 +242,23 @@ impl PluginManager {
 
     pub fn get_plugin(&self, id: &PluginId) -> Result<PluginMetadata> {
         let registry = futures::executor::block_on(self.registry.read());
-        let entry = registry.get(id).ok_or_else(|| TingError::PluginNotFound(id.clone()))?;
+        let entry = registry
+            .get(id)
+            .ok_or_else(|| TingError::PluginNotFound(id.clone()))?;
         Ok(entry.metadata.clone())
     }
 
     pub async fn find_plugins_by_type(&self, plugin_type: PluginType) -> Vec<PluginInfo> {
         let registry = self.registry.read().await;
-        registry.values()
+        registry
+            .values()
             .filter(|e| e.metadata.plugin_type == plugin_type)
             .map(|entry| {
                 if entry.state == PluginState::Failed {
                     PluginInfo::from_metadata_with_error(
-                        &entry.metadata, &entry.state,
-                        entry.load_error.clone().unwrap_or_default()
+                        &entry.metadata,
+                        &entry.state,
+                        entry.load_error.clone().unwrap_or_default(),
                     )
                 } else {
                     PluginInfo::from_metadata(&entry.metadata, &entry.state)
@@ -239,7 +268,8 @@ impl PluginManager {
     }
 
     pub fn is_system_supported_format(extension: &str) -> bool {
-        matches!(extension.to_lowercase().as_str(),
+        matches!(
+            extension.to_lowercase().as_str(),
             "mp3" | "m4a" | "wav" | "ogg" | "flac" | "aac" | "wma" | "opus" | "m4b"
         )
     }
@@ -253,18 +283,22 @@ impl PluginManager {
 
         let registry = self.registry.read().await;
 
-        registry.values()
+        registry
+            .values()
             .filter(|e| e.metadata.plugin_type == PluginType::Format)
             .find(|e| {
-                e.metadata.supported_extensions.as_ref()
+                e.metadata
+                    .supported_extensions
+                    .as_ref()
                     .map(|exts| exts.contains(&extension))
                     .unwrap_or(false)
             })
             .map(|entry| {
                 if entry.state == PluginState::Failed {
                     PluginInfo::from_metadata_with_error(
-                        &entry.metadata, &entry.state,
-                        entry.load_error.clone().unwrap_or_default()
+                        &entry.metadata,
+                        &entry.state,
+                        entry.load_error.clone().unwrap_or_default(),
                     )
                 } else {
                     PluginInfo::from_metadata(&entry.metadata, &entry.state)

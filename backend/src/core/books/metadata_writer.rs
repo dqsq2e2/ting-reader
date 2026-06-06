@@ -1,6 +1,6 @@
+use crate::core::error::{Result, TingError};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use crate::core::error::{Result, TingError};
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct AudiobookshelfChapter {
@@ -57,15 +57,20 @@ impl AudiobookshelfMetadata {
         extended: ExtendedMetadata,
         series: Vec<String>,
     ) -> Self {
-        let tags_vec: Vec<String> = book.tags.clone()
-            .map(|s| s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect())
+        let tags_vec: Vec<String> = book
+            .tags
+            .clone()
+            .map(|s| {
+                s.split(',')
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty())
+                    .collect()
+            })
             .unwrap_or_default();
-        
+
         // Use book.year if available, otherwise fall back to extended.published_year
-        let published_year = book.year
-            .map(|y| y.to_string())
-            .or(extended.published_year);
-            
+        let published_year = book.year.map(|y| y.to_string()).or(extended.published_year);
+
         Self {
             tags: tags_vec,
             chapters,
@@ -74,7 +79,11 @@ impl AudiobookshelfMetadata {
             authors: book.author.clone().map(|s| vec![s]).unwrap_or_default(),
             narrators: book.narrator.clone().map(|s| vec![s]).unwrap_or_default(),
             series,
-            genres: book.genre.clone().map(|s| s.split(',').map(|t| t.trim().to_string()).collect()).unwrap_or_default(),
+            genres: book
+                .genre
+                .clone()
+                .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
+                .unwrap_or_default(),
             published_year,
             published_date: extended.published_date,
             publisher: extended.publisher,
@@ -91,7 +100,8 @@ impl AudiobookshelfMetadata {
 pub fn write_metadata_json(dir: &Path, metadata: &AudiobookshelfMetadata) -> Result<()> {
     let path = dir.join("metadata.json");
     let file = std::fs::File::create(&path).map_err(|e| TingError::IoError(e))?;
-    serde_json::to_writer_pretty(file, metadata).map_err(|e| TingError::SerializationError(e.to_string()))?;
+    serde_json::to_writer_pretty(file, metadata)
+        .map_err(|e| TingError::SerializationError(e.to_string()))?;
     tracing::info!(target: "audit::metadata", "成功写入元数据 (目录: {})", dir.display());
     Ok(())
 }
@@ -102,6 +112,7 @@ pub fn read_metadata_json(dir: &Path) -> Result<Option<AudiobookshelfMetadata>> 
         return Ok(None);
     }
     let file = std::fs::File::open(&path).map_err(|e| TingError::IoError(e))?;
-    let metadata: AudiobookshelfMetadata = serde_json::from_reader(file).map_err(|e| TingError::DeserializationError(e.to_string()))?;
+    let metadata: AudiobookshelfMetadata = serde_json::from_reader(file)
+        .map_err(|e| TingError::DeserializationError(e.to_string()))?;
     Ok(Some(metadata))
 }

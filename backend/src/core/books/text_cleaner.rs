@@ -1,0 +1,351 @@
+//! Text cleaning and normalization module
+//!
+//! This module provides built-in text cleaning functionality for chapter titles
+//! and filenames. It includes:
+//! - Regex-based cleaning rules for special characters
+//! - Chapter number normalization (Chinese and English formats)
+//! - Advertisement text removal
+//! - Path safety checks (prevent path traversal)
+//! - Filename length limits and special character filtering
+//!
+//! This is a core system feature, not implemented as a plugin.
+
+use crate::core::error::{Result, TingError};
+use regex::Regex;
+
+/// Text cleaner for chapter titles and filenames
+pub struct TextCleaner {
+    builtin_rules: Vec<CleaningRule>,
+    plugin_rules: Vec<CleaningRule>,
+    config: CleanerConfig,
+}
+
+/// A single cleaning rule with regex pattern and replacement
+#[derive(Debug, Clone)]
+pub struct CleaningRule {
+    pub name: String,
+    pub priority: u32,
+    pub pattern: Regex,
+    pub replacement: String,
+}
+
+/// Result of applying cleaning rules
+#[derive(Debug, Clone)]
+pub struct CleaningResult {
+    pub original: String,
+    pub cleaned: String,
+    pub applied_rules: Vec<String>,
+}
+
+/// Configuration for the text cleaner
+#[derive(Debug, Clone)]
+pub struct CleanerConfig {
+    pub max_filename_length: usize,
+    pub allowed_chars: String,
+    pub custom_rules: Vec<CleaningRule>,
+}
+
+impl Default for CleanerConfig {
+    fn default() -> Self {
+        Self {
+            max_filename_length: 255,
+            allowed_chars: String::from(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-. ",
+            ),
+            custom_rules: Vec::new(),
+        }
+    }
+}
+
+impl TextCleaner {
+    /// Create a new text cleaner with the given configuration
+    pub fn new(config: CleanerConfig) -> Self {
+        let builtin_rules = Self::create_builtin_rules();
+
+        Self {
+            builtin_rules,
+            plugin_rules: Vec::new(),
+            config,
+        }
+    }
+
+    /// Create built-in cleaning rules
+    fn create_builtin_rules() -> Vec<CleaningRule> {
+        vec![
+            // Rule 1: Remove special characters that are invalid in filenames
+            CleaningRule {
+                name: "remove_special_chars".to_string(),
+                priority: 100,
+                pattern: Regex::new(r#"[<>:"/\\|?*]"#).unwrap(),
+                replacement: "_".to_string(),
+            },
+            // Rule 2a: Normalize Chinese episode numbers to Episode format
+            // CleaningRule {
+            //     name: "normalize_chinese_episode".to_string(),
+            //     priority: 90,
+            //     pattern: Regex::new(r"第(\d+)集").unwrap(),
+            //     replacement: "Episode $1".to_string(),
+            // },
+            // Rule 2b: Remove pipe-enclosed text (e.g. |Title|)
+            CleaningRule {
+                name: "remove_pipe_enclosed".to_string(),
+                priority: 101, // Must run before special chars removal
+                pattern: Regex::new(r"\|.*?\|").unwrap(),
+                replacement: "".to_string(),
+            },
+            // Rule 2: Normalize Chinese chapter numbers to English format
+            // CleaningRule {
+            //     name: "normalize_chinese_chapter".to_string(),
+            //     priority: 90,
+            //     pattern: Regex::new(r"第(\d+)章").unwrap(),
+            //     replacement: "Chapter $1".to_string(),
+            // },
+            // Rule 3: Normalize English chapter numbers (case-insensitive)
+            // CleaningRule {
+            //     name: "normalize_english_chapter".to_string(),
+            //     priority: 89,
+            //     pattern: Regex::new(r"(?i)chapter\s+(\d+)").unwrap(),
+            //     replacement: "Chapter $1".to_string(),
+            // },
+            // Rule 4: Remove leading zeros from chapter numbers
+            CleaningRule {
+                name: "remove_leading_zeros".to_string(),
+                priority: 88,
+                pattern: Regex::new(r"^0+(\d+)").unwrap(),
+                replacement: "$1".to_string(),
+            },
+            // Rule 5: Remove "喜马拉雅" advertisement
+            CleaningRule {
+                name: "remove_ximalaya_ad".to_string(),
+                priority: 80,
+                pattern: Regex::new(r"喜马拉雅").unwrap(),
+                replacement: "".to_string(),
+            },
+            // Rule 6: Remove "VIP专享" advertisement
+            CleaningRule {
+                name: "remove_vip_ad".to_string(),
+                priority: 79,
+                pattern: Regex::new(r"VIP专享").unwrap(),
+                replacement: "".to_string(),
+            },
+            // Rule 7: Remove "付费内容" advertisement
+            CleaningRule {
+                name: "remove_paid_content_ad".to_string(),
+                priority: 78,
+                pattern: Regex::new(r"付费内容").unwrap(),
+                replacement: "".to_string(),
+            },
+            // Rule 8: Remove bracketed advertisement text
+            CleaningRule {
+                name: "remove_bracketed_ads".to_string(),
+                priority: 77,
+                pattern: Regex::new(r"\[.*?广告.*?\]").unwrap(),
+                replacement: "".to_string(),
+            },
+            // Rule 9: Remove "Extra" markers (番外, etc.)
+            // CleaningRule {
+            //     name: "remove_extra_markers".to_string(),
+            //     priority: 76,
+            //     pattern: Regex::new(r"(?i)(番外|花絮|特典|SP|Extra)[：:\-\s]*").unwrap(),
+            //     replacement: "".to_string(),
+            // },
+            // Rule 10: Remove common promotional suffixes and advertisements
+            CleaningRule {
+                name: "remove_promo_keywords".to_string(),
+                priority: 75,
+                // '请?订阅', '求订阅', '转发', '五星', '好评', '关注', '微信', '群', '更多', '加我', '联系', '点击', '搜新书', '新书', '推荐', '上架', '完本'
+                pattern: Regex::new(r"[（\(\[\{【](?:(?:请|求)?订阅|转发|五星|好评|关注|微信|群|更多|加我|联系|点击|搜新书|新书|推荐|上架|完本).*?[）\)\]\}】]").unwrap(),
+                replacement: "".to_string(),
+            },
+            // Rule 11: Remove common suffixes: "-ZmAudio"
+            CleaningRule {
+                name: "remove_zmaudio_suffix".to_string(),
+                priority: 74,
+                pattern: Regex::new(r"(?i)[-_]ZmAudio$").unwrap(),
+                replacement: "".to_string(),
+            },
+            // Rule 12: Trim whitespace
+            CleaningRule {
+                name: "trim_whitespace".to_string(),
+                priority: 10,
+                pattern: Regex::new(r"^\s+|\s+$").unwrap(),
+                replacement: "".to_string(),
+            },
+            // Rule 13: Collapse multiple spaces
+            CleaningRule {
+                name: "collapse_spaces".to_string(),
+                priority: 9,
+                pattern: Regex::new(r"\s+").unwrap(),
+                replacement: " ".to_string(),
+            },
+        ]
+    }
+
+    /// Extract chapter number from title
+    pub fn extract_chapter_number(&self, title: &str) -> Option<i32> {
+        // Priority 1: "第xxx集" or "第xxx章"
+        let re1 = Regex::new(r"第\s*(\d+)\s*[集回章话]").unwrap();
+        if let Some(caps) = re1.captures(title) {
+            if let Ok(num) = caps[1].parse::<i32>() {
+                return Some(num);
+            }
+        }
+
+        // Priority 2: "xxx集" or "xxx章"
+        let re2 = Regex::new(r"(\d+)\s*[集回章话]").unwrap();
+        if let Some(caps) = re2.captures(title) {
+            if let Ok(num) = caps[1].parse::<i32>() {
+                return Some(num);
+            }
+        }
+
+        // Priority 3: Just numbers, but be careful not to pick up dates or other numbers
+        // This is risky, so maybe only if it looks like a chapter number (at start or separated)
+        // For now, let's stick to explicit markers or if it's the only number.
+
+        None
+    }
+
+    /// Clean a chapter title
+    /// Returns: (cleaned_title, is_extra)
+    pub fn clean_chapter_title(&self, title: &str, _book_title: Option<&str>) -> (String, bool) {
+        // Remove extension if present
+        let title_no_ext = if let Some(idx) = title.rfind('.') {
+            // Check if the part after dot looks like an extension (alphanumeric, length < 5)
+            let ext = &title[idx + 1..];
+            if ext.len() > 0 && ext.len() <= 5 && ext.chars().all(|c| c.is_ascii_alphanumeric()) {
+                &title[..idx]
+            } else {
+                title
+            }
+        } else {
+            title
+        };
+
+        // Detect "Extra" markers
+        // Patterns: 番外, 花絮, 特典, SP, Extra
+        let is_extra = Regex::new(r"(?i)番外|花絮|特典|SP|Extra")
+            .unwrap()
+            .is_match(title_no_ext);
+
+        // Apply remaining builtin rules (like special chars removal)
+        // But skip the ones we already handled or that might conflict
+        let cleaned = self.apply_all_rules(title_no_ext).cleaned;
+
+        (cleaned, is_extra)
+    }
+
+    /// Clean a filename
+    pub fn clean_filename(&self, filename: &str) -> String {
+        let mut cleaned = self.apply_all_rules(filename).cleaned;
+
+        // Apply filename length limit
+        if cleaned.len() > self.config.max_filename_length {
+            cleaned.truncate(self.config.max_filename_length);
+        }
+
+        cleaned
+    }
+
+    /// Normalize chapter number format
+    pub fn normalize_chapter_number(&self, text: &str) -> String {
+        // Apply chapter normalization rules
+        let mut result = text.to_string();
+
+        for rule in &self.builtin_rules {
+            if rule.name.contains("chapter") || rule.name.contains("leading_zeros") {
+                result = rule
+                    .pattern
+                    .replace_all(&result, rule.replacement.as_str())
+                    .to_string();
+            }
+        }
+
+        result
+    }
+
+    /// Remove advertisement and irrelevant text
+    pub fn remove_ads(&self, text: &str) -> String {
+        let mut result = text.to_string();
+
+        for rule in &self.builtin_rules {
+            if rule.name.contains("ad") {
+                result = rule
+                    .pattern
+                    .replace_all(&result, rule.replacement.as_str())
+                    .to_string();
+            }
+        }
+
+        result
+    }
+
+    /// Validate path for safety (prevent path traversal)
+    pub fn validate_path(&self, path: &str) -> Result<()> {
+        // Check for path traversal attempts
+        if path.contains("..") {
+            return Err(TingError::SecurityViolation(
+                "Path traversal detected: '..' is not allowed".to_string(),
+            ));
+        }
+
+        // Check for absolute paths (Unix)
+        if path.starts_with('/') {
+            return Err(TingError::SecurityViolation(
+                "Absolute paths are not allowed".to_string(),
+            ));
+        }
+
+        // Check for absolute paths (Windows)
+        if path.len() >= 2 && path.chars().nth(1) == Some(':') {
+            let first_char = path.chars().next().unwrap();
+            if first_char.is_ascii_alphabetic() {
+                return Err(TingError::SecurityViolation(
+                    "Absolute paths are not allowed".to_string(),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Register a plugin cleaning rule
+    pub fn register_plugin_rule(&mut self, rule: CleaningRule) {
+        self.plugin_rules.push(rule);
+        // Sort by priority (higher priority first)
+        self.plugin_rules
+            .sort_by(|a, b| b.priority.cmp(&a.priority));
+    }
+
+    /// Apply all cleaning rules (builtin first, then plugin rules)
+    pub fn apply_all_rules(&self, text: &str) -> CleaningResult {
+        let mut result = text.to_string();
+        let mut applied_rules = Vec::new();
+
+        // Combine builtin, plugin and custom rules, sorted by priority
+        let mut all_rules: Vec<&CleaningRule> = self.builtin_rules.iter().collect();
+        all_rules.extend(self.plugin_rules.iter());
+        all_rules.extend(self.config.custom_rules.iter());
+        all_rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+
+        // Apply each rule
+        for rule in all_rules {
+            let before = result.clone();
+            result = rule
+                .pattern
+                .replace_all(&result, rule.replacement.as_str())
+                .to_string();
+
+            // Track which rules were applied
+            if before != result {
+                applied_rules.push(rule.name.clone());
+            }
+        }
+
+        CleaningResult {
+            original: text.to_string(),
+            cleaned: result,
+            applied_rules,
+        }
+    }
+}

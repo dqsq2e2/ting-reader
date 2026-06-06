@@ -33,20 +33,19 @@ impl DatabaseManager {
         }
 
         // Create connection manager
-        let manager = SqliteConnectionManager::file(db_path)
-            .with_init(move |conn| {
-                // Enable foreign keys
-                conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-                // Set busy timeout
-                conn.busy_timeout(busy_timeout)?;
-                // Enable WAL mode for better concurrency
-                conn.execute_batch("PRAGMA journal_mode = WAL;")?;
-                // Optimize for concurrent access
-                conn.execute_batch("PRAGMA synchronous = NORMAL;")?;
-                conn.execute_batch("PRAGMA cache_size = -64000;")?; // 64MB cache
-                conn.execute_batch("PRAGMA temp_store = MEMORY;")?;
-                Ok(())
-            });
+        let manager = SqliteConnectionManager::file(db_path).with_init(move |conn| {
+            // Enable foreign keys
+            conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+            // Set busy timeout
+            conn.busy_timeout(busy_timeout)?;
+            // Enable WAL mode for better concurrency
+            conn.execute_batch("PRAGMA journal_mode = WAL;")?;
+            // Optimize for concurrent access
+            conn.execute_batch("PRAGMA synchronous = NORMAL;")?;
+            conn.execute_batch("PRAGMA cache_size = -64000;")?; // 64MB cache
+            conn.execute_batch("PRAGMA temp_store = MEMORY;")?;
+            Ok(())
+        });
 
         // Build connection pool
         let pool = Pool::builder()
@@ -69,12 +68,11 @@ impl DatabaseManager {
     /// Create a new DatabaseManager with an in-memory database for testing
     pub fn new_in_memory() -> Result<Self> {
         // Create connection manager for in-memory database
-        let manager = SqliteConnectionManager::memory()
-            .with_init(|conn| {
-                // Enable foreign keys
-                conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-                Ok(())
-            });
+        let manager = SqliteConnectionManager::memory().with_init(|conn| {
+            // Enable foreign keys
+            conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+            Ok(())
+        });
 
         // Build connection pool
         let pool = Pool::builder()
@@ -100,7 +98,7 @@ impl DatabaseManager {
             tracing::warn!("获取数据库连接失败: {}", e);
             TingError::DatabaseError(rusqlite::Error::SqliteFailure(
                 rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                Some("数据库连接池繁忙，请稍后重试".to_string())
+                Some("数据库连接池繁忙，请稍后重试".to_string()),
             ))
         })
     }
@@ -115,13 +113,13 @@ impl DatabaseManager {
         T: Send + 'static,
     {
         let pool = self.pool.clone();
-        
+
         task::spawn_blocking(move || {
             let conn = pool.get().map_err(|e| {
                 tracing::warn!("获取数据库连接失败: {}", e);
                 TingError::DatabaseError(rusqlite::Error::SqliteFailure(
                     rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                    Some("数据库连接池繁忙，请稍后重试".to_string())
+                    Some("数据库连接池繁忙，请稍后重试".to_string()),
                 ))
             })?;
             f(&conn)
@@ -140,20 +138,20 @@ impl DatabaseManager {
         T: Send + 'static,
     {
         let pool = self.pool.clone();
-        
+
         task::spawn_blocking(move || {
             let mut conn = pool.get().map_err(|e| {
                 tracing::warn!("获取数据库连接失败: {}", e);
                 TingError::DatabaseError(rusqlite::Error::SqliteFailure(
                     rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                    Some("数据库连接池繁忙，请稍后重试".to_string())
+                    Some("数据库连接池繁忙，请稍后重试".to_string()),
                 ))
             })?;
-            
+
             let tx = conn.transaction().map_err(TingError::DatabaseError)?;
             let result = f(&tx)?;
             tx.commit().map_err(TingError::DatabaseError)?;
-            
+
             Ok(result)
         })
         .await
@@ -165,7 +163,7 @@ impl DatabaseManager {
         let mut conn = self.get_connection()?;
         crate::db::migrations::run_migrations(&mut conn)
     }
-    
+
     /// Execute database migrations with automatic backup
     ///
     /// This creates a backup before applying migrations.
@@ -180,16 +178,13 @@ impl DatabaseManager {
     pub fn backup(&self, backup_path: &Path) -> Result<()> {
         // Ensure parent directory exists
         if let Some(parent) = backup_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                TingError::IoError(e)
-            })?;
+            std::fs::create_dir_all(parent).map_err(|e| TingError::IoError(e))?;
         }
 
         let src_conn = self.get_connection()?;
-        
+
         // Open destination database
-        let mut dst_conn = Connection::open(backup_path)
-            .map_err(TingError::DatabaseError)?;
+        let mut dst_conn = Connection::open(backup_path).map_err(TingError::DatabaseError)?;
 
         // Perform backup
         let backup = rusqlite::backup::Backup::new(&src_conn, &mut dst_conn)
@@ -205,26 +200,23 @@ impl DatabaseManager {
     /// Backup the database asynchronously
     pub async fn backup_async(&self, backup_path: PathBuf) -> Result<()> {
         let pool = self.pool.clone();
-        
+
         task::spawn_blocking(move || {
             // Ensure parent directory exists
             if let Some(parent) = backup_path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    TingError::IoError(e)
-                })?;
+                std::fs::create_dir_all(parent).map_err(|e| TingError::IoError(e))?;
             }
 
             let src_conn = pool.get().map_err(|e| {
                 tracing::warn!("获取数据库连接失败: {}", e);
                 TingError::DatabaseError(rusqlite::Error::SqliteFailure(
                     rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                    Some("数据库连接池繁忙，请稍后重试".to_string())
+                    Some("数据库连接池繁忙，请稍后重试".to_string()),
                 ))
             })?;
-            
+
             // Open destination database
-            let mut dst_conn = Connection::open(&backup_path)
-                .map_err(TingError::DatabaseError)?;
+            let mut dst_conn = Connection::open(&backup_path).map_err(TingError::DatabaseError)?;
 
             // Perform backup
             let backup = rusqlite::backup::Backup::new(&src_conn, &mut dst_conn)
@@ -249,7 +241,7 @@ impl DatabaseManager {
     pub fn pool_size(&self) -> u32 {
         self.pool.max_size()
     }
-    
+
     /// Get a reference to the connection pool
     pub fn get_pool(&self) -> Arc<Pool<SqliteConnectionManager>> {
         Arc::new(self.pool.clone())
@@ -303,99 +295,116 @@ mod tests {
     #[tokio::test]
     async fn test_execute_async() {
         let (manager, _temp_dir) = create_test_db();
-        
-        let result = manager.execute(|conn| {
-            conn.execute(
-                "CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)",
-                [],
-            ).map_err(TingError::DatabaseError)?;
-            Ok(())
-        }).await;
-        
+
+        let result = manager
+            .execute(|conn| {
+                conn.execute("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)", [])
+                    .map_err(TingError::DatabaseError)?;
+                Ok(())
+            })
+            .await;
+
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_transaction_commit() {
         let (manager, _temp_dir) = create_test_db();
-        
+
         // Create table
-        manager.execute(|conn| {
-            conn.execute(
-                "CREATE TABLE test (id INTEGER PRIMARY KEY, value INTEGER)",
-                [],
-            ).map_err(TingError::DatabaseError)?;
-            Ok(())
-        }).await.unwrap();
-        
-        // Insert in transaction
-        let result = manager.transaction(|tx| {
-            tx.execute("INSERT INTO test (value) VALUES (?)", [42])
+        manager
+            .execute(|conn| {
+                conn.execute(
+                    "CREATE TABLE test (id INTEGER PRIMARY KEY, value INTEGER)",
+                    [],
+                )
                 .map_err(TingError::DatabaseError)?;
-            Ok(())
-        }).await;
-        
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        // Insert in transaction
+        let result = manager
+            .transaction(|tx| {
+                tx.execute("INSERT INTO test (value) VALUES (?)", [42])
+                    .map_err(TingError::DatabaseError)?;
+                Ok(())
+            })
+            .await;
+
         assert!(result.is_ok());
-        
+
         // Verify data was committed
-        let count: i64 = manager.execute(|conn| {
-            conn.query_row("SELECT COUNT(*) FROM test", [], |row| row.get(0))
-                .map_err(TingError::DatabaseError)
-        }).await.unwrap();
-        
+        let count: i64 = manager
+            .execute(|conn| {
+                conn.query_row("SELECT COUNT(*) FROM test", [], |row| row.get(0))
+                    .map_err(TingError::DatabaseError)
+            })
+            .await
+            .unwrap();
+
         assert_eq!(count, 1);
     }
 
     #[tokio::test]
     async fn test_transaction_rollback() {
         let (manager, _temp_dir) = create_test_db();
-        
+
         // Create table
-        manager.execute(|conn| {
-            conn.execute(
-                "CREATE TABLE test (id INTEGER PRIMARY KEY, value INTEGER)",
-                [],
-            ).map_err(TingError::DatabaseError)?;
-            Ok(())
-        }).await.unwrap();
-        
-        // Insert in transaction that fails
-        let result: Result<()> = manager.transaction(|tx| {
-            tx.execute("INSERT INTO test (value) VALUES (?)", [42])
+        manager
+            .execute(|conn| {
+                conn.execute(
+                    "CREATE TABLE test (id INTEGER PRIMARY KEY, value INTEGER)",
+                    [],
+                )
                 .map_err(TingError::DatabaseError)?;
-            // Simulate error
-            Err(TingError::InvalidRequest("test error".into()))
-        }).await;
-        
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        // Insert in transaction that fails
+        let result: Result<()> = manager
+            .transaction(|tx| {
+                tx.execute("INSERT INTO test (value) VALUES (?)", [42])
+                    .map_err(TingError::DatabaseError)?;
+                // Simulate error
+                Err(TingError::InvalidRequest("test error".into()))
+            })
+            .await;
+
         assert!(result.is_err());
-        
+
         // Verify data was rolled back
-        let count: i64 = manager.execute(|conn| {
-            conn.query_row("SELECT COUNT(*) FROM test", [], |row| row.get(0))
-                .map_err(TingError::DatabaseError)
-        }).await.unwrap();
-        
+        let count: i64 = manager
+            .execute(|conn| {
+                conn.query_row("SELECT COUNT(*) FROM test", [], |row| row.get(0))
+                    .map_err(TingError::DatabaseError)
+            })
+            .await
+            .unwrap();
+
         assert_eq!(count, 0);
     }
 
     #[test]
     fn test_backup() {
         let (manager, temp_dir) = create_test_db();
-        
+
         // Create and populate table
         let conn = manager.get_connection().unwrap();
-        conn.execute(
-            "CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)",
-            [],
-        ).unwrap();
-        conn.execute("INSERT INTO test (name) VALUES ('test')", []).unwrap();
+        conn.execute("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)", [])
+            .unwrap();
+        conn.execute("INSERT INTO test (name) VALUES ('test')", [])
+            .unwrap();
         drop(conn);
-        
+
         // Backup database
         let backup_path = temp_dir.path().join("backup.db");
         let result = manager.backup(&backup_path);
         assert!(result.is_ok());
-        
+
         // Verify backup exists and contains data
         let backup_conn = Connection::open(&backup_path).unwrap();
         let count: i64 = backup_conn
@@ -407,23 +416,24 @@ mod tests {
     #[tokio::test]
     async fn test_backup_async() {
         let (manager, temp_dir) = create_test_db();
-        
+
         // Create and populate table
-        manager.execute(|conn| {
-            conn.execute(
-                "CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)",
-                [],
-            ).map_err(TingError::DatabaseError)?;
-            conn.execute("INSERT INTO test (name) VALUES ('test')", [])
-                .map_err(TingError::DatabaseError)?;
-            Ok(())
-        }).await.unwrap();
-        
+        manager
+            .execute(|conn| {
+                conn.execute("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)", [])
+                    .map_err(TingError::DatabaseError)?;
+                conn.execute("INSERT INTO test (name) VALUES ('test')", [])
+                    .map_err(TingError::DatabaseError)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+
         // Backup database asynchronously
         let backup_path = temp_dir.path().join("backup_async.db");
         let result = manager.backup_async(backup_path.clone()).await;
         assert!(result.is_ok());
-        
+
         // Verify backup exists and contains data
         let backup_conn = Connection::open(&backup_path).unwrap();
         let count: i64 = backup_conn
@@ -435,13 +445,13 @@ mod tests {
     #[test]
     fn test_connection_pool_stats() {
         let (manager, _temp_dir) = create_test_db();
-        
+
         assert_eq!(manager.pool_size(), 5);
         assert!(manager.idle_connections() > 0);
-        
+
         // Get a connection
         let _conn = manager.get_connection().unwrap();
-        
+
         // Active connections should increase
         assert!(manager.active_connections() > 0);
     }

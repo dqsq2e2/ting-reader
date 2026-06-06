@@ -6,15 +6,14 @@
 //! Scraper plugins must implement the `ScraperPlugin` trait in addition to the base
 //! `Plugin` trait. They provide functionality for:
 //! - Searching for books by keyword
-//! - Retrieving detailed book information
 //! - Getting chapter lists
 //! - Downloading cover images
 //! - Getting audio download URLs
 
+use super::Plugin;
+use crate::core::error::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use crate::core::error::Result;
-use super::Plugin;
 
 /// Scraper plugin trait
 ///
@@ -35,19 +34,13 @@ pub trait ScraperPlugin: Plugin {
     ///
     /// # Errors
     /// Returns an error if the search fails or the network request fails
-    async fn search(&self, query: &str, author: Option<&str>, narrator: Option<&str>, page: u32) -> Result<SearchResult>;
-
-    /// Get detailed information about a book
-    ///
-    /// # Arguments
-    /// * `book_id` - Unique identifier of the book on the source platform
-    ///
-    /// # Returns
-    /// Detailed book information including metadata and chapter count
-    ///
-    /// # Errors
-    /// Returns an error if the book is not found or the request fails
-    async fn get_detail(&self, book_id: &str) -> Result<BookDetail>;
+    async fn search(
+        &self,
+        query: &str,
+        author: Option<&str>,
+        narrator: Option<&str>,
+        page: u32,
+    ) -> Result<SearchResult>;
 
     /// Get the list of chapters for a book
     ///
@@ -91,13 +84,13 @@ pub trait ScraperPlugin: Plugin {
 pub struct SearchResult {
     /// List of book items in the search results
     pub items: Vec<BookItem>,
-    
+
     /// Total number of results available
     pub total: u32,
-    
+
     /// Current page number (1-indexed)
     pub page: u32,
-    
+
     /// Number of items per page
     pub page_size: u32,
 }
@@ -110,69 +103,69 @@ pub struct SearchResult {
 pub struct BookItem {
     /// Unique identifier on the source platform
     pub id: String,
-    
+
     /// Book title
     pub title: String,
-    
+
     /// Author name
     pub author: String,
-    
+
     /// Cover image URL (optional)
     #[serde(default)]
     pub cover_url: Option<String>,
-    
+
     /// Brief introduction or description (optional)
     #[serde(default)]
     pub intro: Option<String>,
-    
+
     /// Narrator name (optional, for audiobooks)
     #[serde(default)]
     pub narrator: Option<String>,
-    
+
     /// Subtitle (optional)
     #[serde(default)]
     pub subtitle: Option<String>,
-    
+
     /// Published Year (optional)
     #[serde(default)]
     pub published_year: Option<String>,
-    
+
     /// Published Date (optional)
     #[serde(default)]
     pub published_date: Option<String>,
-    
+
     /// Publisher (optional)
     #[serde(default)]
     pub publisher: Option<String>,
-    
+
     /// ISBN (optional)
     #[serde(default)]
     pub isbn: Option<String>,
-    
+
     /// ASIN (optional)
     #[serde(default)]
     pub asin: Option<String>,
-    
+
     /// Language (optional)
     #[serde(default)]
     pub language: Option<String>,
-    
+
     /// Explicit content
     #[serde(default)]
     pub explicit: Option<bool>,
-    
+
     /// Abridged version
     #[serde(default)]
     pub abridged: Option<bool>,
-    
+
     /// Tags or categories
     #[serde(default)]
     pub tags: Vec<String>,
-    
+
     /// Total number of chapters (optional)
     #[serde(default)]
     pub chapter_count: Option<u32>,
-    
+
     /// Total duration in seconds (optional)
     #[serde(default)]
     pub duration: Option<u64>,
@@ -186,60 +179,60 @@ pub struct BookItem {
 pub struct BookDetail {
     /// Unique identifier on the source platform
     pub id: String,
-    
+
     /// Book title
     pub title: String,
-    
+
     /// Author name
     pub author: String,
-    
+
     /// Narrator name (optional, for audiobooks)
     #[serde(default)]
     pub narrator: Option<String>,
-    
+
     /// Cover image URL (optional)
     #[serde(default)]
     pub cover_url: Option<String>,
-    
+
     /// Subtitle (optional)
     #[serde(default)]
     pub subtitle: Option<String>,
-    
+
     /// Published Year (optional)
     #[serde(default)]
     pub published_year: Option<String>,
-    
+
     /// Published Date (optional)
     #[serde(default)]
     pub published_date: Option<String>,
-    
+
     /// Publisher (optional)
     #[serde(default)]
     pub publisher: Option<String>,
-    
+
     /// ISBN (optional)
     #[serde(default)]
     pub isbn: Option<String>,
-    
+
     /// ASIN (optional)
     #[serde(default)]
     pub asin: Option<String>,
-    
+
     /// Language (optional)
     #[serde(default)]
     pub language: Option<String>,
-    
+
     /// Explicit content
     #[serde(default)]
     pub explicit: bool,
-    
+
     /// Abridged version
     #[serde(default)]
     pub abridged: bool,
-    
+
     /// Full introduction or description
     pub intro: String,
-    
+
     /// Tags or categories
     #[serde(default)]
     pub tags: Vec<String>,
@@ -247,10 +240,10 @@ pub struct BookDetail {
     /// Genre
     #[serde(default)]
     pub genre: Option<String>,
-    
+
     /// Total number of chapters
     pub chapter_count: u32,
-    
+
     /// Total duration in seconds (optional)
     #[serde(default)]
     pub duration: Option<u64>,
@@ -263,17 +256,17 @@ pub struct BookDetail {
 pub struct Chapter {
     /// Unique identifier on the source platform
     pub id: String,
-    
+
     /// Chapter title
     pub title: String,
-    
+
     /// Chapter index (0-indexed)
     pub index: u32,
-    
+
     /// Duration in seconds (optional)
     #[serde(default)]
     pub duration: Option<u64>,
-    
+
     /// Whether the chapter is free to access
     #[serde(default = "default_true")]
     pub is_free: bool,
@@ -291,28 +284,26 @@ mod tests {
     #[test]
     fn test_search_result_serialization() {
         let result = SearchResult {
-            items: vec![
-                BookItem {
-                    id: "123".to_string(),
-                    title: "Test Book".to_string(),
-                    author: "Test Author".to_string(),
-                    cover_url: Some("https://example.com/cover.jpg".to_string()),
-                    intro: Some("Test intro".to_string()),
-                    narrator: None,
-                    subtitle: None,
-                    published_year: None,
-                    published_date: None,
-                    publisher: None,
-                    isbn: None,
-                    asin: None,
-                    language: None,
-                    explicit: None,
-                    abridged: None,
-                    tags: vec![],
-                    chapter_count: None,
-                    duration: None,
-                },
-            ],
+            items: vec![BookItem {
+                id: "123".to_string(),
+                title: "Test Book".to_string(),
+                author: "Test Author".to_string(),
+                cover_url: Some("https://example.com/cover.jpg".to_string()),
+                intro: Some("Test intro".to_string()),
+                narrator: None,
+                subtitle: None,
+                published_year: None,
+                published_date: None,
+                publisher: None,
+                isbn: None,
+                asin: None,
+                language: None,
+                explicit: None,
+                abridged: None,
+                tags: vec![],
+                chapter_count: None,
+                duration: None,
+            }],
             total: 100,
             page: 1,
             page_size: 20,
@@ -380,7 +371,7 @@ mod tests {
     fn test_chapter_default_is_free() {
         let json = r#"{"id":"789","title":"Chapter 1","index":0}"#;
         let chapter: Chapter = serde_json::from_str(json).unwrap();
-        
+
         assert!(chapter.is_free);
     }
 }

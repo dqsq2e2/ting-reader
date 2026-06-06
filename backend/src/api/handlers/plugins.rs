@@ -1,20 +1,18 @@
+use super::AppState;
 use crate::api::models::{
-    PluginInfoResponse, PluginDetailResponse, PluginStatsResponse,
-    PluginDependencyResponse, InstallPluginResponse,
-    ReloadPluginResponse, UninstallPluginResponse,
-    PluginConfigResponse, UpdatePluginConfigRequest, UpdatePluginConfigResponse,
-    ScraperSourcesResponse, ScraperSearchRequest, ScraperDetailResponse, SearchResponse,
-    InstallStorePluginRequest,
+    InstallPluginResponse, InstallStorePluginRequest, PluginConfigResponse,
+    PluginDependencyResponse, PluginDetailResponse, PluginInfoResponse, PluginStatsResponse,
+    ReloadPluginResponse, ScraperSearchRequest, ScraperSourcesResponse, SearchResponse,
+    UninstallPluginResponse, UpdatePluginConfigRequest, UpdatePluginConfigResponse,
 };
 use crate::core::error::{Result, TingError};
 use axum::{
-    extract::{Path, State, Multipart},
+    extract::{Multipart, Path, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
 };
 use uuid::Uuid;
-use super::AppState;
 
 /// Handler for GET /api/v1/plugins - List all plugins
 pub async fn list_plugins(State(state): State<AppState>) -> Result<impl IntoResponse> {
@@ -41,7 +39,7 @@ pub async fn list_plugins(State(state): State<AppState>) -> Result<impl IntoResp
             config_schema: info.config_schema,
             permissions: Some(info.permissions),
             license: info.license,
-            homepage: info.homepage,
+            repo: info.repo,
         })
         .collect();
 
@@ -71,7 +69,7 @@ pub async fn get_plugin_detail(
         author: Some(metadata.author.clone()),
         description: Some(metadata.description.clone()),
         license: metadata.license.clone(),
-        homepage: metadata.homepage.clone(),
+        repo: metadata.repo.clone(),
         is_enabled: true, // All loaded plugins are enabled
         state: format!("{:?}", plugin_info.state).to_lowercase(),
         entry_point: metadata.entry_point.clone(),
@@ -108,29 +106,43 @@ pub async fn install_plugin(
 ) -> Result<impl IntoResponse> {
     let temp_dir = std::env::temp_dir().join("ting-reader-uploads");
     if !temp_dir.exists() {
-        tokio::fs::create_dir_all(&temp_dir).await.map_err(TingError::IoError)?;
+        tokio::fs::create_dir_all(&temp_dir)
+            .await
+            .map_err(TingError::IoError)?;
     }
-    
+
     let temp_path = temp_dir.join(format!("plugin-{}.zip", Uuid::new_v4()));
     let mut file_saved = false;
-    
-    while let Some(field) = multipart.next_field().await.map_err(|e| TingError::InvalidRequest(e.to_string()))? {
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| TingError::InvalidRequest(e.to_string()))?
+    {
         if field.name() == Some("file") {
-            let data = field.bytes().await.map_err(|e| TingError::InvalidRequest(e.to_string()))?;
-            tokio::fs::write(&temp_path, data).await.map_err(TingError::IoError)?;
+            let data = field
+                .bytes()
+                .await
+                .map_err(|e| TingError::InvalidRequest(e.to_string()))?;
+            tokio::fs::write(&temp_path, data)
+                .await
+                .map_err(TingError::IoError)?;
             file_saved = true;
             break;
         }
     }
-    
+
     if !file_saved {
         return Err(TingError::InvalidRequest("No file uploaded".to_string()));
     }
-    
-    let result = state.plugin_manager.install_plugin_package(&temp_path).await;
-    
+
+    let result = state
+        .plugin_manager
+        .install_plugin_package(&temp_path)
+        .await;
+
     let _ = tokio::fs::remove_file(&temp_path).await;
-    
+
     let plugin_id = result?;
 
     Ok((
@@ -178,12 +190,16 @@ pub async fn get_plugin_config(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse> {
-    let metadata = state.plugin_manager.get_plugin(&id)
+    let metadata = state
+        .plugin_manager
+        .get_plugin(&id)
         .map_err(|_| TingError::PluginNotFound(id.clone()))?;
 
     let config = state.config_manager.get_config(&id).unwrap_or_else(|_| {
         // Config not initialized yet — bootstrap from schema defaults
-        metadata.config_schema.as_ref()
+        metadata
+            .config_schema
+            .as_ref()
             .map(|s| extract_defaults_from_schema(s))
             .unwrap_or(serde_json::json!({}))
     });
@@ -200,7 +216,9 @@ pub async fn update_plugin_config(
     Path(id): Path<String>,
     Json(req): Json<UpdatePluginConfigRequest>,
 ) -> Result<impl IntoResponse> {
-    let metadata = state.plugin_manager.get_plugin(&id)
+    let metadata = state
+        .plugin_manager
+        .get_plugin(&id)
         .map_err(|_| TingError::PluginNotFound(id.clone()))?;
 
     // Auto-initialize config if it doesn't exist yet
@@ -253,16 +271,25 @@ pub async fn scraper_search(
 
     let page = request.page.unwrap_or(1);
     let page_size = request.page_size.unwrap_or(20);
+    let mut search_params = request.search_params.unwrap_or_default();
+    if let Some(query) = request.query {
+        search_params
+            .entry("title".to_string())
+            .or_insert(query.clone());
+        search_params.entry("query".to_string()).or_insert(query);
+    }
+    if let Some(author) = request.author {
+        search_params.entry("author".to_string()).or_insert(author);
+    }
+    if let Some(narrator) = request.narrator {
+        search_params
+            .entry("narrator".to_string())
+            .or_insert(narrator);
+    }
 
-    let result = state.scraper_service
-        .search(
-            &request.query,
-            request.author.as_deref(),
-            request.narrator.as_deref(),
-            request.source.as_deref(),
-            page,
-            page_size,
-        )
+    let result = state
+        .scraper_service
+        .search_with_params(&search_params, request.source.as_deref(), page, page_size)
         .await?;
 
     Ok(Json(SearchResponse {
@@ -271,16 +298,6 @@ pub async fn scraper_search(
         page: result.page,
         page_size: result.page_size,
     }))
-}
-
-/// Handler for GET /api/v1/scraper/detail/:source/:id - Get book detail from scraper
-pub async fn get_scraper_detail(
-    State(state): State<AppState>,
-    Path((source, id)): Path<(String, String)>,
-) -> Result<impl IntoResponse> {
-    let detail = state.scraper_service.get_detail(&source, &id).await?;
-
-    Ok(Json(ScraperDetailResponse { detail }))
 }
 
 /// Handler for GET /api/v1/store/plugins - Get list of plugins from store
@@ -302,8 +319,11 @@ pub async fn install_store_plugin(
     State(state): State<AppState>,
     Json(req): Json<InstallStorePluginRequest>,
 ) -> Result<impl IntoResponse> {
-    let plugin_id = state.plugin_manager.install_plugin_from_store(&req.plugin_id).await?;
-    
+    let plugin_id = state
+        .plugin_manager
+        .install_plugin_from_store(&req.plugin_id)
+        .await?;
+
     Ok((
         StatusCode::CREATED,
         Json(InstallPluginResponse {

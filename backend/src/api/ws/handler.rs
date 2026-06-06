@@ -97,7 +97,10 @@ async fn authenticate_ws_token(
     };
 
     // Verify user exists in DB
-    let user = state.user_repo.find_by_id(&claims.user_id).await
+    let user = state
+        .user_repo
+        .find_by_id(&claims.user_id)
+        .await
         .map_err(|e| e.into_response())?;
 
     match user {
@@ -123,11 +126,7 @@ async fn handle_ws_connection(socket: WebSocket, state: AppState, user_id: Strin
         loop {
             match broadcast_rx.recv().await {
                 Ok(msg) => {
-                    if sender
-                        .send(Message::Text(msg.into()))
-                        .await
-                        .is_err()
-                    {
+                    if sender.send(Message::Text(msg.into())).await.is_err() {
                         break;
                     }
                 }
@@ -209,7 +208,13 @@ async fn handle_client_message(
                 updated_at: chrono::Utc::now().to_rfc3339(),
             };
 
-            debug!("WS 收到进度: user={} book={} ch={} pos={}s", &user_id, &book_id, chapter_id.as_deref().unwrap_or("-"), position);
+            debug!(
+                "WS 收到进度: user={} book={} ch={} pos={}s",
+                &user_id,
+                &book_id,
+                chapter_id.as_deref().unwrap_or("-"),
+                position
+            );
 
             if let Err(e) = state.progress_repo.upsert(&progress).await {
                 warn!("WS 进度保存失败: user={} err={}", &user_id, e);

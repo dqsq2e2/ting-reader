@@ -9,8 +9,8 @@
 //! - 使用系统派生的主密钥加密
 //! - 支持密钥轮换和平滑过渡
 
+use crate::core::crypto::{decrypt, encrypt};
 use crate::core::error::{Result, TingError};
-use crate::core::crypto::{encrypt, decrypt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -48,7 +48,7 @@ impl JwtKeyPair {
     pub fn generate() -> Self {
         let current = Self::generate_secret();
         let now = chrono::Utc::now().timestamp();
-        
+
         Self {
             current,
             current_created_at: now,
@@ -61,22 +61,22 @@ impl JwtKeyPair {
     fn generate_secret() -> String {
         let mut rng = rand::thread_rng();
         let bytes: Vec<u8> = (0..64).map(|_| rng.gen()).collect();
-        use base64::{Engine as _, engine::general_purpose};
+        use base64::{engine::general_purpose, Engine as _};
         general_purpose::STANDARD.encode(&bytes)
     }
 
     /// 轮换密钥
     pub fn rotate(&mut self) {
         info!("正在轮换 JWT 密钥");
-        
+
         // 将当前密钥移到 previous
         self.previous = Some(self.current.clone());
         self.previous_created_at = Some(self.current_created_at);
-        
+
         // 生成新的当前密钥
         self.current = Self::generate_secret();
         self.current_created_at = chrono::Utc::now().timestamp();
-        
+
         info!("JWT 密钥轮换完成");
     }
 
@@ -145,16 +145,16 @@ impl JwtKeyManager {
         encryption_key: [u8; 32],
     ) -> Result<Self> {
         let encryption_key = Arc::new(encryption_key);
-        
+
         // 从数据库加载或生成新密钥
         let keys = Self::load_or_generate(&db, &encryption_key).await?;
-        
+
         let manager = Self {
             keys: Arc::new(RwLock::new(keys)),
             db,
             encryption_key,
         };
-        
+
         Ok(manager)
     }
 
@@ -183,10 +183,10 @@ impl JwtKeyManager {
         db: &r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
         encryption_key: &[u8; 32],
     ) -> Result<JwtKeyPair> {
-        let conn = db.get().map_err(|e| TingError::DatabaseError(
-            rusqlite::Error::ToSqlConversionFailure(Box::new(e))
-        ))?;
-        
+        let conn = db.get().map_err(|e| {
+            TingError::DatabaseError(rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
+        })?;
+
         let encrypted_json: String = conn
             .query_row(
                 "SELECT value FROM system_settings WHERE key = 'jwt_keys'",
@@ -194,11 +194,11 @@ impl JwtKeyManager {
                 |row| row.get(0),
             )
             .map_err(|e| TingError::DatabaseError(e))?;
-        
+
         // 反序列化加密的密钥对
         let encrypted: EncryptedJwtKeyPair = serde_json::from_str(&encrypted_json)
             .map_err(|e| TingError::ConfigError(format!("解析加密的 JWT 密钥失败: {}", e)))?;
-        
+
         // 解密密钥对
         JwtKeyPair::decrypt(&encrypted, encryption_key)
     }
@@ -209,23 +209,23 @@ impl JwtKeyManager {
         keys: &JwtKeyPair,
         encryption_key: &[u8; 32],
     ) -> Result<()> {
-        let conn = db.get().map_err(|e| TingError::DatabaseError(
-            rusqlite::Error::ToSqlConversionFailure(Box::new(e))
-        ))?;
-        
+        let conn = db.get().map_err(|e| {
+            TingError::DatabaseError(rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
+        })?;
+
         // 加密密钥对
         let encrypted = keys.encrypt(encryption_key)?;
-        
+
         // 序列化加密后的数据
         let encrypted_json = serde_json::to_string(&encrypted)
             .map_err(|e| TingError::ConfigError(format!("序列化加密的 JWT 密钥失败: {}", e)))?;
-        
+
         conn.execute(
             "INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES ('jwt_keys', ?, CURRENT_TIMESTAMP)",
             [encrypted_json],
         )
         .map_err(|e| TingError::DatabaseError(e))?;
-        
+
         Ok(())
     }
 
@@ -262,10 +262,10 @@ impl JwtKeyManager {
     pub fn start_rotation_task(self: Arc<Self>) {
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(3600)); // 每小时检查一次
-            
+
             loop {
                 interval.tick().await;
-                
+
                 if let Err(e) = self.check_and_rotate().await {
                     warn!("JWT 密钥轮换检查失败: {}", e);
                 }

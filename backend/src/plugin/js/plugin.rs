@@ -1,15 +1,15 @@
 //! JavaScript Plugin Loader
 //!
 //! This module provides the JavaScript plugin loading and lifecycle management.
-//! 
+//!
 //! **Important Note on Thread Safety:**
 //! JavaScript plugins using Deno Core cannot implement the Plugin trait directly
 //! because Deno's JsRuntime is not Send + Sync (V8 isolates are single-threaded).
-//! 
+//!
 //! Instead, this module provides:
 //! 1. JavaScriptPluginLoader - for loading and managing JS plugin metadata
 //! 2. JavaScriptPluginExecutor - for executing JS plugins in a single-threaded context
-//! 
+//!
 //! The plugin manager should handle JS plugins specially, executing them on a
 //! dedicated single-threaded runtime.
 
@@ -18,9 +18,9 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use tracing::info;
 
-use super::runtime::JsRuntimeWrapper;
-use super::super::types::{PluginMetadata, PluginType};
 use super::super::types::metadata::read_plugin_metadata;
+use super::super::types::{PluginMetadata, PluginType};
+use super::runtime::JsRuntimeWrapper;
 use crate::core::error::TingError;
 
 /// JavaScript plugin loader
@@ -58,7 +58,7 @@ impl JavaScriptPluginLoader {
 
         // Verify this is a JavaScript plugin
         Self::verify_runtime(&metadata, &plugin_dir)?;
-        
+
         // Get the entry point file path
         let entry_point = plugin_dir.join(&metadata.entry_point);
         if !entry_point.exists() {
@@ -68,35 +68,35 @@ impl JavaScriptPluginLoader {
             ))
             .into());
         }
-        
+
         Ok(Self {
             metadata,
             plugin_dir,
         })
     }
-    
+
     /// Get the plugin metadata
     pub fn metadata(&self) -> &PluginMetadata {
         &self.metadata
     }
-    
+
     /// Get the plugin directory
     pub fn plugin_dir(&self) -> &Path {
         &self.plugin_dir
     }
-    
+
     /// Get the plugin type
     pub fn plugin_type(&self) -> PluginType {
         self.metadata.plugin_type
     }
-    
+
     /// Create an executor for this plugin
     ///
     /// The executor must be used in a single-threaded context (e.g., LocalSet)
     pub fn create_executor(&self) -> Result<JavaScriptPluginExecutor> {
         JavaScriptPluginExecutor::new(self.plugin_dir.clone(), self.metadata.clone())
     }
-    
+
     /// Install npm dependencies for this plugin
     ///
     /// This method generates a package.json and runs npm install if the plugin
@@ -110,12 +110,18 @@ impl JavaScriptPluginLoader {
     pub fn install_npm_dependencies(&self, npm_manager: &super::npm::NpmManager) -> Result<()> {
         // Check if plugin has npm dependencies
         if self.metadata.npm_dependencies.is_empty() {
-            info!("Plugin {} has no npm dependencies, skipping npm install", self.metadata.name);
+            info!(
+                "Plugin {} has no npm dependencies, skipping npm install",
+                self.metadata.name
+            );
             return Ok(());
         }
-        
-        info!("Installing npm dependencies for plugin: {}", self.metadata.name);
-        
+
+        info!(
+            "Installing npm dependencies for plugin: {}",
+            self.metadata.name
+        );
+
         // Generate package.json
         npm_manager.generate_package_json(
             &self.plugin_dir,
@@ -126,14 +132,17 @@ impl JavaScriptPluginLoader {
             self.metadata.license.as_deref(),
             &self.metadata.npm_dependencies,
         )?;
-        
+
         // Install dependencies
         npm_manager.install_dependencies(&self.plugin_dir)?;
-        
-        info!("npm dependencies installed successfully for plugin: {}", self.metadata.name);
+
+        info!(
+            "npm dependencies installed successfully for plugin: {}",
+            self.metadata.name
+        );
         Ok(())
     }
-    
+
     /// Check if npm dependencies are installed
     pub fn has_npm_dependencies_installed(&self, npm_manager: &super::npm::NpmManager) -> bool {
         if self.metadata.npm_dependencies.is_empty() {
@@ -141,7 +150,7 @@ impl JavaScriptPluginLoader {
         }
         npm_manager.has_node_modules(&self.plugin_dir)
     }
-    
+
     /// Verify that the plugin metadata specifies JavaScript runtime
     fn verify_runtime(metadata: &PluginMetadata, plugin_dir: &Path) -> Result<()> {
         // Read plugin.json to check for runtime field
@@ -160,7 +169,7 @@ impl JavaScriptPluginLoader {
                 }
             } else {
                 return Err(TingError::PluginLoadError(
-                    "Plugin 'runtime' field must be a string".to_string()
+                    "Plugin 'runtime' field must be a string".to_string(),
                 )
                 .into());
             }
@@ -183,13 +192,13 @@ impl JavaScriptPluginLoader {
 pub struct JavaScriptPluginExecutor {
     /// The JavaScript runtime wrapper
     runtime: JsRuntimeWrapper,
-    
+
     /// Plugin metadata
     metadata: PluginMetadata,
-    
+
     /// Plugin directory path
     plugin_dir: PathBuf,
-    
+
     /// Whether the plugin has been initialized
     initialized: bool,
 }
@@ -199,7 +208,7 @@ impl JavaScriptPluginExecutor {
     fn new(plugin_dir: PathBuf, metadata: PluginMetadata) -> Result<Self> {
         let entry_point = plugin_dir.join(&metadata.entry_point);
         let runtime = JsRuntimeWrapper::new(entry_point, metadata.clone(), None)?;
-        
+
         Ok(Self {
             runtime,
             metadata,
@@ -207,20 +216,20 @@ impl JavaScriptPluginExecutor {
             initialized: false,
         })
     }
-    
+
     /// Load the JavaScript module
     pub async fn load_module(&mut self) -> Result<()> {
         self.runtime.load_module().await
     }
-    
+
     /// Initialize the plugin
     pub async fn initialize(&mut self, config: Value, data_dir: PathBuf) -> Result<()> {
         if self.initialized {
             return Ok(());
         }
-        
+
         info!("Initializing JavaScript plugin: {}", self.metadata.name);
-        
+
         // Call the initialize function if it exists
         let init_code = format!(
             r#"
@@ -235,41 +244,41 @@ impl JavaScriptPluginExecutor {
             }))
             .unwrap_or_else(|_| "{}".to_string())
         );
-        
+
         self.runtime.execute_script(&init_code)?;
         self.initialized = true;
-        
+
         info!("JavaScript plugin initialized: {}", self.metadata.name);
         Ok(())
     }
-    
+
     /// Shutdown the plugin
     pub fn shutdown(&mut self) -> Result<()> {
         if !self.initialized {
             return Ok(());
         }
-        
+
         info!("Shutting down JavaScript plugin: {}", self.metadata.name);
-        
+
         // Call the shutdown function if it exists
         let shutdown_code = r#"
             if (typeof shutdown === 'function') {
                 shutdown();
             }
         "#;
-        
+
         self.runtime.execute_script(shutdown_code)?;
         self.initialized = false;
-        
+
         info!("JavaScript plugin shut down: {}", self.metadata.name);
         Ok(())
     }
-    
+
     /// Garbage collect
     pub fn garbage_collect(&mut self) -> Result<()> {
         self.runtime.garbage_collect()
     }
-    
+
     /// Call a JavaScript function
     pub async fn call_function<T, R>(&mut self, function_name: &str, args: T) -> Result<R>
     where
@@ -278,12 +287,12 @@ impl JavaScriptPluginExecutor {
     {
         self.runtime.call_function(function_name, args).await
     }
-    
+
     /// Get the plugin metadata
     pub fn metadata(&self) -> &PluginMetadata {
         &self.metadata
     }
-    
+
     /// Get the plugin directory
     pub fn plugin_dir(&self) -> &Path {
         &self.plugin_dir
@@ -377,28 +386,31 @@ mod tests {
         let result = JavaScriptPluginLoader::verify_runtime(&metadata, &plugin_dir);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("expected 'javascript'"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("expected 'javascript'"));
     }
-    
+
     #[test]
     fn test_new_javascript_plugin_loader() {
         let temp_dir = create_test_plugin_dir("test-plugin", "javascript");
         let plugin_dir = temp_dir.path().join("test-plugin");
-        
+
         let loader = JavaScriptPluginLoader::new(plugin_dir);
-        
+
         assert!(loader.is_ok());
         let loader = loader.unwrap();
         assert_eq!(loader.metadata().name, "test-plugin");
         assert_eq!(loader.plugin_type(), PluginType::Utility);
     }
-    
+
     #[test]
     fn test_new_missing_entry_point() {
         let temp_dir = TempDir::new().unwrap();
         let plugin_dir = temp_dir.path().join("test-plugin");
         fs::create_dir(&plugin_dir).unwrap();
-        
+
         // Create plugin.json but no plugin.js
         let metadata = serde_json::json!({
             "name": "test-plugin",
@@ -409,27 +421,30 @@ mod tests {
             "runtime": "javascript",
             "entry_point": "plugin.js",
         });
-        
+
         fs::write(
             plugin_dir.join("plugin.json"),
             serde_json::to_string_pretty(&metadata).unwrap(),
         )
         .unwrap();
-        
+
         let result = JavaScriptPluginLoader::new(plugin_dir);
-        
+
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Entry point file not found"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Entry point file not found"));
     }
-    
+
     #[tokio::test]
     async fn test_create_executor_and_load() {
         let temp_dir = create_test_plugin_dir("test-plugin", "javascript");
         let plugin_dir = temp_dir.path().join("test-plugin");
-        
+
         let loader = JavaScriptPluginLoader::new(plugin_dir).unwrap();
         let mut executor = loader.create_executor().unwrap();
-        
+
         let result = executor.load_module().await;
         assert!(result.is_ok());
     }

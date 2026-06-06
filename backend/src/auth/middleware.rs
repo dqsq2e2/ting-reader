@@ -12,7 +12,7 @@ use axum::{
 #[derive(Clone, Debug)]
 pub struct AuthUser {
     pub user_id: String,
-    pub id: String,  // Alias for user_id for convenience
+    pub id: String, // Alias for user_id for convenience
     pub username: String,
     pub role: String,
 }
@@ -71,10 +71,10 @@ pub async fn authenticate(
     // Fetch user from database
     use crate::db::repository::Repository;
     let user_id = claims.user_id;
-    
+
     // Check if user exists
     let user_result = state.user_repo.find_by_id(&user_id).await;
-    
+
     let user = match user_result {
         Ok(Some(u)) => u,
         Ok(None) => {
@@ -104,13 +104,8 @@ pub fn get_auth_user(request: &Request) -> Result<AuthUser> {
         .ok_or_else(|| TingError::AuthenticationError("用户未认证".to_string()))
 }
 
-
 // Implement FromRequestParts for AuthUser to enable extraction in handlers
-use axum::{
-    async_trait,
-    extract::FromRequestParts,
-    http::request::Parts,
-};
+use axum::{async_trait, extract::FromRequestParts, http::request::Parts};
 
 #[async_trait]
 impl<S> FromRequestParts<S> for AuthUser

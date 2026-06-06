@@ -1,21 +1,18 @@
 pub mod scrape;
 
-pub use scrape::{scrape_book, scrape_book_diff, apply_scrape_result};
+pub use scrape::{apply_scrape_result, scrape_book_diff};
 
+use super::AppState;
 use crate::api::models::{
-    BookResponse, CreateBookRequest, UpdateBookRequest,
-    SearchQuery, SearchResponse,
-    ChapterResponse, UpdateChapterRequest,
-    StatsResponse,
-    MergeSuggestionResponse, MergeBooksRequest, IgnoreMergeSuggestionRequest, UpdateBookCorrectionRequest,
-    BatchUpdateChaptersRequest,
-    MoveChaptersRequest,
+    BatchUpdateChaptersRequest, BookResponse, ChapterResponse, CreateBookRequest,
+    MergeBooksRequest, MoveChaptersRequest, SearchQuery, SearchResponse, StatsResponse,
+    UpdateBookCorrectionRequest, UpdateBookRequest, UpdateChapterRequest,
 };
 use crate::core::error::{Result, TingError};
-use crate::db::models::Book;
 use crate::core::nfo_manager::BookMetadata;
-use crate::db::repository::{Repository, ChapterRepository};
-use crate::core::task_queue::{Task, TaskPayload, Priority};
+use crate::core::task_queue::{Priority, Task, TaskPayload};
+use crate::db::models::Book;
+use crate::db::repository::{ChapterRepository, Repository};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -23,7 +20,6 @@ use axum::{
     Json,
 };
 use uuid::Uuid;
-use super::AppState;
 
 /// Handler for GET /api/v1/books - List all books
 pub async fn list_books(
@@ -36,14 +32,11 @@ pub async fn list_books(
     let library_id = params.get("library_id").cloned();
     let is_admin = user.role == "admin";
 
-    let books = state.book_repo.find_with_filters(
-        &user.id,
-        is_admin,
-        search,
-        tag,
-        library_id
-    ).await?;
-    
+    let books = state
+        .book_repo
+        .find_with_filters(&user.id, is_admin, search, tag, library_id)
+        .await?;
+
     let book_responses: Vec<BookResponse> = books.into_iter().map(BookResponse::from).collect();
 
     Ok(Json(book_responses))
@@ -55,18 +48,26 @@ pub async fn get_book(
     Path(id): Path<String>,
     user: crate::auth::middleware::AuthUser,
 ) -> Result<impl IntoResponse> {
-    let book = state.book_repo.find_by_id(&id).await?
+    let book = state
+        .book_repo
+        .find_by_id(&id)
+        .await?
         .ok_or_else(|| TingError::NotFound(format!("Book with id {} not found", id)))?;
 
-    let library = state.library_repo.find_by_id(&book.library_id).await?
-        .ok_or_else(|| TingError::NotFound(format!("Library with id {} not found", book.library_id)))?;
+    let library = state
+        .library_repo
+        .find_by_id(&book.library_id)
+        .await?
+        .ok_or_else(|| {
+            TingError::NotFound(format!("Library with id {} not found", book.library_id))
+        })?;
 
     let is_fav = state.favorite_repo.is_favorited(&user.id, &id).await?;
 
     let mut response = BookResponse::from(book.clone());
     response.library_type = Some(library.library_type);
     response.is_favorite = is_fav;
-    
+
     Ok((StatusCode::OK, Json(response)))
 }
 
@@ -88,10 +89,13 @@ pub async fn create_book(
                 if path.is_absolute() {
                     url.clone()
                 } else {
-                    std::path::Path::new(&req.path).join(url).to_string_lossy().to_string()
+                    std::path::Path::new(&req.path)
+                        .join(url)
+                        .to_string_lossy()
+                        .to_string()
                 }
             };
-            
+
             if let Ok(Some(color)) = crate::core::color::calculate_theme_color(&cover_path).await {
                 theme_color = Some(color);
             }
@@ -140,100 +144,130 @@ pub async fn update_book(
     let mut theme_color = req.theme_color.clone();
     let book_path_str = req.path.clone().unwrap_or(existing_book.path.clone());
     let book_path = std::path::Path::new(&book_path_str);
-    
+
     let cover_changed = if let Some(ref new_url) = req.cover_url {
         existing_book.cover_url.as_ref() != Some(new_url)
     } else {
         false
     };
-    
+
     if theme_color.is_none() || cover_changed {
         if let Some(ref url) = req.cover_url {
-             // If cover URL is provided, always recalculate theme color if not provided
-             let cover_path = if url.starts_with("http://") || url.starts_with("https://") {
-                 url.clone()
-             } else {
-                 let path = std::path::Path::new(url);
-                 if path.is_absolute() {
-                     url.clone()
-                 } else {
-                     book_path.join(url).to_string_lossy().to_string()
-                 }
-             };
+            // If cover URL is provided, always recalculate theme color if not provided
+            let cover_path = if url.starts_with("http://") || url.starts_with("https://") {
+                url.clone()
+            } else {
+                let path = std::path::Path::new(url);
+                if path.is_absolute() {
+                    url.clone()
+                } else {
+                    book_path.join(url).to_string_lossy().to_string()
+                }
+            };
 
-             match crate::core::color::calculate_theme_color(&cover_path).await {
-                 Ok(Some(color)) => {
-                     theme_color = Some(color);
-                 },
-                 Ok(None) => {
-                     // Try WebDAV if local/http failed and it's a webdav library
-                     if let Ok(Some(library)) = state.library_repo.find_by_id(&existing_book.library_id).await {
-                         if library.library_type == "webdav" {
-                             if let Ok((mut reader, _)) = state.storage_service.get_webdav_reader(
-                                 &library, 
-                                 url, 
-                                 None, 
-                                 state.encryption_key.as_ref()
-                             ).await {
-                                 let mut buffer = Vec::new();
-                                 if tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut buffer).await.is_ok() {
-                                     if let Ok(Some(color)) = crate::core::color::calculate_theme_color_from_bytes(&buffer).await {
-                                         theme_color = Some(color);
-                                     }
-                                 }
-                             }
-                         }
-                     }
-                 },
-                 Err(e) => {
-                     tracing::warn!("计算主题颜色失败: {}", e);
-                 }
-             }
+            match crate::core::color::calculate_theme_color(&cover_path).await {
+                Ok(Some(color)) => {
+                    theme_color = Some(color);
+                }
+                Ok(None) => {
+                    // Try WebDAV if local/http failed and it's a webdav library
+                    if let Ok(Some(library)) = state
+                        .library_repo
+                        .find_by_id(&existing_book.library_id)
+                        .await
+                    {
+                        if library.library_type == "webdav" {
+                            if let Ok((mut reader, _)) = state
+                                .storage_service
+                                .get_webdav_reader(
+                                    &library,
+                                    url,
+                                    None,
+                                    state.encryption_key.as_ref(),
+                                )
+                                .await
+                            {
+                                let mut buffer = Vec::new();
+                                if tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut buffer)
+                                    .await
+                                    .is_ok()
+                                {
+                                    if let Ok(Some(color)) =
+                                        crate::core::color::calculate_theme_color_from_bytes(
+                                            &buffer,
+                                        )
+                                        .await
+                                    {
+                                        theme_color = Some(color);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("计算主题颜色失败: {}", e);
+                }
+            }
         } else {
-             // If cover URL is NOT provided in request, keep existing theme color
-             // UNLESS existing cover exists and theme color is missing
-             theme_color = existing_book.theme_color.clone();
-             if theme_color.is_none() {
-                 if let Some(ref url) = existing_book.cover_url {
-                     let cover_path = if url.starts_with("http://") || url.starts_with("https://") {
-                         url.clone()
-                     } else {
-                         let path = std::path::Path::new(url);
-                         if path.is_absolute() {
-                             url.clone()
-                         } else {
-                             book_path.join(url).to_string_lossy().to_string()
-                         }
-                     };
+            // If cover URL is NOT provided in request, keep existing theme color
+            // UNLESS existing cover exists and theme color is missing
+            theme_color = existing_book.theme_color.clone();
+            if theme_color.is_none() {
+                if let Some(ref url) = existing_book.cover_url {
+                    let cover_path = if url.starts_with("http://") || url.starts_with("https://") {
+                        url.clone()
+                    } else {
+                        let path = std::path::Path::new(url);
+                        if path.is_absolute() {
+                            url.clone()
+                        } else {
+                            book_path.join(url).to_string_lossy().to_string()
+                        }
+                    };
 
-                     match crate::core::color::calculate_theme_color(&cover_path).await {
-                         Ok(Some(color)) => {
-                             theme_color = Some(color);
-                         },
-                         Ok(None) => {
-                             // Try WebDAV fallback for existing cover
-                             if let Ok(Some(library)) = state.library_repo.find_by_id(&existing_book.library_id).await {
-                                 if library.library_type == "webdav" {
-                                     if let Ok((mut reader, _)) = state.storage_service.get_webdav_reader(
-                                         &library, 
-                                         url, 
-                                         None, 
-                                         state.encryption_key.as_ref()
-                                     ).await {
-                                         let mut buffer = Vec::new();
-                                         if tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut buffer).await.is_ok() {
-                                             if let Ok(Some(color)) = crate::core::color::calculate_theme_color_from_bytes(&buffer).await {
+                    match crate::core::color::calculate_theme_color(&cover_path).await {
+                        Ok(Some(color)) => {
+                            theme_color = Some(color);
+                        }
+                        Ok(None) => {
+                            // Try WebDAV fallback for existing cover
+                            if let Ok(Some(library)) = state
+                                .library_repo
+                                .find_by_id(&existing_book.library_id)
+                                .await
+                            {
+                                if library.library_type == "webdav" {
+                                    if let Ok((mut reader, _)) = state
+                                        .storage_service
+                                        .get_webdav_reader(
+                                            &library,
+                                            url,
+                                            None,
+                                            state.encryption_key.as_ref(),
+                                        )
+                                        .await
+                                    {
+                                        let mut buffer = Vec::new();
+                                        if tokio::io::AsyncReadExt::read_to_end(
+                                            &mut reader,
+                                            &mut buffer,
+                                        )
+                                        .await
+                                        .is_ok()
+                                        {
+                                            if let Ok(Some(color)) = crate::core::color::calculate_theme_color_from_bytes(&buffer).await {
                                                  theme_color = Some(color);
                                              }
-                                         }
-                                     }
-                                 }
-                             }
-                         },
-                         Err(_) => {}
-                     }
-                 }
-             }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                }
+            }
         }
     }
 
@@ -262,12 +296,17 @@ pub async fn update_book(
     state.book_repo.update(&updated_book).await?;
 
     // Check NFO writing
-    if let Ok(Some(library)) = state.library_repo.find_by_id(&updated_book.library_id).await {
-        let config: crate::db::models::ScraperConfig = library.scraper_config
+    if let Ok(Some(library)) = state
+        .library_repo
+        .find_by_id(&updated_book.library_id)
+        .await
+    {
+        let config: crate::db::models::ScraperConfig = library
+            .scraper_config
             .as_ref()
             .and_then(|json| serde_json::from_str(json).ok())
             .unwrap_or_default();
-            
+
         // Handle NFO writing (Local & WebDAV)
         if config.nfo_writing_enabled {
             let mut metadata = BookMetadata::new(
@@ -281,10 +320,14 @@ pub async fn update_book(
             metadata.intro = updated_book.description.clone();
             metadata.cover_url = updated_book.cover_url.clone();
             if let Some(tags_str) = &updated_book.tags {
-                 metadata.tags.items = tags_str.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                metadata.tags.items = tags_str
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
             }
             metadata.touch(); // Update timestamp
-            
+
             // Determine path
             let target_dir = if library.library_type == "webdav" {
                 // WebDAV uses hash-based temp dir
@@ -292,16 +335,27 @@ pub async fn update_book(
                 use sha2::Digest;
                 hasher.update(updated_book.path.as_bytes()); // updated_book.path is the WebDAV URL
                 let book_hash = format!("{:x}", hasher.finalize());
-                let temp_book_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-                    .join("temp").join(&book_hash);
-                if !temp_book_dir.exists() { std::fs::create_dir_all(&temp_book_dir).ok(); }
+                let temp_book_dir = std::env::current_dir()
+                    .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                    .join("temp")
+                    .join(&book_hash);
+                if !temp_book_dir.exists() {
+                    std::fs::create_dir_all(&temp_book_dir).ok();
+                }
                 temp_book_dir
             } else {
                 std::path::PathBuf::from(&updated_book.path)
             };
-            
-            if let Err(e) = state.nfo_manager.write_book_nfo_to_dir(&target_dir, &metadata) {
-                tracing::warn!("为书籍 {} 写入 NFO 失败: {}", updated_book.title.as_deref().unwrap_or("?"), e);
+
+            if let Err(e) = state
+                .nfo_manager
+                .write_book_nfo_to_dir(&target_dir, &metadata)
+            {
+                tracing::warn!(
+                    "为书籍 {} 写入 NFO 失败: {}",
+                    updated_book.title.as_deref().unwrap_or("?"),
+                    e
+                );
             }
         }
 
@@ -313,32 +367,61 @@ pub async fn update_book(
                 use sha2::Digest;
                 hasher.update(updated_book.path.as_bytes());
                 let book_hash = format!("{:x}", hasher.finalize());
-                let temp_book_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-                    .join("temp").join(&book_hash);
-                if !temp_book_dir.exists() { std::fs::create_dir_all(&temp_book_dir).ok(); }
+                let temp_book_dir = std::env::current_dir()
+                    .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                    .join("temp")
+                    .join(&book_hash);
+                if !temp_book_dir.exists() {
+                    std::fs::create_dir_all(&temp_book_dir).ok();
+                }
                 temp_book_dir
             } else {
                 std::path::PathBuf::from(&updated_book.path)
             };
 
-            let mut metadata_json = crate::core::metadata_writer::read_metadata_json(&target_dir).unwrap_or(None).unwrap_or_default();
-            
+            let mut metadata_json = crate::core::metadata_writer::read_metadata_json(&target_dir)
+                .unwrap_or(None)
+                .unwrap_or_default();
+
             // Update fields from book record
             metadata_json.title = updated_book.title.clone();
-            metadata_json.authors = updated_book.author.clone().map(|s| vec![s]).unwrap_or_default();
-            metadata_json.narrators = updated_book.narrator.clone().map(|s| vec![s]).unwrap_or_default();
+            metadata_json.authors = updated_book
+                .author
+                .clone()
+                .map(|s| vec![s])
+                .unwrap_or_default();
+            metadata_json.narrators = updated_book
+                .narrator
+                .clone()
+                .map(|s| vec![s])
+                .unwrap_or_default();
             metadata_json.description = updated_book.description.clone();
-            metadata_json.genres = updated_book.genre.clone().map(|s| s.split(',').map(|t| t.trim().to_string()).collect()).unwrap_or_default();
-            metadata_json.tags = updated_book.tags.clone().map(|s| s.split(',').map(|t| t.trim().to_string()).collect()).unwrap_or_default();
+            metadata_json.genres = updated_book
+                .genre
+                .clone()
+                .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
+                .unwrap_or_default();
+            metadata_json.tags = updated_book
+                .tags
+                .clone()
+                .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
+                .unwrap_or_default();
             metadata_json.published_year = updated_book.year.map(|y| y.to_string());
-            
+
             // Sync chapters from DB
             let chapter_repo = ChapterRepository::new(state.book_repo.db().clone());
             if let Ok(chapters) = chapter_repo.find_by_book(&updated_book.id).await {
                 let mut sorted_chapters = chapters;
                 sorted_chapters.sort_by(|a, b| {
-                    a.chapter_index.unwrap_or(0).cmp(&b.chapter_index.unwrap_or(0))
-                        .then_with(|| natord::compare(a.title.as_deref().unwrap_or(""), b.title.as_deref().unwrap_or("")))
+                    a.chapter_index
+                        .unwrap_or(0)
+                        .cmp(&b.chapter_index.unwrap_or(0))
+                        .then_with(|| {
+                            natord::compare(
+                                a.title.as_deref().unwrap_or(""),
+                                b.title.as_deref().unwrap_or(""),
+                            )
+                        })
                 });
 
                 let mut abs_chapters = Vec::new();
@@ -355,12 +438,18 @@ pub async fn update_book(
                 }
                 metadata_json.chapters = abs_chapters;
             }
-            
+
             // Sync series from DB
-            let series_list = state.series_repo.find_series_by_book(&updated_book.id).await.unwrap_or_default();
+            let series_list = state
+                .series_repo
+                .find_series_by_book(&updated_book.id)
+                .await
+                .unwrap_or_default();
             let mut series_titles = Vec::new();
             for series in series_list {
-                let formatted_title = if let Ok(books) = state.series_repo.find_books_by_series(&series.id).await {
+                let formatted_title = if let Ok(books) =
+                    state.series_repo.find_books_by_series(&series.id).await
+                {
                     if let Some((_, order)) = books.iter().find(|(b, _)| b.id == updated_book.id) {
                         format!("{} #{}", series.title, order)
                     } else {
@@ -369,17 +458,19 @@ pub async fn update_book(
                 } else {
                     series.title.clone()
                 };
-                
+
                 if !series_titles.contains(&formatted_title) {
                     series_titles.push(formatted_title);
                 }
             }
             metadata_json.series = series_titles;
-            
+
             // Subtitle is now in metadata.json but not in Book struct, so we preserve what was read.
             // If request had extended fields (not supported in UpdateBookRequest yet), we would update them here.
-            
-            if let Err(e) = crate::core::metadata_writer::write_metadata_json(&target_dir, &metadata_json) {
+
+            if let Err(e) =
+                crate::core::metadata_writer::write_metadata_json(&target_dir, &metadata_json)
+            {
                 tracing::error!(target: "audit::metadata", "为书籍 {} 写入 metadata.json 失败: {}", updated_book.title.as_deref().unwrap_or("?"), e);
             }
         }
@@ -393,7 +484,10 @@ pub async fn delete_book(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse> {
-    let book = state.book_repo.find_by_id(&id).await?
+    let book = state
+        .book_repo
+        .find_by_id(&id)
+        .await?
         .ok_or_else(|| TingError::NotFound(format!("Book with id {} not found", id)))?;
 
     // Cleanup cover if cached (WebDAV temp/cache covers)
@@ -402,11 +496,11 @@ pub async fn delete_book(
         if path_str.contains("/temp/covers/") || path_str.contains("/storage/cache/covers/") {
             let path = std::path::Path::new(&path_str);
             if path.exists() {
-                 if let Err(e) = std::fs::remove_file(path) {
-                     tracing::warn!("删除封面缓存 {} 失败: {}", cover_url, e);
-                 } else {
-                     tracing::info!("已删除孤立的封面缓存: {}", cover_url);
-                 }
+                if let Err(e) = std::fs::remove_file(path) {
+                    tracing::warn!("删除封面缓存 {} 失败: {}", cover_url, e);
+                } else {
+                    tracing::info!("已删除孤立的封面缓存: {}", cover_url);
+                }
             }
         }
     }
@@ -424,12 +518,12 @@ pub async fn search_books(
     let result = state
         .scraper_service
         .search(
-            &query.q, 
-            None, 
-            None, 
-            query.source.as_deref(), 
-            query.page, 
-            query.page_size
+            &query.q,
+            None,
+            None,
+            query.source.as_deref(),
+            query.page,
+            query.page_size,
         )
         .await?;
 
@@ -448,12 +542,17 @@ pub async fn get_book_chapters(
     user: crate::auth::middleware::AuthUser,
 ) -> Result<impl IntoResponse> {
     if state.book_repo.find_by_id(&book_id).await?.is_none() {
-        return Err(TingError::NotFound(format!("Book with id {} not found", book_id)));
+        return Err(TingError::NotFound(format!(
+            "Book with id {} not found",
+            book_id
+        )));
     }
 
     let chapter_repo = ChapterRepository::new(state.book_repo.db().clone());
-    let chapters_with_progress = chapter_repo.find_by_book_with_progress(&book_id, &user.id).await?;
-    
+    let chapters_with_progress = chapter_repo
+        .find_by_book_with_progress(&book_id, &user.id)
+        .await?;
+
     let chapter_responses: Vec<ChapterResponse> = chapters_with_progress
         .into_iter()
         .map(|(chapter, pos, updated)| {
@@ -496,15 +595,24 @@ pub async fn update_chapter(
     chapter_repo.update(&updated_chapter).await?;
 
     // Regenerate metadata.json if enabled
-    let book = state.book_repo.find_by_id(&updated_chapter.book_id).await?
-        .ok_or_else(|| TingError::NotFound(format!("Book with id {} not found", updated_chapter.book_id)))?;
-    
+    let book = state
+        .book_repo
+        .find_by_id(&updated_chapter.book_id)
+        .await?
+        .ok_or_else(|| {
+            TingError::NotFound(format!(
+                "Book with id {} not found",
+                updated_chapter.book_id
+            ))
+        })?;
+
     if let Ok(Some(library)) = state.library_repo.find_by_id(&book.library_id).await {
-        let config: crate::db::models::ScraperConfig = library.scraper_config
+        let config: crate::db::models::ScraperConfig = library
+            .scraper_config
             .as_ref()
             .and_then(|json| serde_json::from_str(json).ok())
             .unwrap_or_default();
-            
+
         if config.metadata_writing_enabled {
             // Determine path
             let target_dir = if library.library_type == "webdav" {
@@ -512,22 +620,35 @@ pub async fn update_chapter(
                 use sha2::Digest;
                 hasher.update(book.path.as_bytes());
                 let book_hash = format!("{:x}", hasher.finalize());
-                let temp_book_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-                    .join("temp").join(&book_hash);
-                if !temp_book_dir.exists() { std::fs::create_dir_all(&temp_book_dir).ok(); }
+                let temp_book_dir = std::env::current_dir()
+                    .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                    .join("temp")
+                    .join(&book_hash);
+                if !temp_book_dir.exists() {
+                    std::fs::create_dir_all(&temp_book_dir).ok();
+                }
                 temp_book_dir
             } else {
                 std::path::PathBuf::from(&book.path)
             };
 
-            let mut metadata_json = crate::core::metadata_writer::read_metadata_json(&target_dir).unwrap_or(None).unwrap_or_default();
-            
+            let mut metadata_json = crate::core::metadata_writer::read_metadata_json(&target_dir)
+                .unwrap_or(None)
+                .unwrap_or_default();
+
             // Sync chapters from DB
             if let Ok(chapters) = chapter_repo.find_by_book(&book.id).await {
                 let mut sorted_chapters = chapters;
                 sorted_chapters.sort_by(|a, b| {
-                    a.chapter_index.unwrap_or(0).cmp(&b.chapter_index.unwrap_or(0))
-                        .then_with(|| natord::compare(a.title.as_deref().unwrap_or(""), b.title.as_deref().unwrap_or("")))
+                    a.chapter_index
+                        .unwrap_or(0)
+                        .cmp(&b.chapter_index.unwrap_or(0))
+                        .then_with(|| {
+                            natord::compare(
+                                a.title.as_deref().unwrap_or(""),
+                                b.title.as_deref().unwrap_or(""),
+                            )
+                        })
                 });
 
                 let mut abs_chapters = Vec::new();
@@ -544,28 +665,35 @@ pub async fn update_chapter(
                 }
                 metadata_json.chapters = abs_chapters;
             }
-            
+
             // Sync series from DB
-            let series_list = state.series_repo.find_series_by_book(&book.id).await.unwrap_or_default();
+            let series_list = state
+                .series_repo
+                .find_series_by_book(&book.id)
+                .await
+                .unwrap_or_default();
             let mut series_titles = Vec::new();
             for series in series_list {
-                let formatted_title = if let Ok(books) = state.series_repo.find_books_by_series(&series.id).await {
-                    if let Some((_, order)) = books.iter().find(|(b, _)| b.id == book.id) {
-                        format!("{} #{}", series.title, order)
+                let formatted_title =
+                    if let Ok(books) = state.series_repo.find_books_by_series(&series.id).await {
+                        if let Some((_, order)) = books.iter().find(|(b, _)| b.id == book.id) {
+                            format!("{} #{}", series.title, order)
+                        } else {
+                            series.title.clone()
+                        }
                     } else {
                         series.title.clone()
-                    }
-                } else {
-                    series.title.clone()
-                };
-                
+                    };
+
                 if !series_titles.contains(&formatted_title) {
                     series_titles.push(formatted_title);
                 }
             }
             metadata_json.series = series_titles;
-            
-            if let Err(e) = crate::core::metadata_writer::write_metadata_json(&target_dir, &metadata_json) {
+
+            if let Err(e) =
+                crate::core::metadata_writer::write_metadata_json(&target_dir, &metadata_json)
+            {
                 tracing::error!(target: "audit::metadata", "为章节更新 {} 写入 metadata.json 失败: {}", updated_chapter.title.as_deref().unwrap_or("?"), e);
             }
         }
@@ -580,15 +708,16 @@ pub async fn get_tags(
     user: crate::auth::middleware::AuthUser,
 ) -> Result<impl IntoResponse> {
     let is_admin = user.role == "admin";
-    
+
     // Use find_with_filters to respect user permissions
-    let books = state.book_repo.find_with_filters(
-        &user.id,
-        is_admin,
-        None,  // search
-        None,  // tag
-        None   // library_id
-    ).await?;
+    let books = state
+        .book_repo
+        .find_with_filters(
+            &user.id, is_admin, None, // search
+            None, // tag
+            None, // library_id
+        )
+        .await?;
 
     let mut tags_set = std::collections::HashSet::new();
     for book in books {
@@ -613,7 +742,8 @@ pub async fn get_stats(State(state): State<AppState>) -> Result<impl IntoRespons
     let (total_books, total_chapters, total_duration) = state.book_repo.get_stats().await?;
 
     let libraries = state.library_repo.find_all().await?;
-    let last_scan_time = libraries.iter()
+    let last_scan_time = libraries
+        .iter()
         .filter_map(|l| l.last_scanned_at.as_ref())
         .max()
         .cloned();
@@ -632,42 +762,6 @@ pub async fn get_stats(State(state): State<AppState>) -> Result<impl IntoRespons
 // Merge System Handlers
 // ============================================================================
 
-/// Handler for GET /api/v1/books/merge/suggestions - Get merge suggestions
-pub async fn get_merge_suggestions(
-    State(state): State<AppState>,
-    user: crate::auth::middleware::AuthUser,
-) -> Result<impl IntoResponse> {
-    if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
-    }
-
-    let suggestions = state.merge_service.find_suggestions(0.85).await?;
-    
-    let mut response = Vec::new();
-    for suggestion in suggestions {
-        let source_book = state.book_repo.find_by_id(&suggestion.book_a_id).await?;
-        let target_book = state.book_repo.find_by_id(&suggestion.book_b_id).await?;
-        
-        if let (Some(source), Some(target)) = (source_book, target_book) {
-            response.push(MergeSuggestionResponse {
-                id: suggestion.id,
-                source_book_id: source.id,
-                target_book_id: target.id,
-                source_title: source.title.unwrap_or_default(),
-                target_title: target.title.unwrap_or_default(),
-                source_author: source.author,
-                target_author: target.author,
-                score: suggestion.score,
-                reason: suggestion.reason,
-                status: suggestion.status,
-                created_at: suggestion.created_at,
-            });
-        }
-    }
-
-    Ok(Json(response))
-}
-
 /// Handler for POST /api/v1/books/merge - Merge two books
 pub async fn merge_books(
     State(state): State<AppState>,
@@ -675,10 +769,15 @@ pub async fn merge_books(
     Json(req): Json<MergeBooksRequest>,
 ) -> Result<impl IntoResponse> {
     if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
+        return Err(TingError::PermissionDenied(
+            "Admin access required".to_string(),
+        ));
     }
 
-    let result = state.merge_service.merge_books(&req.source_book_id, &req.target_book_id).await?;
+    let result = state
+        .merge_service
+        .merge_books(&req.source_book_id, &req.target_book_id)
+        .await?;
 
     Ok(Json(serde_json::json!({
         "message": "Books merged successfully",
@@ -694,11 +793,16 @@ pub async fn batch_update_chapters(
     Json(req): Json<BatchUpdateChaptersRequest>,
 ) -> Result<impl IntoResponse> {
     if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
+        return Err(TingError::PermissionDenied(
+            "Admin access required".to_string(),
+        ));
     }
 
     if state.book_repo.find_by_id(&id).await?.is_none() {
-        return Err(TingError::NotFound(format!("Book with id {} not found", id)));
+        return Err(TingError::NotFound(format!(
+            "Book with id {} not found",
+            id
+        )));
     }
 
     let chapter_repo = ChapterRepository::new(state.book_repo.db().clone());
@@ -728,15 +832,19 @@ pub async fn batch_update_chapters(
     }
 
     // Regenerate metadata.json if enabled
-    let book = state.book_repo.find_by_id(&id).await?
+    let book = state
+        .book_repo
+        .find_by_id(&id)
+        .await?
         .ok_or_else(|| TingError::NotFound(format!("Book with id {} not found", id)))?;
 
     if let Ok(Some(library)) = state.library_repo.find_by_id(&book.library_id).await {
-        let config: crate::db::models::ScraperConfig = library.scraper_config
+        let config: crate::db::models::ScraperConfig = library
+            .scraper_config
             .as_ref()
             .and_then(|json| serde_json::from_str(json).ok())
             .unwrap_or_default();
-            
+
         if config.metadata_writing_enabled {
             // Determine path
             let target_dir = if library.library_type == "webdav" {
@@ -744,22 +852,35 @@ pub async fn batch_update_chapters(
                 use sha2::Digest;
                 hasher.update(book.path.as_bytes());
                 let book_hash = format!("{:x}", hasher.finalize());
-                let temp_book_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-                    .join("temp").join(&book_hash);
-                if !temp_book_dir.exists() { std::fs::create_dir_all(&temp_book_dir).ok(); }
+                let temp_book_dir = std::env::current_dir()
+                    .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                    .join("temp")
+                    .join(&book_hash);
+                if !temp_book_dir.exists() {
+                    std::fs::create_dir_all(&temp_book_dir).ok();
+                }
                 temp_book_dir
             } else {
                 std::path::PathBuf::from(&book.path)
             };
 
-            let mut metadata_json = crate::core::metadata_writer::read_metadata_json(&target_dir).unwrap_or(None).unwrap_or_default();
-            
+            let mut metadata_json = crate::core::metadata_writer::read_metadata_json(&target_dir)
+                .unwrap_or(None)
+                .unwrap_or_default();
+
             // Sync chapters from DB
             if let Ok(chapters) = chapter_repo.find_by_book(&book.id).await {
                 let mut sorted_chapters = chapters;
                 sorted_chapters.sort_by(|a, b| {
-                    a.chapter_index.unwrap_or(0).cmp(&b.chapter_index.unwrap_or(0))
-                        .then_with(|| natord::compare(a.title.as_deref().unwrap_or(""), b.title.as_deref().unwrap_or("")))
+                    a.chapter_index
+                        .unwrap_or(0)
+                        .cmp(&b.chapter_index.unwrap_or(0))
+                        .then_with(|| {
+                            natord::compare(
+                                a.title.as_deref().unwrap_or(""),
+                                b.title.as_deref().unwrap_or(""),
+                            )
+                        })
                 });
 
                 let mut abs_chapters = Vec::new();
@@ -776,9 +897,13 @@ pub async fn batch_update_chapters(
                 }
                 metadata_json.chapters = abs_chapters;
             }
-            
+
             // Sync series from DB
-            let series_list = state.series_repo.find_series_by_book(&book.id).await.unwrap_or_default();
+            let series_list = state
+                .series_repo
+                .find_series_by_book(&book.id)
+                .await
+                .unwrap_or_default();
             let mut series_titles = Vec::new();
             for series in series_list {
                 if let Ok(books) = state.series_repo.find_books_by_series(&series.id).await {
@@ -792,8 +917,10 @@ pub async fn batch_update_chapters(
                 }
             }
             metadata_json.series = series_titles;
-            
-            if let Err(e) = crate::core::metadata_writer::write_metadata_json(&target_dir, &metadata_json) {
+
+            if let Err(e) =
+                crate::core::metadata_writer::write_metadata_json(&target_dir, &metadata_json)
+            {
                 tracing::error!(target: "audit::metadata", "为批量更新 {} 写入 metadata.json 失败: {}", book.title.as_deref().unwrap_or("?"), e);
             }
         }
@@ -801,24 +928,6 @@ pub async fn batch_update_chapters(
 
     Ok(Json(serde_json::json!({
         "message": "Chapters updated successfully"
-    })))
-}
-
-
-/// Handler for POST /api/v1/books/merge/ignore - Ignore a merge suggestion
-pub async fn ignore_merge_suggestion(
-    State(state): State<AppState>,
-    user: crate::auth::middleware::AuthUser,
-    Json(req): Json<IgnoreMergeSuggestionRequest>,
-) -> Result<impl IntoResponse> {
-    if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
-    }
-
-    state.merge_service.ignore_suggestion(&req.suggestion_id).await?;
-
-    Ok(Json(serde_json::json!({
-        "message": "Suggestion ignored successfully"
     })))
 }
 
@@ -830,10 +939,15 @@ pub async fn update_book_correction(
     Json(req): Json<UpdateBookCorrectionRequest>,
 ) -> Result<impl IntoResponse> {
     if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
+        return Err(TingError::PermissionDenied(
+            "Admin access required".to_string(),
+        ));
     }
 
-    state.merge_service.update_manual_correction(&id, req.manual_corrected, req.match_pattern).await?;
+    state
+        .merge_service
+        .update_manual_correction(&id, req.manual_corrected, req.match_pattern)
+        .await?;
 
     Ok(Json(serde_json::json!({
         "message": "Book correction status updated successfully"
@@ -847,10 +961,15 @@ pub async fn move_chapters(
     Json(req): Json<MoveChaptersRequest>,
 ) -> Result<impl IntoResponse> {
     if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
+        return Err(TingError::PermissionDenied(
+            "Admin access required".to_string(),
+        ));
     }
 
-    state.merge_service.move_chapters(&req.target_book_id, req.chapter_ids).await?;
+    state
+        .merge_service
+        .move_chapters(&req.target_book_id, req.chapter_ids)
+        .await?;
 
     Ok(Json(serde_json::json!({
         "message": "Chapters moved successfully"
@@ -864,10 +983,15 @@ pub async fn write_book_metadata_to_files(
     user: crate::auth::middleware::AuthUser,
 ) -> Result<impl IntoResponse> {
     if user.role != "admin" {
-        return Err(TingError::PermissionDenied("Admin access required".to_string()));
+        return Err(TingError::PermissionDenied(
+            "Admin access required".to_string(),
+        ));
     }
 
-    let book = state.book_repo.find_by_id(&id).await?
+    let book = state
+        .book_repo
+        .find_by_id(&id)
+        .await?
         .ok_or_else(|| TingError::NotFound(format!("Book with id {} not found", id)))?;
 
     // Create task

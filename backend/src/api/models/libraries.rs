@@ -28,7 +28,9 @@ impl From<crate::db::models::Library> for LibraryResponse {
             root_path: library.root_path,
             last_scanned_at: library.last_scanned_at,
             created_at: library.created_at,
-            scraper_config: library.scraper_config.and_then(|s| serde_json::from_str(&s).ok()),
+            scraper_config: library
+                .scraper_config
+                .and_then(|s| serde_json::from_str(&s).ok()),
         }
     }
 }
@@ -41,7 +43,7 @@ pub struct LibrariesListResponse {
 }
 
 /// Request body for creating a library
-/// 
+///
 /// Accepts frontend format: path (for local), webdav_url, webdav_username, webdav_password
 #[derive(Debug, Deserialize)]
 pub struct CreateLibraryRequest {
@@ -64,7 +66,7 @@ pub struct CreateLibraryRequest {
 }
 
 /// Request body for updating a library
-/// 
+///
 /// Accepts frontend format: path, webdav_url, webdav_username, webdav_password
 #[derive(Debug, Deserialize)]
 pub struct UpdateLibraryRequest {

@@ -20,10 +20,22 @@ fn test_vulnerability_severity_ordering() {
 
 #[test]
 fn test_vulnerability_severity_from_str() {
-    assert_eq!(VulnerabilitySeverity::from_str("low"), Some(VulnerabilitySeverity::Low));
-    assert_eq!(VulnerabilitySeverity::from_str("moderate"), Some(VulnerabilitySeverity::Moderate));
-    assert_eq!(VulnerabilitySeverity::from_str("high"), Some(VulnerabilitySeverity::High));
-    assert_eq!(VulnerabilitySeverity::from_str("critical"), Some(VulnerabilitySeverity::Critical));
+    assert_eq!(
+        VulnerabilitySeverity::from_str("low"),
+        Some(VulnerabilitySeverity::Low)
+    );
+    assert_eq!(
+        VulnerabilitySeverity::from_str("moderate"),
+        Some(VulnerabilitySeverity::Moderate)
+    );
+    assert_eq!(
+        VulnerabilitySeverity::from_str("high"),
+        Some(VulnerabilitySeverity::High)
+    );
+    assert_eq!(
+        VulnerabilitySeverity::from_str("critical"),
+        Some(VulnerabilitySeverity::Critical)
+    );
     assert_eq!(VulnerabilitySeverity::from_str("invalid"), None);
 }
 
@@ -34,7 +46,10 @@ fn test_security_config_default() {
     assert!(config.enforce_version_lock);
     assert!(!config.enable_audit);
     assert!(!config.fail_on_audit_vulnerabilities);
-    assert_eq!(config.max_vulnerability_severity, VulnerabilitySeverity::High);
+    assert_eq!(
+        config.max_vulnerability_severity,
+        VulnerabilitySeverity::High
+    );
 }
 
 #[test]
@@ -89,8 +104,12 @@ fn test_package_json_creation() {
     ];
 
     let package_json = PackageJson::from_plugin_metadata(
-        "test-plugin", "1.0.0",
-        Some("Test plugin"), Some("Test Author"), Some("MIT"), &deps,
+        "test-plugin",
+        "1.0.0",
+        Some("Test plugin"),
+        Some("Test Author"),
+        Some("MIT"),
+        &deps,
     );
 
     assert_eq!(package_json.name, "test-plugin");
@@ -99,8 +118,14 @@ fn test_package_json_creation() {
     assert_eq!(package_json.author, Some("Test Author".to_string()));
     assert_eq!(package_json.license, Some("MIT".to_string()));
     assert_eq!(package_json.dependencies.len(), 2);
-    assert_eq!(package_json.dependencies.get("axios"), Some(&"^1.6.0".to_string()));
-    assert_eq!(package_json.dependencies.get("cheerio"), Some(&"^1.0.0".to_string()));
+    assert_eq!(
+        package_json.dependencies.get("axios"),
+        Some(&"^1.6.0".to_string())
+    );
+    assert_eq!(
+        package_json.dependencies.get("cheerio"),
+        Some(&"^1.0.0".to_string())
+    );
     assert!(package_json.private);
 }
 
@@ -109,10 +134,17 @@ fn test_package_json_write_and_read() {
     let temp_dir = TempDir::new().unwrap();
     let package_json_path = temp_dir.path().join("package.json");
 
-    let deps = vec![NpmDependency::new("axios".to_string(), "^1.6.0".to_string())];
+    let deps = vec![NpmDependency::new(
+        "axios".to_string(),
+        "^1.6.0".to_string(),
+    )];
     let package_json = PackageJson::from_plugin_metadata(
-        "test-plugin", "1.0.0",
-        Some("Test plugin"), Some("Test Author"), Some("MIT"), &deps,
+        "test-plugin",
+        "1.0.0",
+        Some("Test plugin"),
+        Some("Test Author"),
+        Some("MIT"),
+        &deps,
     );
 
     package_json.write_to_file(&package_json_path).unwrap();
@@ -156,7 +188,10 @@ fn test_get_node_modules_path() {
     let manager = NpmManager::default();
     let plugin_dir = PathBuf::from("/path/to/plugin");
     let node_modules_path = manager.get_node_modules_path(&plugin_dir);
-    assert_eq!(node_modules_path, PathBuf::from("/path/to/plugin/node_modules"));
+    assert_eq!(
+        node_modules_path,
+        PathBuf::from("/path/to/plugin/node_modules")
+    );
 }
 
 #[test]
@@ -194,7 +229,10 @@ fn test_clean_node_modules_not_exists() {
 
 #[test]
 fn test_dependency_install_log_serialization() {
-    let deps = vec![NpmDependency::new("axios".to_string(), "^1.6.0".to_string())];
+    let deps = vec![NpmDependency::new(
+        "axios".to_string(),
+        "^1.6.0".to_string(),
+    )];
     let log = DependencyInstallLog {
         timestamp: "2024-01-01T00:00:00Z".to_string(),
         plugin_name: "test-plugin".to_string(),
@@ -304,7 +342,11 @@ fn test_cleanup_all_unused() {
 
 #[test]
 fn test_cache_hit_rate_update() {
-    let mut stats = CacheStatistics { cache_hits: 8, cache_misses: 2, ..Default::default() };
+    let mut stats = CacheStatistics {
+        cache_hits: 8,
+        cache_misses: 2,
+        ..Default::default()
+    };
     cache::update_hit_rate(&mut stats);
     assert_eq!(stats.hit_rate, 0.8);
 

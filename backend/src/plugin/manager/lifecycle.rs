@@ -1,20 +1,21 @@
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{info, error, warn};
+use tracing::{error, info, warn};
 
+use super::{FailedPlugin, PluginEntry, PluginManager};
 use crate::core::error::{Result, TingError};
-use crate::plugin::types::{Plugin, PluginId, PluginMetadata, PluginContext, PluginState};
+use crate::plugin::installer::PluginInstaller;
 use crate::plugin::js::{JavaScriptPluginLoader, JavaScriptPluginWrapper};
 use crate::plugin::native::{NativeLoader, NativePlugin};
-use crate::plugin::installer::PluginInstaller;
-use super::{PluginManager, PluginEntry, FailedPlugin};
+use crate::plugin::types::{Plugin, PluginContext, PluginId, PluginMetadata, PluginState};
 
 impl PluginManager {
     /// Load a plugin from a directory
     pub async fn load_plugin(&self, plugin_path: &Path) -> Result<PluginId> {
-        let _permit = self.load_semaphore.acquire().await
-            .map_err(|e| TingError::PluginLoadError(format!("Failed to acquire load permit: {}", e)))?;
+        let _permit = self.load_semaphore.acquire().await.map_err(|e| {
+            TingError::PluginLoadError(format!("Failed to acquire load permit: {}", e))
+        })?;
 
         info!("Acquired plugin load permit for: {}", plugin_path.display());
 
@@ -32,29 +33,29 @@ impl PluginManager {
         }
 
         let load_future = self.load_plugin_instance(plugin_path, &metadata);
-        let (instance, state, error) = match tokio::time::timeout(
-            Duration::from_secs(30),
-            load_future
-        ).await {
-            Ok(Ok(inst)) => (inst, PluginState::Loaded, None),
-            Ok(Err(e)) => {
-                error!("Failed to load plugin {}: {}", plugin_id, e);
-                (
-                    Arc::new(FailedPlugin::new(metadata.clone(), e.to_string())) as Arc<dyn Plugin>,
-                    PluginState::Failed,
-                    Some(e.to_string())
-                )
-            }
-            Err(_) => {
-                let timeout_err = format!("Plugin load timeout after 30s");
-                error!("{} for plugin {}", timeout_err, plugin_id);
-                (
-                    Arc::new(FailedPlugin::new(metadata.clone(), timeout_err.clone())) as Arc<dyn Plugin>,
-                    PluginState::Failed,
-                    Some(timeout_err)
-                )
-            }
-        };
+        let (instance, state, error) =
+            match tokio::time::timeout(Duration::from_secs(30), load_future).await {
+                Ok(Ok(inst)) => (inst, PluginState::Loaded, None),
+                Ok(Err(e)) => {
+                    error!("Failed to load plugin {}: {}", plugin_id, e);
+                    (
+                        Arc::new(FailedPlugin::new(metadata.clone(), e.to_string()))
+                            as Arc<dyn Plugin>,
+                        PluginState::Failed,
+                        Some(e.to_string()),
+                    )
+                }
+                Err(_) => {
+                    let timeout_err = format!("Plugin load timeout after 30s");
+                    error!("{} for plugin {}", timeout_err, plugin_id);
+                    (
+                        Arc::new(FailedPlugin::new(metadata.clone(), timeout_err.clone()))
+                            as Arc<dyn Plugin>,
+                        PluginState::Failed,
+                        Some(timeout_err),
+                    )
+                }
+            };
 
         // Register plugin
         {
@@ -86,10 +87,15 @@ impl PluginManager {
         Ok(plugin_id)
     }
 
-    pub(crate) async fn load_plugin_instance(&self, plugin_path: &Path, metadata: &PluginMetadata) -> Result<Arc<dyn Plugin>> {
+    pub(crate) async fn load_plugin_instance(
+        &self,
+        plugin_path: &Path,
+        metadata: &PluginMetadata,
+    ) -> Result<Arc<dyn Plugin>> {
         if metadata.entry_point.ends_with(".js") {
-            let loader = JavaScriptPluginLoader::new(plugin_path.to_path_buf())
-                .map_err(|e| TingError::PluginLoadError(format!("Failed to create JS loader: {}", e)))?;
+            let loader = JavaScriptPluginLoader::new(plugin_path.to_path_buf()).map_err(|e| {
+                TingError::PluginLoadError(format!("Failed to create JS loader: {}", e))
+            })?;
             let wrapper = JavaScriptPluginWrapper::new(loader)?;
             Ok(Arc::new(wrapper))
         } else if metadata.entry_point.ends_with(".wasm") {
@@ -97,14 +103,25 @@ impl PluginManager {
             let module = self.wasm_runtime.load_module_from_file(&wasm_path).await?;
             let instance = self.wasm_runtime.instantiate(module, metadata).await?;
             Ok(Arc::new(instance))
-        } else if metadata.entry_point.ends_with(".dll") || metadata.entry_point.ends_with(".so") || metadata.entry_point.ends_with(".dylib") {
+        } else if metadata.entry_point.ends_with(".dll")
+            || metadata.entry_point.ends_with(".so")
+            || metadata.entry_point.ends_with(".dylib")
+        {
             let lib_path = plugin_path.join(&metadata.entry_point);
             let loader = Arc::new(NativeLoader::new());
             loader.load_library(metadata.instance_id(), &lib_path, metadata.clone())?;
-            let plugin = NativePlugin::new(metadata.instance_id(), metadata.clone(), loader, plugin_path.to_path_buf());
+            let plugin = NativePlugin::new(
+                metadata.instance_id(),
+                metadata.clone(),
+                loader,
+                plugin_path.to_path_buf(),
+            );
             Ok(Arc::new(plugin))
         } else {
-            Err(TingError::PluginLoadError(format!("Unsupported entry point: {}", metadata.entry_point)))
+            Err(TingError::PluginLoadError(format!(
+                "Unsupported entry point: {}",
+                metadata.entry_point
+            )))
         }
     }
 
@@ -139,23 +156,36 @@ impl PluginManager {
 
         let installer = PluginInstaller::new(
             self.config.plugin_dir.clone(),
-            self.config.plugin_dir.join("temp")
+            self.config.plugin_dir.join("temp"),
         )?;
 
         if let Err(e) = installer.uninstall_plugin(plugin_id) {
-            warn!("Failed to uninstall plugin using standard ID path: {}. Searching for directory...", e);
+            warn!(
+                "Failed to uninstall plugin using standard ID path: {}. Searching for directory...",
+                e
+            );
 
             let mut found = false;
-            let mut read_dir = tokio::fs::read_dir(&self.config.plugin_dir).await.map_err(TingError::IoError)?;
+            let mut read_dir = tokio::fs::read_dir(&self.config.plugin_dir)
+                .await
+                .map_err(TingError::IoError)?;
 
             while let Some(entry) = read_dir.next_entry().await.map_err(TingError::IoError)? {
                 let path = entry.path();
                 if path.is_dir() && path.join("plugin.json").exists() {
                     if let Ok(metadata) = self.read_plugin_metadata(&path) {
                         if &metadata.instance_id() == plugin_id {
-                            info!("Found plugin directory for {}: {}", plugin_id, path.display());
+                            info!(
+                                "Found plugin directory for {}: {}",
+                                plugin_id,
+                                path.display()
+                            );
                             if let Err(e) = tokio::fs::remove_dir_all(&path).await {
-                                error!("Failed to remove plugin directory {}: {}", path.display(), e);
+                                error!(
+                                    "Failed to remove plugin directory {}: {}",
+                                    path.display(),
+                                    e
+                                );
                             }
                             found = true;
                             break;
@@ -189,7 +219,8 @@ impl PluginManager {
             })?;
 
             let registry = self.registry.read().await;
-            let metadata = registry.get(id)
+            let metadata = registry
+                .get(id)
                 .map(|e| e.metadata.clone())
                 .ok_or_else(|| TingError::PluginNotFound(id.clone()))?;
 
@@ -211,7 +242,10 @@ impl PluginManager {
 
                     {
                         let mut registry = self.registry.write().await;
-                        registry.insert(new_metadata.instance_id(), PluginEntry::new(new_metadata.clone(), instance));
+                        registry.insert(
+                            new_metadata.instance_id(),
+                            PluginEntry::new(new_metadata.clone(), instance),
+                        );
                     }
 
                     self.initialize_plugin(&new_id).await?;
@@ -252,7 +286,7 @@ impl PluginManager {
     pub async fn install_plugin_package(&self, package_path: &Path) -> Result<PluginId> {
         let installer = PluginInstaller::new(
             self.config.plugin_dir.clone(),
-            self.config.plugin_dir.join("temp")
+            self.config.plugin_dir.join("temp"),
         )?;
 
         let metadata = installer.get_package_metadata(package_path)?;
@@ -267,8 +301,9 @@ impl PluginManager {
             let registry = self.registry.read().await;
             let mut to_remove = Vec::new();
             for (id, entry) in registry.iter() {
-                let is_same_plugin = entry.metadata.id == metadata.id ||
-                    (entry.metadata.id == entry.metadata.name && entry.metadata.name == metadata.name);
+                let is_same_plugin = entry.metadata.id == metadata.id
+                    || (entry.metadata.id == entry.metadata.name
+                        && entry.metadata.name == metadata.name);
 
                 if is_same_plugin && id != &target_plugin_id {
                     to_remove.push(id.clone());
@@ -278,14 +313,20 @@ impl PluginManager {
         };
 
         for old_id in old_versions_to_remove {
-            info!("Found old version of plugin {}, removing: {}", metadata.id, old_id);
+            info!(
+                "Found old version of plugin {}, removing: {}",
+                metadata.id, old_id
+            );
             if let Err(e) = self.uninstall_plugin(&old_id).await {
                 tracing::warn!("卸载旧版本 {} 失败: {}", old_id, e);
             }
         }
 
         if needs_unload {
-            info!("Plugin {} is already loaded, unloading before re-installation", target_plugin_id);
+            info!(
+                "Plugin {} is already loaded, unloading before re-installation",
+                target_plugin_id
+            );
             if let Err(e) = self.unload_plugin(&target_plugin_id).await {
                 tracing::warn!("安装前卸载插件 {} 失败: {}", target_plugin_id, e);
             }
@@ -306,9 +347,9 @@ impl PluginManager {
         info!("Installing plugin from store: {}", plugin_id);
 
         let plugins = self.get_store_plugins().await?;
-        let plugin = plugins.iter()
-            .find(|p| p.id == plugin_id)
-            .ok_or_else(|| TingError::PluginNotFound(format!("Plugin {} not found in store", plugin_id)))?;
+        let plugin = plugins.iter().find(|p| p.id == plugin_id).ok_or_else(|| {
+            TingError::PluginNotFound(format!("Plugin {} not found in store", plugin_id))
+        })?;
 
         let download_url = crate::plugin::store::get_download_url(plugin)?;
 
@@ -316,10 +357,14 @@ impl PluginManager {
 
         let temp_dir = self.config.plugin_dir.join("temp");
         if !temp_dir.exists() {
-            tokio::fs::create_dir_all(&temp_dir).await.map_err(TingError::IoError)?;
+            tokio::fs::create_dir_all(&temp_dir)
+                .await
+                .map_err(TingError::IoError)?;
         }
 
-        let temp_path = crate::plugin::store::download_plugin(&self.http_client, &download_url, &temp_dir).await?;
+        let temp_path =
+            crate::plugin::store::download_plugin(&self.http_client, &download_url, &temp_dir)
+                .await?;
 
         info!("Installing plugin package from {}", temp_path.display());
         let result = self.install_plugin_package(&temp_path).await;
@@ -336,7 +381,9 @@ impl PluginManager {
     pub(crate) async fn initialize_plugin(&self, plugin_id: &PluginId) -> Result<()> {
         let (metadata, config_schema) = {
             let registry = self.registry.read().await;
-            let entry = registry.get(plugin_id).ok_or_else(|| TingError::PluginNotFound(plugin_id.clone()))?;
+            let entry = registry
+                .get(plugin_id)
+                .ok_or_else(|| TingError::PluginNotFound(plugin_id.clone()))?;
             (entry.metadata.clone(), entry.metadata.config_schema.clone())
         };
 
@@ -359,7 +406,9 @@ impl PluginManager {
 
         let instance = {
             let mut registry = self.registry.write().await;
-            let entry = registry.get_mut(plugin_id).ok_or_else(|| TingError::PluginNotFound(plugin_id.clone()))?;
+            let entry = registry
+                .get_mut(plugin_id)
+                .ok_or_else(|| TingError::PluginNotFound(plugin_id.clone()))?;
             entry.set_state(PluginState::Initializing);
             entry.instance.clone()
         };
@@ -379,7 +428,9 @@ impl PluginManager {
     pub(crate) async fn shutdown_plugin(&self, plugin_id: &PluginId) -> Result<()> {
         let instance = {
             let mut registry = self.registry.write().await;
-            let entry = registry.get_mut(plugin_id).ok_or_else(|| TingError::PluginNotFound(plugin_id.clone()))?;
+            let entry = registry
+                .get_mut(plugin_id)
+                .ok_or_else(|| TingError::PluginNotFound(plugin_id.clone()))?;
             entry.set_state(PluginState::Unloading);
             entry.instance.clone()
         };
@@ -392,12 +443,16 @@ impl PluginManager {
         let instance_id = metadata.instance_id();
         let config = if let Some(cm) = self.config_manager.read().unwrap().as_ref() {
             cm.get_config(&instance_id).unwrap_or_else(|_| {
-                metadata.config_schema.as_ref()
+                metadata
+                    .config_schema
+                    .as_ref()
                     .map(|s| extract_defaults_from_schema(s))
                     .unwrap_or(serde_json::json!({}))
             })
         } else {
-            metadata.config_schema.as_ref()
+            metadata
+                .config_schema
+                .as_ref()
                 .map(|s| extract_defaults_from_schema(s))
                 .unwrap_or(serde_json::json!({}))
         };
@@ -405,7 +460,9 @@ impl PluginManager {
         Ok(PluginContext {
             config,
             data_dir: self.config.plugin_dir.join("data").join(&metadata.name),
-            logger: Arc::new(crate::plugin::logger::DefaultPluginLogger::new(metadata.name.clone())),
+            logger: Arc::new(crate::plugin::logger::DefaultPluginLogger::new(
+                metadata.name.clone(),
+            )),
             event_bus: Arc::new(crate::plugin::events::DefaultPluginEventBus::new()),
         })
     }

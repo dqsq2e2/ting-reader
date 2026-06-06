@@ -50,19 +50,20 @@ impl WsSessionManager {
     pub async fn unsubscribe(&self, user_id: &str) {
         self.channels.write().await.remove(user_id);
     }
-    
+
     /// Clean up channels with no active receivers.
     /// This can be called periodically to free memory from inactive users.
     pub async fn cleanup_inactive_channels(&self) {
         let mut channels = self.channels.write().await;
         channels.retain(|_, sender| sender.receiver_count() > 0);
     }
-    
+
     /// Get statistics about active channels
     pub async fn get_stats(&self) -> (usize, usize) {
         let channels = self.channels.read().await;
         let total_channels = channels.len();
-        let active_receivers: usize = channels.values()
+        let active_receivers: usize = channels
+            .values()
             .map(|sender| sender.receiver_count())
             .sum();
         (total_channels, active_receivers)

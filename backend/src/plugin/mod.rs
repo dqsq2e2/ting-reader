@@ -10,35 +10,42 @@
 //! - npm dependency manager for JavaScript plugins
 
 pub mod config;
+pub mod events;
 pub mod format;
 pub mod fs_utils;
 pub mod installer;
 pub mod js;
-pub mod manager;
 pub mod logger;
-pub mod events;
+pub mod manager;
 pub mod native;
 // npm moved into js/
 pub mod registry;
-pub mod wasm;
 pub mod scraper;
 pub mod store;
 pub mod types;
 pub mod utility;
+pub mod wasm;
 
-pub use config::{PluginConfigManager, ConfigChangeEvent};
-pub use format::{FormatPlugin, TranscodeOptions, AudioFormat, AudioMetadata, ProgressCallback};
+pub use config::{ConfigChangeEvent, PluginConfigManager};
+pub use format::{AudioFormat, AudioMetadata, FormatPlugin, ProgressCallback, TranscodeOptions};
 pub use installer::{PluginInstaller, PluginPackage};
-pub use js::{JsScraperPlugin, JsPluginLogger, JsPluginEventBus, create_js_runtime_with_bindings, JavaScriptPluginLoader, JavaScriptPluginExecutor, JavaScriptPluginWrapper, JsRuntimeWrapper, JsError};
-pub use manager::{PluginManager, PluginConfig, PluginInfo};
-pub use native::{NativeLoader, NativePlugin};
-pub use js::npm::{NpmManager, NpmDependency, PackageJson, NpmSecurityConfig, VulnerabilitySeverity, NpmAuditResult};
-pub use registry::{PluginRegistry, PluginEntry};
-pub use wasm::{WasmRuntime, WasmPlugin, Sandbox, Permission, ResourceLimits, FileAccess};
-pub use scraper::{ScraperPlugin, SearchResult, BookItem, BookDetail, Chapter};
-pub use store::{StorePlugin, StoreDownload};
-pub use types::{Plugin, PluginType, PluginMetadata, PluginId, PluginState, PluginStats};
-pub use utility::{
-    UtilityPlugin, Capability, Endpoint, HttpMethod, Request, Response,
-    EndpointHandler, EventType, Event, EventSource,
+pub use js::npm::{
+    NpmAuditResult, NpmDependency, NpmManager, NpmSecurityConfig, PackageJson,
+    VulnerabilitySeverity,
 };
+pub use js::{
+    create_js_runtime_with_bindings, JavaScriptPluginExecutor, JavaScriptPluginLoader,
+    JavaScriptPluginWrapper, JsError, JsPluginEventBus, JsPluginLogger, JsRuntimeWrapper,
+    JsScraperPlugin,
+};
+pub use manager::{PluginConfig, PluginInfo, PluginManager};
+pub use native::{NativeLoader, NativePlugin};
+pub use registry::{PluginEntry, PluginRegistry};
+pub use scraper::{BookDetail, BookItem, Chapter, ScraperPlugin, SearchResult};
+pub use store::{StoreDownload, StorePlugin};
+pub use types::{Plugin, PluginId, PluginMetadata, PluginState, PluginStats, PluginType};
+pub use utility::{
+    Capability, Endpoint, EndpointHandler, Event, EventSource, EventType, HttpMethod, Request,
+    Response, UtilityPlugin,
+};
+pub use wasm::{FileAccess, Permission, ResourceLimits, Sandbox, WasmPlugin, WasmRuntime};

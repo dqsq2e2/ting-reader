@@ -9,4 +9,4 @@ mod tests;
 
 pub use plugin::WasmPlugin;
 pub use runtime::WasmRuntime;
-pub use sandbox::{Sandbox, Permission, ResourceLimits, FileAccess};
+pub use sandbox::{FileAccess, Permission, ResourceLimits, Sandbox};

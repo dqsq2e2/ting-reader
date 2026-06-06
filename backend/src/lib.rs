@@ -11,8 +11,8 @@ pub mod db;
 pub mod plugin;
 
 // Re-export commonly used types
-pub use api::ApiServer;
 pub use crate::core::{Config, EventBus, TaskQueue};
+pub use api::ApiServer;
 pub use db::DatabaseManager;
 pub use plugin::{PluginManager, PluginRegistry};
 

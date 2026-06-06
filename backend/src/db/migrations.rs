@@ -3,11 +3,11 @@
 //! This module provides database schema migration functionality with automatic backup and rollback.
 
 use crate::core::error::{Result, TingError};
-use rusqlite::Connection;
-use tracing::{info, warn, error};
-use std::path::{Path, PathBuf};
-use std::fs;
 use chrono::Local;
+use rusqlite::Connection;
+use std::fs;
+use std::path::{Path, PathBuf};
+use tracing::{error, info, warn};
 
 /// Migration version tracking table
 const MIGRATION_TABLE: &str = r#"
@@ -57,31 +57,6 @@ CREATE TABLE IF NOT EXISTS chapters (
     is_extra INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
-);
-
--- Plugin registry table
-CREATE TABLE IF NOT EXISTS plugin_registry (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    version TEXT NOT NULL,
-    plugin_type TEXT NOT NULL,
-    description TEXT,
-    author TEXT,
-    enabled INTEGER DEFAULT 1,
-    config TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- Plugin dependencies table
-CREATE TABLE IF NOT EXISTS plugin_dependencies (
-    plugin_id TEXT NOT NULL,
-    dependency_id TEXT NOT NULL,
-    version_requirement TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (plugin_id, dependency_id),
-    FOREIGN KEY (plugin_id) REFERENCES plugin_registry(id) ON DELETE CASCADE,
-    FOREIGN KEY (dependency_id) REFERENCES plugin_registry(id) ON DELETE CASCADE
 );
 
 -- Tasks table (compatible with Node.js version)
@@ -155,8 +130,6 @@ CREATE INDEX IF NOT EXISTS idx_books_library_id ON books(library_id);
 CREATE INDEX IF NOT EXISTS idx_books_hash ON books(hash);
 CREATE INDEX IF NOT EXISTS idx_chapters_book_id ON chapters(book_id);
 CREATE INDEX IF NOT EXISTS idx_chapters_index ON chapters(book_id, chapter_index);
-CREATE INDEX IF NOT EXISTS idx_plugin_registry_type ON plugin_registry(plugin_type);
-CREATE INDEX IF NOT EXISTS idx_plugin_registry_enabled ON plugin_registry(enabled);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(type);
 CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at);
@@ -207,19 +180,6 @@ const MIGRATION_V5: &str = r#"
 ALTER TABLE books ADD COLUMN manual_corrected INTEGER DEFAULT 0;
 ALTER TABLE books ADD COLUMN match_pattern TEXT;
 
--- Merge suggestions table
-CREATE TABLE IF NOT EXISTS merge_suggestions (
-    id TEXT PRIMARY KEY,
-    book_a_id TEXT NOT NULL,
-    book_b_id TEXT NOT NULL,
-    score REAL,
-    reason TEXT,
-    status TEXT DEFAULT 'pending',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (book_a_id) REFERENCES books(id) ON DELETE CASCADE,
-    FOREIGN KEY (book_b_id) REFERENCES books(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_merge_suggestions_status ON merge_suggestions(status);
 "#;
 
 /// Sixth schema migration (version 6)
@@ -312,6 +272,14 @@ CREATE TABLE IF NOT EXISTS system_settings (
 );
 "#;
 
+/// Fourteenth schema migration (version 14)
+const MIGRATION_V14: &str = r#"
+-- Remove unused plugin persistence tables. Runtime plugins are loaded from metadata files.
+DROP TABLE IF EXISTS merge_suggestions;
+DROP TABLE IF EXISTS plugin_dependencies;
+DROP TABLE IF EXISTS plugin_registry;
+"#;
+
 /// Run all pending database migrations
 ///
 /// This function applies database schema migrations in order.
@@ -320,11 +288,11 @@ CREATE TABLE IF NOT EXISTS system_settings (
 /// If a migration fails, it automatically rolls back to the backup.
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     info!("正在运行数据库迁移");
-    
+
     // Create migration tracking table
     conn.execute_batch(MIGRATION_TABLE)
         .map_err(|e| TingError::DatabaseError(e))?;
-    
+
     // Check current version
     let current_version: i64 = conn
         .query_row(
@@ -333,9 +301,9 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
             |row| row.get(0),
         )
         .map_err(|e| TingError::DatabaseError(e))?;
-    
+
     info!("当前数据库模式版本: {}", current_version);
-    
+
     // Apply migrations
     if current_version < 1 {
         info!("Applying migration v1: Initial schema");
@@ -371,35 +339,50 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         info!("Applying migration v7: Chapter Lock");
         apply_migration(conn, 7, MIGRATION_V7)?;
     }
-    
+
     if current_version < 8 {
         info!("Applying migration v8: Fix Tasks Table Schema");
         // Check if columns exist before applying
-        let has_retries: bool = conn.query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name = 'retries'",
-            [],
-            |row| row.get(0),
-        ).unwrap_or(0) > 0;
+        let has_retries: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name = 'retries'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0)
+            > 0;
 
-        let has_max_retries: bool = conn.query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name = 'max_retries'",
-            [],
-            |row| row.get(0),
-        ).unwrap_or(0) > 0;
+        let has_max_retries: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name = 'max_retries'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0)
+            > 0;
 
         if !has_retries {
             info!("Adding missing column 'retries' to tasks table");
-            conn.execute("ALTER TABLE tasks ADD COLUMN retries INTEGER DEFAULT 0", []).map_err(TingError::DatabaseError)?;
+            conn.execute("ALTER TABLE tasks ADD COLUMN retries INTEGER DEFAULT 0", [])
+                .map_err(TingError::DatabaseError)?;
         }
 
         if !has_max_retries {
-             info!("Adding missing column 'max_retries' to tasks table");
-             conn.execute("ALTER TABLE tasks ADD COLUMN max_retries INTEGER DEFAULT 3", []).map_err(TingError::DatabaseError)?;
+            info!("Adding missing column 'max_retries' to tasks table");
+            conn.execute(
+                "ALTER TABLE tasks ADD COLUMN max_retries INTEGER DEFAULT 3",
+                [],
+            )
+            .map_err(TingError::DatabaseError)?;
         }
 
         // Update version manually since we are not using apply_migration for conditional logic
         // Use INSERT OR IGNORE just in case, though the version check above should prevent duplicates
-        conn.execute("INSERT OR IGNORE INTO schema_migrations (version) VALUES (8)", []).map_err(TingError::DatabaseError)?;
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_migrations (version) VALUES (8)",
+            [],
+        )
+        .map_err(TingError::DatabaseError)?;
         info!("Migration v8 applied successfully");
     }
 
@@ -428,6 +411,11 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_migration(conn, 13, MIGRATION_V13)?;
     }
 
+    if current_version < 14 {
+        info!("Applying migration v14: Remove unused plugin persistence tables");
+        apply_migration(conn, 14, MIGRATION_V14)?;
+    }
+
     info!("数据库迁移成功完成");
     Ok(())
 }
@@ -438,15 +426,14 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
 /// If any migration fails, it restores from the backup.
 pub fn run_migrations_with_backup(db_path: &Path) -> Result<()> {
     info!("正在运行数据库迁移 with automatic backup");
-    
+
     // Create backup before migration
     let backup_path = create_migration_backup(db_path)?;
     info!("Created migration backup at: {}", backup_path.display());
-    
+
     // Open connection and run migrations
-    let mut conn = Connection::open(db_path)
-        .map_err(|e| TingError::DatabaseError(e))?;
-    
+    let mut conn = Connection::open(db_path).map_err(|e| TingError::DatabaseError(e))?;
+
     match run_migrations(&mut conn) {
         Ok(_) => {
             info!("Migrations completed successfully, keeping backup");
@@ -455,11 +442,11 @@ pub fn run_migrations_with_backup(db_path: &Path) -> Result<()> {
         Err(e) => {
             error!("Migration failed: {}, restoring from backup", e);
             drop(conn); // Close connection before restoring
-            
+
             // Restore from backup
             restore_from_backup(&backup_path, db_path)?;
             info!("Database restored from backup");
-            
+
             Err(e)
         }
     }
@@ -468,28 +455,26 @@ pub fn run_migrations_with_backup(db_path: &Path) -> Result<()> {
 /// Create a backup of the database before migration
 fn create_migration_backup(db_path: &Path) -> Result<PathBuf> {
     let timestamp = Local::now().format("%Y%m%d_%H%M%S");
-    let backup_dir = db_path.parent()
+    let backup_dir = db_path
+        .parent()
         .ok_or_else(|| TingError::ConfigError("Invalid database path".to_string()))?
         .join("backups");
-    
+
     // Create backup directory if it doesn't exist
-    fs::create_dir_all(&backup_dir)
-        .map_err(|e| TingError::IoError(e))?;
-    
+    fs::create_dir_all(&backup_dir).map_err(|e| TingError::IoError(e))?;
+
     let backup_path = backup_dir.join(format!("migration_backup_{}.db", timestamp));
-    
+
     // Copy database file
-    fs::copy(db_path, &backup_path)
-        .map_err(|e| TingError::IoError(e))?;
-    
+    fs::copy(db_path, &backup_path).map_err(|e| TingError::IoError(e))?;
+
     Ok(backup_path)
 }
 
 /// Restore database from backup
 fn restore_from_backup(backup_path: &Path, db_path: &Path) -> Result<()> {
-    fs::copy(backup_path, db_path)
-        .map_err(|e| TingError::IoError(e))?;
-    
+    fs::copy(backup_path, db_path).map_err(|e| TingError::IoError(e))?;
+
     Ok(())
 }
 
@@ -499,17 +484,18 @@ fn restore_from_backup(backup_path: &Path, db_path: &Path) -> Result<()> {
 /// Note: This requires a backup file to exist for the target version.
 pub fn rollback_to_version(db_path: &Path, target_version: i64, backup_path: &Path) -> Result<()> {
     info!("Rolling back database to version {}", target_version);
-    
+
     // Verify backup exists
     if !backup_path.exists() {
-        return Err(TingError::ConfigError(
-            format!("Backup file not found: {}", backup_path.display())
-        ));
+        return Err(TingError::ConfigError(format!(
+            "Backup file not found: {}",
+            backup_path.display()
+        )));
     }
-    
+
     // Restore from backup
     restore_from_backup(backup_path, db_path)?;
-    
+
     info!("Database rolled back to version {}", target_version);
     Ok(())
 }
@@ -517,26 +503,26 @@ pub fn rollback_to_version(db_path: &Path, target_version: i64, backup_path: &Pa
 /// Apply a single migration
 fn apply_migration(conn: &mut Connection, version: i64, sql: &str) -> Result<()> {
     // Start transaction
-    let tx = conn.transaction()
+    let tx = conn
+        .transaction()
         .map_err(|e| TingError::DatabaseError(e))?;
-    
+
     // Execute migration SQL
-    tx.execute_batch(sql)
-        .map_err(|e| {
-            warn!("Migration v{} failed: {}", version, e);
-            TingError::DatabaseError(e)
-        })?;
-    
+    tx.execute_batch(sql).map_err(|e| {
+        warn!("Migration v{} failed: {}", version, e);
+        TingError::DatabaseError(e)
+    })?;
+
     // Record migration
     tx.execute(
         "INSERT INTO schema_migrations (version) VALUES (?)",
         [version],
-    ).map_err(|e| TingError::DatabaseError(e))?;
-    
+    )
+    .map_err(|e| TingError::DatabaseError(e))?;
+
     // Commit transaction
-    tx.commit()
-        .map_err(|e| TingError::DatabaseError(e))?;
-    
+    tx.commit().map_err(|e| TingError::DatabaseError(e))?;
+
     info!("Migration v{} applied successfully", version);
     Ok(())
 }
