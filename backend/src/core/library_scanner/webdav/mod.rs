@@ -4,9 +4,14 @@ mod processing;
 
 use super::{LibraryScanner, ScanResult, ScanStatus};
 use crate::core::error::{Result, TingError};
+use crate::core::library_scanner::shared::{
+    parse_chapter_range_dir_name, select_mergeable_range_group, ChapterRangeDir,
+};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use tracing::{debug, info, warn};
+
+type WebDavFileEntry = (String, Option<chrono::DateTime<chrono::Utc>>);
 
 impl LibraryScanner {
     /// Scan a WebDAV library
@@ -34,8 +39,7 @@ impl LibraryScanner {
 
         // Group by directory URL (parent URL)
         // Key: Parent URL (String), Value: List of (File URL, Last Modified)
-        let mut dir_groups: HashMap<String, Vec<(String, Option<chrono::DateTime<chrono::Utc>>)>> =
-            HashMap::new();
+        let mut dir_groups: HashMap<String, Vec<WebDavFileEntry>> = HashMap::new();
 
         // Metadata/sidecar file extensions that should be grouped alongside audio files
         // so that cover images, metadata.json, book.nfo etc. are available during processing.
@@ -66,6 +70,8 @@ impl LibraryScanner {
         )
         .await;
 
+        let (dir_groups, coalesced_range_dirs) =
+            self.coalesce_webdav_range_directory_groups(dir_groups);
         let total_groups = dir_groups.len();
         let mut processed_count = 0;
 
@@ -86,6 +92,7 @@ impl LibraryScanner {
         }
 
         let mut found_book_ids: HashSet<String> = HashSet::new();
+        let mut absorbed_range_book_ids: HashMap<String, String> = HashMap::new();
         let last_scanned = if let Some(ref date_str) = library.last_scanned_at {
             chrono::DateTime::parse_from_rfc3339(date_str)
                 .map(|dt| dt.with_timezone(&chrono::Utc))
@@ -100,12 +107,7 @@ impl LibraryScanner {
 
             processed_count += 1;
             // Extract directory name from URL for logging
-            let decoded_dir_url = self.decode_url_path(&dir_url);
-            let dir_name = decoded_dir_url
-                .trim_end_matches('/')
-                .split('/')
-                .last()
-                .unwrap_or("Unknown");
+            let dir_name = self.webdav_url_name(&dir_url);
 
             self.update_progress(
                 task_id,
@@ -146,6 +148,16 @@ impl LibraryScanner {
             let mut existing_info = book_path_map.get(&dir_url).cloned();
             if existing_info.is_none() {
                 existing_info = book_hash_map.get(&dir_hash).cloned();
+            }
+            if existing_info.is_none() {
+                if let Some(child_dirs) = coalesced_range_dirs.get(&dir_url) {
+                    for child_dir in child_dirs {
+                        if let Some(info) = book_path_map.get(child_dir).cloned() {
+                            existing_info = Some(info);
+                            break;
+                        }
+                    }
+                }
             }
 
             // Incremental Check: Skip if book exists and no files modified since last scan
@@ -229,6 +241,18 @@ impl LibraryScanner {
                         ScanStatus::Skipped => scan_result.books_skipped += 1,
                     }
                     found_book_ids.insert(book_id.clone());
+                    if let Some(child_dirs) = coalesced_range_dirs.get(&dir_url) {
+                        for child_dir in child_dirs {
+                            if let Some((child_book_id, manual_corrected, _)) =
+                                book_path_map.get(child_dir)
+                            {
+                                if child_book_id != &book_id && *manual_corrected == 0 {
+                                    absorbed_range_book_ids
+                                        .insert(child_book_id.clone(), book_id.clone());
+                                }
+                            }
+                        }
+                    }
                     debug!(book_id = %book_id, url = %dir_url, status = ?status, "Processed WebDAV book directory");
                 }
                 Err(e) => {
@@ -244,6 +268,27 @@ impl LibraryScanner {
             self.plugin_manager.garbage_collect_all().await;
         }
 
+        if let Some(merge_service) = &self.merge_service {
+            for (source_id, target_id) in absorbed_range_book_ids {
+                if found_book_ids.contains(&source_id) {
+                    continue;
+                }
+
+                if let Err(e) = merge_service
+                    .absorb_scanned_book(&target_id, &source_id)
+                    .await
+                {
+                    warn!(
+                        "Failed to absorb WebDAV range-segment book {} into {}: {}",
+                        source_id, target_id, e
+                    );
+                } else {
+                    scan_result.books_deleted += 1;
+                    found_book_ids.insert(source_id);
+                }
+            }
+        }
+
         // 3. Handle deletions via shared helper (no path-exists check for WebDAV)
         self.handle_book_deletions(&mut scan_result, &prefetched, &found_book_ids, false)
             .await;
@@ -253,4 +298,85 @@ impl LibraryScanner {
 
         Ok(scan_result)
     }
+
+    fn coalesce_webdav_range_directory_groups(
+        &self,
+        mut dir_groups: HashMap<String, Vec<WebDavFileEntry>>,
+    ) -> (
+        HashMap<String, Vec<WebDavFileEntry>>,
+        HashMap<String, Vec<String>>,
+    ) {
+        let mut candidates: HashMap<String, Vec<(String, ChapterRangeDir)>> = HashMap::new();
+
+        for dir_url in dir_groups.keys() {
+            let Some(parent_url) = webdav_parent_url(dir_url) else {
+                continue;
+            };
+            let dir_name = self.webdav_url_name(dir_url);
+            let Some(range_dir) = parse_chapter_range_dir_name(&dir_name) else {
+                continue;
+            };
+
+            candidates
+                .entry(parent_url)
+                .or_default()
+                .push((dir_url.clone(), range_dir));
+        }
+
+        let mut coalesced_range_dirs = HashMap::new();
+
+        for (parent_url, entries) in candidates {
+            let parent_name = self.webdav_url_name(&parent_url);
+            let ranges: Vec<ChapterRangeDir> =
+                entries.iter().map(|(_, range)| range.clone()).collect();
+            let Some(indices) = select_mergeable_range_group(&parent_name, &ranges) else {
+                continue;
+            };
+
+            let mut selected: Vec<(String, ChapterRangeDir)> = indices
+                .into_iter()
+                .map(|index| entries[index].clone())
+                .collect();
+            selected.sort_by_key(|(_, range)| (range.start, range.end));
+
+            let child_dirs: Vec<String> = selected
+                .iter()
+                .map(|(child_dir, _)| child_dir.clone())
+                .collect();
+
+            for child_dir in &child_dirs {
+                if let Some(mut child_files) = dir_groups.remove(child_dir) {
+                    dir_groups
+                        .entry(parent_url.clone())
+                        .or_default()
+                        .append(&mut child_files);
+                }
+            }
+
+            if !child_dirs.is_empty() {
+                coalesced_range_dirs.insert(parent_url, child_dirs);
+            }
+        }
+
+        (dir_groups, coalesced_range_dirs)
+    }
+
+    fn webdav_url_name(&self, url: &str) -> String {
+        let raw_name = url
+            .trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .filter(|name| !name.is_empty())
+            .unwrap_or("");
+        self.decode_url_path(raw_name)
+    }
+}
+
+fn webdav_parent_url(url: &str) -> Option<String> {
+    let trimmed = url.trim_end_matches('/');
+    let slash_index = trimmed.rfind('/')?;
+    if slash_index == 0 {
+        return None;
+    }
+    Some(trimmed[..slash_index].to_string())
 }

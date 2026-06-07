@@ -3,6 +3,9 @@ mod metadata;
 
 use super::{LibraryScanner, ScanResult, ScanStatus};
 use crate::core::error::Result;
+use crate::core::library_scanner::shared::{
+    parse_chapter_range_dir_name, select_mergeable_range_group, ChapterRangeDir,
+};
 use crate::core::nfo_manager::BookMetadata;
 use crate::db::repository::Repository;
 use sha2::{Digest, Sha256};
@@ -58,6 +61,8 @@ impl LibraryScanner {
         .await;
 
         // 2. Process each directory group as a book
+        let (dir_groups, coalesced_range_dirs) =
+            coalesce_local_range_directory_groups(path, dir_groups);
         let total_groups = dir_groups.len();
         let mut processed_count = 0;
 
@@ -92,6 +97,7 @@ impl LibraryScanner {
             .collect();
 
         let mut found_book_ids: HashSet<String> = HashSet::new();
+        let mut absorbed_range_book_ids: HashMap<String, String> = HashMap::new();
 
         for (dir, mut files) in dir_groups {
             // Check cancellation
@@ -126,6 +132,17 @@ impl LibraryScanner {
                 existing_info = book_hash_map.get(&book_hash).cloned();
             }
 
+            if existing_info.is_none() {
+                if let Some(child_dirs) = coalesced_range_dirs.get(&dir) {
+                    for child_dir in child_dirs {
+                        if let Some(info) = book_path_map.get(child_dir).cloned() {
+                            existing_info = Some(info);
+                            break;
+                        }
+                    }
+                }
+            }
+
             match self
                 .process_book_directory(
                     library_id,
@@ -147,6 +164,18 @@ impl LibraryScanner {
                         ScanStatus::Skipped => scan_result.books_skipped += 1,
                     }
                     found_book_ids.insert(book_id.clone());
+                    if let Some(child_dirs) = coalesced_range_dirs.get(&dir) {
+                        for child_dir in child_dirs {
+                            if let Some((child_book_id, manual_corrected, _)) =
+                                book_path_map.get(child_dir)
+                            {
+                                if child_book_id != &book_id && *manual_corrected == 0 {
+                                    absorbed_range_book_ids
+                                        .insert(child_book_id.clone(), book_id.clone());
+                                }
+                            }
+                        }
+                    }
                     debug!(book_id = %book_id, path = ?dir, status = ?status, "Processed book directory");
                 }
                 Err(e) => {
@@ -161,6 +190,45 @@ impl LibraryScanner {
             // Periodic garbage collection to prevent memory buildup during large scans
             // Force GC after every directory to help debug memory issues with native plugins
             self.plugin_manager.garbage_collect_all().await;
+        }
+
+        for (source_id, target_id) in absorbed_range_book_ids {
+            if found_book_ids.contains(&source_id) {
+                continue;
+            }
+
+            if let Some(merge_service) = &self.merge_service {
+                if let Err(e) = merge_service
+                    .absorb_scanned_book(&target_id, &source_id)
+                    .await
+                {
+                    warn!(
+                        "Failed to absorb range-segment book {} into {}: {}",
+                        source_id, target_id, e
+                    );
+                } else {
+                    scan_result.books_deleted += 1;
+                }
+            } else {
+                info!(
+                    "Deleting range-segment book record after merging into parent book: {}",
+                    source_id
+                );
+                if let Err(e) = self.book_repo.delete(&source_id).await {
+                    warn!(
+                        "Failed to delete absorbed range-segment book {}: {}",
+                        source_id, e
+                    );
+                } else {
+                    scan_result.books_deleted += 1;
+                    if let Err(e) = self.chapter_repo.delete_by_book(&source_id).await {
+                        warn!(
+                            "Failed to delete chapters for absorbed range-segment book {}: {}",
+                            source_id, e
+                        );
+                    }
+                }
+            }
         }
 
         // 3. Handle Deletions: Delete books that were not found in the scan and path does not exist
@@ -804,4 +872,72 @@ impl LibraryScanner {
         hasher.update(path_str.as_bytes());
         format!("{:x}", hasher.finalize())
     }
+}
+
+fn coalesce_local_range_directory_groups(
+    root: &Path,
+    mut dir_groups: HashMap<PathBuf, Vec<PathBuf>>,
+) -> (
+    HashMap<PathBuf, Vec<PathBuf>>,
+    HashMap<PathBuf, Vec<PathBuf>>,
+) {
+    let mut candidates: HashMap<PathBuf, Vec<(PathBuf, ChapterRangeDir)>> = HashMap::new();
+
+    for dir in dir_groups.keys() {
+        let Some(parent) = dir.parent() else {
+            continue;
+        };
+        let Some(dir_name) = dir.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let Some(range_dir) = parse_chapter_range_dir_name(dir_name) else {
+            continue;
+        };
+
+        candidates
+            .entry(parent.to_path_buf())
+            .or_default()
+            .push((dir.clone(), range_dir));
+    }
+
+    let mut coalesced_range_dirs = HashMap::new();
+
+    for (parent, entries) in candidates {
+        let parent_name = parent
+            .file_name()
+            .and_then(|name| name.to_str())
+            .or_else(|| root.file_name().and_then(|name| name.to_str()))
+            .unwrap_or("");
+
+        let ranges: Vec<ChapterRangeDir> = entries.iter().map(|(_, range)| range.clone()).collect();
+        let Some(indices) = select_mergeable_range_group(parent_name, &ranges) else {
+            continue;
+        };
+
+        let mut selected: Vec<(PathBuf, ChapterRangeDir)> = indices
+            .into_iter()
+            .map(|index| entries[index].clone())
+            .collect();
+        selected.sort_by_key(|(_, range)| (range.start, range.end));
+
+        let child_dirs: Vec<PathBuf> = selected
+            .iter()
+            .map(|(child_dir, _)| child_dir.clone())
+            .collect();
+
+        for child_dir in &child_dirs {
+            if let Some(mut child_files) = dir_groups.remove(child_dir) {
+                dir_groups
+                    .entry(parent.clone())
+                    .or_default()
+                    .append(&mut child_files);
+            }
+        }
+
+        if !child_dirs.is_empty() {
+            coalesced_range_dirs.insert(parent, child_dirs);
+        }
+    }
+
+    (dir_groups, coalesced_range_dirs)
 }

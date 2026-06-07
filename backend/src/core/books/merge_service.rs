@@ -1,6 +1,7 @@
 use crate::core::error::{Result, TingError};
 use crate::db::models::Book;
 use crate::db::repository::{BookRepository, ChapterRepository, Repository};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{info, warn};
 
@@ -118,6 +119,78 @@ impl MergeService {
         self.book_repo.delete(source_book_id).await?;
 
         info!("Merged successfully");
+        Ok(())
+    }
+
+    /// Absorb one scanner-created source book into another without marking the
+    /// target as manually corrected. Used when a later scan discovers that
+    /// several physical folders are segments of the same audiobook.
+    pub async fn absorb_scanned_book(
+        &self,
+        target_book_id: &str,
+        source_book_id: &str,
+    ) -> Result<()> {
+        if target_book_id == source_book_id {
+            return Ok(());
+        }
+
+        self.book_repo
+            .find_by_id(target_book_id)
+            .await?
+            .ok_or_else(|| TingError::NotFound("Target book not found".to_string()))?;
+
+        self.book_repo
+            .find_by_id(source_book_id)
+            .await?
+            .ok_or_else(|| TingError::NotFound("Source book not found".to_string()))?;
+
+        let target_chapters = self.chapter_repo.find_by_book(target_book_id).await?;
+        let mut seen_hashes: HashSet<String> = target_chapters
+            .iter()
+            .filter_map(|chapter| chapter.hash.clone())
+            .collect();
+        let mut seen_paths: HashSet<String> = target_chapters
+            .iter()
+            .map(|chapter| chapter.path.clone())
+            .collect();
+        let mut next_index = target_chapters
+            .iter()
+            .map(|chapter| chapter.chapter_index.unwrap_or(0))
+            .max()
+            .unwrap_or(-1)
+            + 1;
+
+        let mut source_chapters = self.chapter_repo.find_by_book(source_book_id).await?;
+        source_chapters.sort_by(|a, b| natord::compare(&a.path, &b.path));
+
+        for chapter in source_chapters.iter_mut() {
+            let duplicate_hash = chapter
+                .hash
+                .as_ref()
+                .map(|hash| seen_hashes.contains(hash))
+                .unwrap_or(false);
+            let duplicate_path = seen_paths.contains(&chapter.path);
+
+            if duplicate_hash || duplicate_path {
+                continue;
+            }
+
+            if let Some(hash) = &chapter.hash {
+                seen_hashes.insert(hash.clone());
+            }
+            seen_paths.insert(chapter.path.clone());
+
+            chapter.book_id = target_book_id.to_string();
+            chapter.chapter_index = Some(next_index);
+            next_index += 1;
+            self.chapter_repo.update(chapter).await?;
+        }
+
+        self.book_repo.delete(source_book_id).await?;
+        info!(
+            "Absorbed scanned book {} into {}",
+            source_book_id, target_book_id
+        );
         Ok(())
     }
 

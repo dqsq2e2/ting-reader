@@ -646,7 +646,7 @@ pub async fn stream_chapter(
                     {
                         let start = range.start as usize;
                         let end = range.end as usize;
-                        let _content_length = (end - start) as u64;
+                        let content_length = (end - start) as u64;
                         let body = data[start..end].to_vec();
 
                         return Ok((
@@ -658,6 +658,7 @@ pub async fn stream_chapter(
                                     header::CONTENT_RANGE,
                                     format!("bytes {}-{}/{}", start, end - 1, file_size),
                                 ),
+                                (header::CONTENT_LENGTH, content_length.to_string()),
                                 (header::ACCEPT_RANGES, "bytes".to_string()),
                                 (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".to_string()),
                                 (
@@ -836,23 +837,31 @@ pub async fn stream_chapter(
     // Non-encrypted: Stream directly
     let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
 
-    // Parse range header manually since we don't have file size yet
-    // We only support simple ranges "bytes=start-end" or "bytes=start-" for now
+    // Local files know their size, so use the shared parser to support suffix ranges
+    // like "bytes=-500". WebDAV keeps the lightweight open-ended parser because
+    // the upstream server owns the final range handling.
     let range = if let Some(r) = range_header {
-        let r_str = r.replace("bytes=", "");
-        let parts: Vec<&str> = r_str.split('-').collect();
-        let start = parts[0].parse::<u64>().unwrap_or(0);
-        let end = if parts.len() > 1 && !parts[1].is_empty() {
-            parts[1].parse::<u64>().unwrap_or(0)
+        if library.library_type == "local" {
+            let file_size = tokio::fs::metadata(std::path::Path::new(&chapter.path))
+                .await?
+                .len();
+            let parsed = state.audio_streamer.parse_range_header(r, file_size)?;
+            Some((parsed.start, parsed.end))
         } else {
-            0
-        };
-        // storage_service expects (start, end) where end=0 means "until end of file"
-        // But for get_local_reader, we need to handle limiting manually
-        if end > 0 {
-            Some((start, end + 1))
-        } else {
-            Some((start, 0))
+            let r_str = r.replace("bytes=", "");
+            let parts: Vec<&str> = r_str.split('-').collect();
+            let start = parts[0].parse::<u64>().unwrap_or(0);
+            let end = if parts.len() > 1 && !parts[1].is_empty() {
+                parts[1].parse::<u64>().unwrap_or(0)
+            } else {
+                0
+            };
+            // storage_service expects (start, end) where end=0 means "until end of file"
+            if end > 0 {
+                Some((start, end + 1))
+            } else {
+                Some((start, 0))
+            }
         }
     } else {
         None
