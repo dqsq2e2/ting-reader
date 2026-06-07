@@ -11,4 +11,4 @@ distributor_url       = https://www.tingreader.cn
 desktop_uidir         = ui
 desktop_applaunchname = ting-reader.main
 service_port          = 3000
-checkport             = true
+checkport             = false
