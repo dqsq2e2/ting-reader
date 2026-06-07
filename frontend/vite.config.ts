@@ -19,7 +19,7 @@ export default defineConfig({
       manifest: {
         id: 'ting-reader',
         name: 'Ting Reader',
-        short_name: 'Ting',
+        short_name: 'Ting Reader',
         description: 'Your self-hosted audiobook platform',
         theme_color: '#0284c7',
         background_color: '#ffffff',
@@ -155,8 +155,9 @@ export default defineConfig({
     }
   },
   server: {
-    port: 3000,
+    port: 5173,
     host: true,
+    allowedHosts: ["ting.ginchan.top"],
   },
   optimizeDeps: {
     include: ['react-window']

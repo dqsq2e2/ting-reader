@@ -4,7 +4,7 @@
         "items": [
             {
                 "type": "tips",
-                "helpText": "您即将卸载 Ting Reader。请选择是否需要清理应用数据："
+                "helpText": "您即将卸载 听悦。请选择是否需要清理应用数据："
             },
             {
                 "type": "checkbox",
