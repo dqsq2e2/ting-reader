@@ -155,9 +155,8 @@ export default defineConfig({
     }
   },
   server: {
-    port: 5173,
+    port: 3000,
     host: true,
-    allowedHosts: ["ting.ginchan.top"],
   },
   optimizeDeps: {
     include: ['react-window']
