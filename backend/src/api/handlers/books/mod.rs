@@ -74,6 +74,7 @@ pub async fn get_book(
 /// Handler for POST /api/v1/books - Create a new book
 pub async fn create_book(
     State(state): State<AppState>,
+    user: crate::auth::middleware::AuthUser,
     Json(req): Json<CreateBookRequest>,
 ) -> Result<impl IntoResponse> {
     let book_id = Uuid::new_v4().to_string();
@@ -125,6 +126,47 @@ pub async fn create_book(
     };
 
     state.book_repo.create(&book).await?;
+
+    let library = state
+        .library_repo
+        .find_by_id(&book.library_id)
+        .await
+        .ok()
+        .flatten();
+    let book_title = book.title.clone().unwrap_or_else(|| "Unknown".to_string());
+    let library_name = library.as_ref().map(|item| item.name.clone());
+
+    tracing::info!(
+        target: "audit::library",
+        actor_id = %user.id,
+        actor = %user.username,
+        book_id = %book.id,
+        book_title = %book_title,
+        library_id = %book.library_id,
+        library_name = %library_name.as_deref().unwrap_or(""),
+        "用户 '{}' 创建了作品 '{}'",
+        user.username,
+        book_title
+    );
+
+    crate::core::notifications::dispatch_notification_event(
+        state.notification_repo.clone(),
+        crate::core::notifications::NotificationEventPayload::new(
+            "book.created",
+            "作品入库",
+            format!("作品 {} 已入库", book_title),
+            serde_json::json!({
+                "actorId": user.id,
+                "actor": user.username,
+                "bookId": book.id,
+                "bookTitle": book_title,
+                "author": book.author,
+                "narrator": book.narrator,
+                "libraryId": book.library_id,
+                "libraryName": library_name,
+            }),
+        ),
+    );
 
     Ok((StatusCode::CREATED, Json(BookResponse::from(book))))
 }
@@ -483,6 +525,7 @@ pub async fn update_book(
 pub async fn delete_book(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    user: crate::auth::middleware::AuthUser,
 ) -> Result<impl IntoResponse> {
     let book = state
         .book_repo
@@ -506,6 +549,47 @@ pub async fn delete_book(
     }
 
     state.book_repo.delete(&id).await?;
+
+    let library = state
+        .library_repo
+        .find_by_id(&book.library_id)
+        .await
+        .ok()
+        .flatten();
+    let book_title = book.title.clone().unwrap_or_else(|| "Unknown".to_string());
+    let library_name = library.as_ref().map(|item| item.name.clone());
+
+    tracing::info!(
+        target: "audit::library",
+        actor_id = %user.id,
+        actor = %user.username,
+        book_id = %book.id,
+        book_title = %book_title,
+        library_id = %book.library_id,
+        library_name = %library_name.as_deref().unwrap_or(""),
+        "用户 '{}' 删除了作品 '{}'",
+        user.username,
+        book_title
+    );
+
+    crate::core::notifications::dispatch_notification_event(
+        state.notification_repo.clone(),
+        crate::core::notifications::NotificationEventPayload::new(
+            "book.deleted",
+            "删除作品",
+            format!("作品 {} 已删除", book_title),
+            serde_json::json!({
+                "actorId": user.id,
+                "actor": user.username,
+                "bookId": book.id,
+                "bookTitle": book_title,
+                "author": book.author,
+                "narrator": book.narrator,
+                "libraryId": book.library_id,
+                "libraryName": library_name,
+            }),
+        ),
+    );
 
     Ok(StatusCode::NO_CONTENT)
 }

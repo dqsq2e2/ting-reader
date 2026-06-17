@@ -16,6 +16,19 @@ pub struct LoginRequest {
     pub password: String,
 }
 
+/// Token login request
+#[derive(Debug, Deserialize)]
+pub struct TokenLoginRequest {
+    pub token: String,
+}
+
+/// Restored browser session request
+#[derive(Debug, Default, Deserialize)]
+pub struct SessionRestoreRequest {
+    pub token: Option<String>,
+    pub session_id: Option<String>,
+}
+
 /// Login response
 #[derive(Debug, Serialize)]
 pub struct LoginResponse {

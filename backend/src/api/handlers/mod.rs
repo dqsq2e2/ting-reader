@@ -1,6 +1,8 @@
 pub mod books;
 pub mod libraries;
 pub mod media;
+pub mod notifications;
+pub mod playlists;
 pub mod plugins;
 pub mod series;
 pub mod system;
@@ -10,6 +12,8 @@ pub mod users;
 pub use books::*;
 pub use libraries::*;
 pub use media::*;
+pub use notifications::*;
+pub use playlists::*;
 pub use plugins::*;
 pub use series::*;
 pub use system::*;
@@ -28,8 +32,9 @@ use crate::core::services::{BookService, ScraperService};
 use crate::core::task_queue::TaskQueue;
 use crate::core::StorageService;
 use crate::db::repository::{
-    BookRepository, ChapterRepository, FavoriteRepository, LibraryRepository, ProgressRepository,
-    SeriesRepository, UserRepository, UserSettingsRepository,
+    BookRepository, ChapterRepository, FavoriteRepository, LibraryRepository,
+    NotificationWebhookRepository, PlaylistRepository, ProgressRepository, SeriesRepository,
+    UserRepository, UserSettingsRepository,
 };
 use crate::plugin::config::PluginConfigManager;
 use crate::plugin::manager::PluginManager;
@@ -46,6 +51,8 @@ pub struct AppState {
     pub library_repo: Arc<LibraryRepository>,
     pub chapter_repo: Arc<ChapterRepository>,
     pub series_repo: Arc<SeriesRepository>,
+    pub playlist_repo: Arc<PlaylistRepository>,
+    pub notification_repo: Arc<NotificationWebhookRepository>,
     pub book_service: Arc<BookService>,
     pub scraper_service: Arc<ScraperService>,
     pub plugin_manager: Arc<PluginManager>,

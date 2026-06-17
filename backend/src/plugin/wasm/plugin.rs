@@ -284,6 +284,27 @@ impl WasmPlugin {
         String::from_utf8(bytes)
             .map_err(|e| TingError::PluginExecutionError(format!("Invalid UTF-8 string: {}", e)))
     }
+
+    pub async fn search_with_params(&self, params: serde_json::Value) -> Result<SearchResult> {
+        let params = serde_json::to_string(&params).map_err(|e| {
+            TingError::PluginExecutionError(format!("Failed to serialize search params: {}", e))
+        })?;
+        let (method_ptr, params_ptr) = self.write_args("search", &params).await?;
+        let result_ptr = self.invoke(method_ptr, params_ptr).await?;
+        let result_json = self.read_string(result_ptr).await?;
+
+        if let Ok(err_obj) = serde_json::from_str::<serde_json::Value>(&result_json) {
+            if let Some(err_msg) = err_obj.get("error").and_then(|v| v.as_str()) {
+                return Err(TingError::PluginExecutionError(format!(
+                    "WASM error: {}",
+                    err_msg
+                )));
+            }
+        }
+
+        serde_json::from_str(&result_json)
+            .map_err(|e| TingError::PluginExecutionError(format!("Invalid search result: {}", e)))
+    }
 }
 
 #[async_trait::async_trait]
@@ -345,24 +366,8 @@ impl ScraperPlugin for WasmPlugin {
             "author": author,
             "narrator": narrator,
             "page": page
-        })
-        .to_string();
-        let (method_ptr, params_ptr) = self.write_args("search", &params).await?;
-        let result_ptr = self.invoke(method_ptr, params_ptr).await?;
-        let result_json = self.read_string(result_ptr).await?;
-
-        // Handle error response from WASM
-        if let Ok(err_obj) = serde_json::from_str::<serde_json::Value>(&result_json) {
-            if let Some(err_msg) = err_obj.get("error").and_then(|v| v.as_str()) {
-                return Err(TingError::PluginExecutionError(format!(
-                    "WASM error: {}",
-                    err_msg
-                )));
-            }
-        }
-
-        serde_json::from_str(&result_json)
-            .map_err(|e| TingError::PluginExecutionError(format!("Invalid search result: {}", e)))
+        });
+        self.search_with_params(params).await
     }
 
     async fn get_chapters(&self, book_id: &str) -> Result<Vec<Chapter>> {

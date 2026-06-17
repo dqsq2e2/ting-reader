@@ -141,7 +141,7 @@ pub struct Library {
 }
 
 /// Scraper configuration stored in Library
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScraperConfig {
     /// Default list of scraper sources in order of priority
     #[serde(default)]
@@ -172,7 +172,7 @@ pub struct ScraperConfig {
     pub metadata_writing_enabled: bool,
     /// Whether to force using file/folder name as title (ignoring priority)
     /// This field was previously "prefer_audio_title" with inverted logic
-    #[serde(default)]
+    #[serde(default = "default_use_filename_as_title")]
     #[serde(rename = "preferAudioTitle", alias = "prefer_audio_title")]
     pub use_filename_as_title: bool,
     /// Priority order for metadata sources
@@ -193,6 +193,30 @@ pub struct ScraperConfig {
     #[serde(default)]
     #[serde(rename = "cloudMode", alias = "cloud_mode")]
     pub cloud_mode: bool,
+}
+
+impl Default for ScraperConfig {
+    fn default() -> Self {
+        Self {
+            default_sources: Vec::new(),
+            author_sources: None,
+            narrator_sources: None,
+            cover_sources: None,
+            intro_sources: None,
+            tags_sources: None,
+            nfo_writing_enabled: false,
+            metadata_writing_enabled: false,
+            use_filename_as_title: default_use_filename_as_title(),
+            metadata_priority: default_metadata_priority(),
+            extract_audio_cover: default_extract_audio_cover(),
+            disable_watcher: false,
+            cloud_mode: false,
+        }
+    }
+}
+
+fn default_use_filename_as_title() -> bool {
+    true
 }
 
 fn default_extract_audio_cover() -> bool {
@@ -227,4 +251,45 @@ pub struct SeriesBook {
     pub series_id: String,
     pub book_id: String,
     pub book_order: i32,
+}
+
+/// User playlist record
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Playlist {
+    pub id: String,
+    pub user_id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Playlist book link record
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaylistBook {
+    pub playlist_id: String,
+    pub book_id: String,
+    pub book_order: i32,
+}
+
+/// Playlist item link record. Items can be individual books or whole series.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaylistItem {
+    pub playlist_id: String,
+    pub item_type: String,
+    pub item_id: String,
+    pub item_order: i32,
+}
+
+/// Webhook notification configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationWebhook {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    pub enabled: i32,
+    pub events: String,
+    pub secret: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }

@@ -5,6 +5,7 @@ import BookCard from '../components/BookCard';
 import { Heart } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { usePlayerStore } from '../store/playerStore';
+import BackButton from '../components/BackButton';
 
 const FavoritesPage: React.FC = () => {
   const currentChapter = usePlayerStore((state) => state.currentChapter);
@@ -67,6 +68,8 @@ const FavoritesPage: React.FC = () => {
   return (
     <div className="flex-1 min-h-full flex flex-col p-4 sm:p-6 md:p-8 animate-in fade-in duration-500">
       <div className="flex-1 space-y-6">
+        <BackButton fallback="/mine" />
+
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
             <Heart className="text-red-500" fill="currentColor" />

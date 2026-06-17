@@ -144,7 +144,9 @@ services:
     image: dqsq2e2/ting-reader:latest
     container_name: ting-reader
     ports:
-      - "3000:3000"
+      - "0.0.0.0:3000:3000"
+      # 如需 IPv6 访问，请先确认 Docker 主机已启用 IPv6，再取消下一行注释：
+      # - "[::]:3000:3000"
     volumes:
       - ./data:/app/data        # 数据库和配置
       - ./storage:/app/storage  # 有声书文件目录
@@ -155,9 +157,12 @@ services:
       - RUST_LOG=info
       - TING_SERVER__HOST=0.0.0.0
       - TING_SERVER__PORT=3000
-      # 建议修改 JWT 密钥，增强安全性
-      - TING_SECURITY__JWT_SECRET=change_me_in_prod
+      # 可选：未配置时服务端会自动生成并持久化 JWT 密钥。
+      # 固定密钥仅在迁移实例或多副本共享登录状态时需要。
+      # - TING_SECURITY__JWT_SECRET=change_me_in_prod
 ```
+
+> IPv6 访问需要 Docker 守护进程和宿主机网络同时启用 IPv6。直接运行二进制时，也可以将 `TING_SERVER__HOST` 设为 `::` 监听 IPv4/IPv6 双栈。
 
 启动容器：
 

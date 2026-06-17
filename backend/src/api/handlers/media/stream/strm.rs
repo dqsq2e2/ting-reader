@@ -197,7 +197,11 @@ pub(super) async fn handle_strm_stream(
 
         // Add transcoding parameters
         if format == "mp3" {
-            cmd.arg("-acodec")
+            cmd.arg("-fflags")
+                .arg("+genpts+igndts")
+                .arg("-avoid_negative_ts")
+                .arg("make_zero")
+                .arg("-acodec")
                 .arg("libmp3lame")
                 .arg("-b:a")
                 .arg("128k")

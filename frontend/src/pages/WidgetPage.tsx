@@ -6,6 +6,7 @@ import { usePlayerStore } from '../store/playerStore';
 import { useAuthStore } from '../store/authStore';
 import { Search, ArrowLeft, User, Lock, LogIn } from 'lucide-react';
 import { getCoverUrl } from '../utils/image';
+import { getCoverAspectClass, useBookshelfCoverShape } from '../hooks/useBookshelfCoverShape';
 
 const WidgetPage: React.FC = () => {
   const { id } = useParams();
@@ -13,6 +14,7 @@ const WidgetPage: React.FC = () => {
   const token = searchParams.get('token');
   const { setToken, setAuth, isAuthenticated } = useAuthStore();
   const { playChapter } = usePlayerStore();
+  const coverShape = useBookshelfCoverShape(isAuthenticated);
   
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [books, setBooks] = useState<any[]>([]);
@@ -228,7 +230,7 @@ const WidgetPage: React.FC = () => {
               >
                 <img 
                   src={getCoverUrl(book.coverUrl || book.cover_url, book.libraryId || book.library_id, book.id)} 
-                  className="w-10 h-10 rounded-lg object-cover" 
+                  className={`w-10 ${getCoverAspectClass(coverShape)} rounded-lg object-cover shrink-0`} 
                   alt={book.title}
                 />
                 <div className="min-w-0">

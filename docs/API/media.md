@@ -41,7 +41,23 @@
 **转码说明：**
 - `transcode=mp3`：通过 FFmpeg 转码为 MP3（128kbps）
 - `transcode=wav`：通过 FFmpeg 转码为 WAV
-- `transcode=hls`：转码为 HLS 流（见下方 HLS 章节）
+- `transcode=hls`：创建 HLS 转码会话，返回播放列表地址（见下方 HLS 章节）
+
+**HLS 初始化响应：**
+
+当请求 `/api/stream/:chapterId?transcode=hls` 时，响应为 JSON：
+
+```json
+{
+  "type": "hls",
+  "session_id": "string",
+  "playlist_url": "/api/stream/hls/{sessionId}/playlist.m3u8",
+  "is_strm": false,
+  "ready": true
+}
+```
+
+可通过 `seek` 查询参数指定初始位置，例如 `/api/stream/:chapterId?transcode=hls&seek=120.5`。
 
 **STRM 文件：** 自动解析 `.strm` 文件中的 URL 并代理或重定向。
 
@@ -83,6 +99,23 @@ HLS 流跳转（无需认证）。
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | sessionId | string | HLS 会话 ID |
+
+**查询参数：**
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| seek | number | 跳转秒数 |
+
+**响应：** `200 OK`
+
+```json
+{
+  "status": "seeked",
+  "seek_time": 120.5,
+  "seq": 2,
+  "playlist_url": "/api/stream/hls/{sessionId}/playlist.m3u8?seq=2"
+}
+```
 
 ---
 

@@ -71,12 +71,24 @@ fn parse_log_file(path: &StdPath, logs: &mut Vec<LogEntry>) {
             } else {
                 String::new()
             };
+            let fields = json.get("fields").and_then(|value| {
+                value.as_object().and_then(|fields| {
+                    let mut map = fields.clone();
+                    map.remove("message");
+                    if map.is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::Value::Object(map))
+                    }
+                })
+            });
 
             logs.push(LogEntry {
                 timestamp,
                 level,
                 module,
                 message,
+                fields,
                 task_id: None,
                 task_status: None,
                 task_type: None,
@@ -222,6 +234,11 @@ pub async fn get_system_logs(
                     level: level.to_string(),
                     module: module.to_string(),
                     message,
+                    fields: Some(serde_json::json!({
+                        "taskId": task.id.clone(),
+                        "taskStatus": task.status.clone(),
+                        "taskType": task.task_type.clone(),
+                    })),
                     task_id: Some(task.id),
                     task_status: Some(task.status),
                     task_type: Some(task.task_type),
@@ -295,9 +312,14 @@ pub async fn export_system_logs(
 
     let mut output = String::new();
     for log in filtered_logs {
+        let fields = log
+            .fields
+            .as_ref()
+            .map(|value| format!(" {}", value))
+            .unwrap_or_default();
         output.push_str(&format!(
-            "[{}] [{}] [{}] {}\n",
-            log.timestamp, log.level, log.module, log.message
+            "[{}] [{}] [{}] {}{}\n",
+            log.timestamp, log.level, log.module, log.message, fields
         ));
     }
 

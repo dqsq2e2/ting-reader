@@ -1,7 +1,7 @@
 use super::AppState;
 use crate::api::models::{
-    CreateLibraryRequest, FolderInfo, LibraryResponse, LibraryScanResponse, TestWebDavRequest,
-    TestWebDavResponse, UpdateLibraryRequest,
+    CreateLibraryRequest, FolderInfo, LibraryResponse, LibraryScanRequest, LibraryScanResponse,
+    TestWebDavRequest, TestWebDavResponse, UpdateLibraryRequest,
 };
 use crate::api::require_admin;
 use crate::core::error::{Result, TingError};
@@ -129,6 +129,24 @@ pub async fn create_library(
         library.url
     );
 
+    crate::core::notifications::dispatch_notification_event(
+        state.notification_repo.clone(),
+        crate::core::notifications::NotificationEventPayload::new(
+            "library.created",
+            "新增媒体库",
+            format!("管理员 {} 创建了媒体库 {}", user.username, library.name),
+            serde_json::json!({
+                "actorId": user.id,
+                "actor": user.username,
+                "libraryId": library.id,
+                "libraryName": library.name,
+                "libraryType": library.library_type,
+                "url": library.url,
+                "rootPath": library.root_path,
+            }),
+        ),
+    );
+
     let library_path = if library.library_type == "local" {
         let config = state.config.read().await;
         let storage_root = config.storage.local_storage_root.clone();
@@ -145,6 +163,7 @@ pub async fn create_library(
         data: serde_json::json!({
             "library_id": library.id,
             "library_path": library_path,
+            "mode": crate::core::library_scanner::ScanMode::Incremental.as_str(),
         }),
     };
 
@@ -347,6 +366,24 @@ pub async fn delete_library(
         library.id
     );
 
+    crate::core::notifications::dispatch_notification_event(
+        state.notification_repo.clone(),
+        crate::core::notifications::NotificationEventPayload::new(
+            "library.deleted",
+            "删除媒体库",
+            format!("管理员 {} 删除了媒体库 {}", user.username, library.name),
+            serde_json::json!({
+                "actorId": user.id,
+                "actor": user.username,
+                "libraryId": library.id,
+                "libraryName": library.name,
+                "libraryType": library.library_type,
+                "url": library.url,
+                "rootPath": library.root_path,
+            }),
+        ),
+    );
+
     Ok(Json(serde_json::json!({
         "success": true,
         "message": "Library deleted successfully"
@@ -358,6 +395,7 @@ pub async fn scan_library(
     State(state): State<AppState>,
     Path(library_id): Path<String>,
     user: crate::auth::middleware::AuthUser,
+    req: Option<Json<LibraryScanRequest>>,
 ) -> Result<impl IntoResponse> {
     require_admin(&user)?;
 
@@ -378,11 +416,17 @@ pub async fn scan_library(
         library.url.clone()
     };
 
+    let scan_mode = req
+        .and_then(|Json(body)| body.mode)
+        .map(|mode| crate::core::library_scanner::ScanMode::from_str(&mode))
+        .unwrap_or(crate::core::library_scanner::ScanMode::Incremental);
+
     let task_payload = crate::core::task_queue::TaskPayload::Custom {
         task_type: "library_scan".to_string(),
         data: serde_json::json!({
             "library_id": library.id,
             "library_path": library_path,
+            "mode": scan_mode.as_str(),
         }),
     };
 
@@ -403,7 +447,15 @@ pub async fn scan_library(
         Json(LibraryScanResponse {
             task_id: submitted_task_id,
             status: "queued".to_string(),
-            message: format!("Library scan started for '{}'", library.name),
+            message: format!(
+                "{} scan started for '{}'",
+                if scan_mode.is_full() {
+                    "Full"
+                } else {
+                    "Incremental"
+                },
+                library.name
+            ),
         }),
     ))
 }

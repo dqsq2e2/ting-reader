@@ -62,8 +62,17 @@ impl TaskQueue {
         let library_path = data["library_path"].as_str().ok_or_else(|| {
             crate::core::error::TingError::TaskError("Missing library_path".to_string())
         })?;
+        let scan_mode = data["mode"]
+            .as_str()
+            .map(crate::core::library_scanner::ScanMode::from_str)
+            .unwrap_or(crate::core::library_scanner::ScanMode::Incremental);
 
-        info!(library_id = %library_id, path = %library_path, "Handling library scan task");
+        info!(
+            library_id = %library_id,
+            path = %library_path,
+            scan_mode = %scan_mode.as_str(),
+            "Handling library scan task"
+        );
 
         // Get repositories
         let book_repo = self.book_repo.as_ref().ok_or_else(|| {
@@ -81,6 +90,9 @@ impl TaskQueue {
             crate::core::error::TingError::TaskError(
                 "Library repository not configured".to_string(),
             )
+        })?;
+        let library = library_repo.find_by_id(library_id).await?.ok_or_else(|| {
+            crate::core::error::TingError::NotFound(format!("Library {} not found", library_id))
         })?;
 
         // Get services
@@ -123,24 +135,53 @@ impl TaskQueue {
 
         // Scan the library
         let result = scanner
-            .scan_library(library_id, library_path, Some(task_id))
+            .scan_library(library_id, library_path, scan_mode, Some(task_id))
             .await?;
 
         info!(
             library_id = %library_id,
+            library_name = %library.name,
+            library_type = %library.library_type,
+            path = %library_path,
             books_created = result.books_created,
+            books_updated = result.books_updated,
             books_deleted = result.books_deleted,
             errors = result.errors.len(),
-            "Library scan completed"
+            scan_mode = %scan_mode.as_str(),
+            "Library scan completed for '{}'",
+            library.name
         );
 
         // Update task message with result
         let message = format!(
-            "图书馆扫描完成，新增 {} 本，更新 {} 本，删除 {} 本",
-            result.books_created, result.books_updated, result.books_deleted
+            "存储库「{}」扫描完成，新增 {} 本，更新 {} 本，删除 {} 本",
+            library.name, result.books_created, result.books_updated, result.books_deleted
         );
         if let Err(e) = self.task_repo.update_progress(task_id, &message).await {
             warn!(task_id = %task_id, error = %e, "Failed to update task progress message");
+        }
+
+        if let Some(notification_repo) = &self.notification_repo {
+            crate::core::notifications::dispatch_notification_event(
+                notification_repo.clone(),
+                crate::core::notifications::NotificationEventPayload::new(
+                    "library.scan_completed",
+                    "媒体库扫描完成",
+                    message.clone(),
+                    serde_json::json!({
+                        "libraryId": library.id,
+                        "libraryName": library.name,
+                        "libraryType": library.library_type,
+                        "path": library_path,
+                        "mode": scan_mode.as_str(),
+                        "taskId": task_id,
+                        "booksCreated": result.books_created,
+                        "booksUpdated": result.books_updated,
+                        "booksDeleted": result.books_deleted,
+                        "errors": result.errors.len(),
+                    }),
+                ),
+            );
         }
 
         if !result.errors.is_empty() {

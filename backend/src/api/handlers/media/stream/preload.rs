@@ -12,7 +12,7 @@ pub(super) async fn maybe_spawn_auto_preload(
 ) {
     // Auto Preload / Cache Logic
     if let Some(user) = user {
-        // Auto-preload and auto-cache are available for all users
+        // Auto-preload is available for all users; server-side auto-cache is admin only.
         if let Ok(Some(settings)) = state.settings_repo.get_by_user(&user.id).await {
             let settings_val = settings
                 .settings_json
@@ -25,11 +25,12 @@ pub(super) async fn maybe_spawn_auto_preload(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
 
-            let auto_cache = settings_val
-                .as_ref()
-                .and_then(|v| v.get("autoCache"))
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
+            let auto_cache = user.role == "admin"
+                && settings_val
+                    .as_ref()
+                    .and_then(|v| v.get("autoCache"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
 
             if auto_preload || auto_cache {
                 if let Ok(chapters) = state.chapter_repo.find_by_book(&book.id).await {

@@ -31,7 +31,6 @@ const SettingsPage: React.FC = () => {
     playbackSpeed: 1.0,
     sleepTimerDefault: 0,
     autoPreload: false,
-    autoCache: false,
     theme: 'system' as 'light' | 'dark' | 'system',
     widgetCss: ''
   });
@@ -138,7 +137,6 @@ const SettingsPage: React.FC = () => {
         playbackSpeed: data.playbackSpeed ?? 1.0,
         sleepTimerDefault: data.sleepTimerDefault ?? 0,
         autoPreload: data.autoPreload ?? false,
-        autoCache: data.autoCache ?? false,
         theme: data.theme ?? 'system',
         widgetCss: data.widgetCss ?? '',
         ...data
@@ -163,10 +161,11 @@ const SettingsPage: React.FC = () => {
       // The settingsJson field causes recursion if sent back to the server
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { settingsJson, userId, updatedAt, ...cleanSettings } = newSettings;
+      delete cleanSettings.autoCache;
       
       // client interceptor handles camelCase -> snake_case conversion for request body
       await apiClient.post('/api/settings', cleanSettings);
-      setSettings(newSettings);
+      setSettings(prev => ({ ...prev, ...newSettings }));
       
       // Sync playback speed to player store immediately
       if (newSettings.playbackSpeed) {
@@ -398,24 +397,6 @@ const SettingsPage: React.FC = () => {
               </button>
             </div>
 
-            <div className="flex items-center justify-between gap-4 pt-4 border-t border-slate-100 dark:border-slate-800">
-              <div className="flex-1 min-w-0">
-                <p className="font-bold dark:text-white truncate">服务端自动缓存 (WebDAV)</p>
-                <p className="text-xs md:text-sm text-slate-500 line-clamp-2">
-                  播放当前章节时，通知服务器预先缓存下一章节 (仅适用于 WebDAV 库)
-                </p>
-              </div>
-              <button
-                onClick={() => handleSave({ ...settings, autoCache: !settings.autoCache })}
-                className={`flex-shrink-0 w-12 md:w-14 h-7 md:h-8 rounded-full transition-all relative ${
-                  settings.autoCache ? 'bg-primary-600' : 'bg-slate-200 dark:bg-slate-700'
-                }`}
-              >
-                <div className={`absolute top-1 w-5 md:w-6 h-5 md:h-6 bg-white rounded-full transition-all ${
-                  settings.autoCache ? 'left-6 md:left-7' : 'left-1'
-                }`} />
-              </button>
-            </div>
           </div>
         </section>
 

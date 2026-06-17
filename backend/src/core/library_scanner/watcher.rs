@@ -94,7 +94,14 @@ impl LibraryWatcher {
                             // Timeout expired, enqueue scan task
                             info!("Library watcher triggered scan for library {}", lib_id_clone);
 
-                            if let Err(e) = task_queue.enqueue_scan_library(&lib_id_clone, &path_clone).await {
+                            if let Err(e) = task_queue
+                                .enqueue_scan_library(
+                                    &lib_id_clone,
+                                    &path_clone,
+                                    crate::core::library_scanner::ScanMode::Incremental,
+                                )
+                                .await
+                            {
                                 warn!("Failed to enqueue auto-scan task: {}", e);
                             }
                             break;

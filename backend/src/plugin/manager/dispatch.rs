@@ -44,11 +44,7 @@ impl PluginManager {
         } else if let Some(wasm_plugin) = instance.as_any().downcast_ref::<WasmPlugin>() {
             match method {
                 ScraperMethod::Search => {
-                    let query = params.get("query").and_then(|v| v.as_str()).unwrap_or("");
-                    let author = params.get("author").and_then(|v| v.as_str());
-                    let narrator = params.get("narrator").and_then(|v| v.as_str());
-                    let page = params.get("page").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
-                    let result = wasm_plugin.search(query, author, narrator, page).await?;
+                    let result = wasm_plugin.search_with_params(params).await?;
                     Ok(serde_json::to_value(result).map_err(|e| {
                         TingError::PluginExecutionError(format!("Serialization error: {}", e))
                     })?)

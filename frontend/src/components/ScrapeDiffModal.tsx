@@ -1,14 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import apiClient from '../api/client';
-import type { Book, ScraperSearchField, ScraperSearchItem, ScraperSource } from '../types';
+import type { Book, Library, ScraperSearchField, ScraperSearchItem, ScraperSource } from '../types';
 import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  BadgeCheck,
   BookOpen,
+  Building2,
+  Calendar,
   Check,
   ChevronRight,
   FileText,
+  Globe2,
+  Hash,
   Image as ImageIcon,
   Loader2,
   Mic2,
@@ -22,6 +27,7 @@ import {
   X,
 } from 'lucide-react';
 import { getCoverUrl } from '../utils/image';
+import { getCoverAspectClass, useBookshelfCoverShape } from '../hooks/useBookshelfCoverShape';
 
 interface Props {
   bookId: string;
@@ -29,7 +35,7 @@ interface Props {
   onSave: () => void;
 }
 
-type FieldValue = string | number | string[] | null | undefined;
+type FieldValue = string | number | boolean | string[] | null | undefined;
 type ModalStep = 'search' | 'results' | 'review';
 type ResultView = 'list' | 'detail';
 
@@ -58,6 +64,21 @@ interface ScrapeSearchResult {
   resultIndex: number;
 }
 
+interface LibraryScraperConfig {
+  defaultSources?: string[];
+  default_sources?: string[];
+  coverSources?: string[];
+  cover_sources?: string[];
+  introSources?: string[];
+  intro_sources?: string[];
+  authorSources?: string[];
+  author_sources?: string[];
+  narratorSources?: string[];
+  narrator_sources?: string[];
+  tagsSources?: string[];
+  tags_sources?: string[];
+}
+
 interface CoverFrameProps {
   value: FieldValue;
   alt: string;
@@ -71,7 +92,25 @@ const DEFAULT_SEARCH_FIELDS: ScraperSearchField[] = [
   { key: 'narrator', label: '演播', required: false, defaultFrom: 'book.narrator' },
 ];
 
-const DEFAULT_RESULT_FIELDS = ['title', 'author', 'narrator', 'cover_url', 'description', 'tags', 'genre'];
+const DEFAULT_RESULT_FIELDS = [
+  'title',
+  'author',
+  'narrator',
+  'cover_url',
+  'description',
+  'tags',
+  'genre',
+  'year',
+  'subtitle',
+  'published_date',
+  'publisher',
+  'isbn',
+  'asin',
+  'language',
+  'explicit',
+  'abridged',
+  'duration',
+];
 
 const FIELD_DEFINITIONS: Record<string, FieldDefinition> = {
   title: { key: 'title', label: '书名', icon: <BookOpen size={15} /> },
@@ -82,6 +121,15 @@ const FIELD_DEFINITIONS: Record<string, FieldDefinition> = {
   tags: { key: 'tags', label: '标签', icon: <Tags size={15} />, wide: true },
   genre: { key: 'genre', label: '类型', icon: <Tags size={15} /> },
   year: { key: 'year', label: '年份', icon: <BookOpen size={15} /> },
+  subtitle: { key: 'subtitle', label: '副标题', icon: <FileText size={15} /> },
+  published_date: { key: 'published_date', label: '发布日期', icon: <Calendar size={15} /> },
+  publisher: { key: 'publisher', label: '出版社', icon: <Building2 size={15} /> },
+  isbn: { key: 'isbn', label: 'ISBN', icon: <Hash size={15} /> },
+  asin: { key: 'asin', label: 'ASIN', icon: <Hash size={15} /> },
+  language: { key: 'language', label: '语言', icon: <Globe2 size={15} /> },
+  explicit: { key: 'explicit', label: '成人内容', icon: <BadgeCheck size={15} /> },
+  abridged: { key: 'abridged', label: '删节版', icon: <BadgeCheck size={15} /> },
+  duration: { key: 'duration', label: '总时长', icon: <Hash size={15} /> },
 };
 
 const FIELD_ORDER = Object.keys(FIELD_DEFINITIONS);
@@ -97,6 +145,7 @@ const normalizeFieldKey = (key: string) => {
   if (normalized === 'cover_url') return 'cover_url';
   if (normalized === 'intro') return 'description';
   if (normalized === 'published_year') return 'year';
+  if (normalized === 'published_date') return 'published_date';
   return normalized;
 };
 
@@ -125,6 +174,104 @@ const getBookDefaultValue = (book: Book, field: ScraperSearchField) => {
   return '';
 };
 
+const TITLE_MATCH_PUNCTUATION_PATTERN = /[\s\u3000"'`‘’“”.,，。:：;；!?！？、·•・《》<>〈〉【】[\]（）(){}｛｝\-—–_/\\|+*=#￥$%^&~…]+/g;
+
+const normalizeTitleForMatch = (value?: FieldValue) => {
+  if (!hasFieldValue(value) || Array.isArray(value)) return '';
+  return String(value)
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(TITLE_MATCH_PUNCTUATION_PATTERN, '');
+};
+
+const getTitleMatchTerms = (
+  currentBook: Book | null,
+  sourceList: ScraperSource[],
+  valuesBySourceId: Record<string, Record<string, string>>
+) => {
+  const terms: string[] = [];
+  const seen = new Set<string>();
+  const addTerm = (value?: FieldValue) => {
+    if (!hasFieldValue(value) || Array.isArray(value)) return;
+    String(value)
+      .split(/[|丨]/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .forEach((item) => {
+        const normalized = normalizeTitleForMatch(item);
+        if (!normalized || seen.has(normalized)) return;
+        seen.add(normalized);
+        terms.push(item);
+      });
+  };
+
+  sourceList.forEach((source) => {
+    const values = valuesBySourceId[source.id] || {};
+    getSearchFields(source).forEach((field) => {
+      if (getSharedSearchFieldKind(field) === 'title') {
+        addTerm(values[field.key]);
+      }
+    });
+  });
+  addTerm(currentBook?.title);
+
+  return terms;
+};
+
+const getCommonPrefixLength = (a: string, b: string) => {
+  const max = Math.min(a.length, b.length);
+  let length = 0;
+  while (length < max && a[length] === b[length]) {
+    length += 1;
+  }
+  return length;
+};
+
+const getCharacterOverlap = (a: string, b: string) => {
+  const counts = new Map<string, number>();
+  for (const char of a) {
+    counts.set(char, (counts.get(char) || 0) + 1);
+  }
+
+  let overlap = 0;
+  for (const char of b) {
+    const count = counts.get(char) || 0;
+    if (count > 0) {
+      overlap += 1;
+      counts.set(char, count - 1);
+    }
+  }
+
+  return overlap;
+};
+
+const getTitleMatchScore = (candidate: FieldValue, terms: string[]) => {
+  const normalizedCandidate = normalizeTitleForMatch(candidate);
+  if (!normalizedCandidate) return 0;
+
+  return Math.max(
+    0,
+    ...terms.map((term) => {
+      const normalizedTerm = normalizeTitleForMatch(term);
+      if (!normalizedTerm) return 0;
+      if (normalizedCandidate === normalizedTerm) return 100000;
+
+      const lengthRatio = Math.min(normalizedCandidate.length, normalizedTerm.length)
+        / Math.max(normalizedCandidate.length, normalizedTerm.length);
+      if (normalizedCandidate.includes(normalizedTerm) || normalizedTerm.includes(normalizedCandidate)) {
+        return 80000 + Math.round(lengthRatio * 10000);
+      }
+
+      const overlap = getCharacterOverlap(normalizedCandidate, normalizedTerm);
+      const diceScore = Math.round((2 * overlap / (normalizedCandidate.length + normalizedTerm.length)) * 70000);
+      const prefixScore = Math.round(
+        (getCommonPrefixLength(normalizedCandidate, normalizedTerm) / Math.max(normalizedCandidate.length, normalizedTerm.length)) * 10000
+      );
+      return diceScore + prefixScore;
+    })
+  );
+};
+
 const getItemFieldValue = (item: ScraperSearchItem, fieldKey: string): FieldValue => {
   switch (fieldKey) {
     case 'title':
@@ -143,6 +290,24 @@ const getItemFieldValue = (item: ScraperSearchItem, fieldKey: string): FieldValu
       return item.genre;
     case 'year':
       return item.publishedYear || item.published_year;
+    case 'subtitle':
+      return item.subtitle;
+    case 'published_date':
+      return item.publishedDate || item.published_date;
+    case 'publisher':
+      return item.publisher;
+    case 'isbn':
+      return item.isbn;
+    case 'asin':
+      return item.asin;
+    case 'language':
+      return item.language;
+    case 'explicit':
+      return item.explicit;
+    case 'abridged':
+      return item.abridged;
+    case 'duration':
+      return item.duration;
     default:
       return item[fieldKey] as FieldValue;
   }
@@ -188,13 +353,70 @@ const getDraftBookFieldValue = (
 const formatFieldValue = (value: FieldValue, emptyLabel = '未返回') => {
   if (!hasFieldValue(value)) return emptyLabel;
   if (Array.isArray(value)) return value.join(' / ');
+  if (typeof value === 'boolean') return value ? '是' : '否';
   return String(value);
 };
 
 const formatCurrentValue = (value: FieldValue) => formatFieldValue(value, '未知');
 
 const fieldValueForApi = (value: Exclude<FieldValue, null | undefined>) => {
-  return Array.isArray(value) ? value : String(value);
+  return Array.isArray(value) || typeof value === 'boolean' || typeof value === 'number' ? value : String(value);
+};
+
+const fieldValueForEditor = (value: FieldValue) => {
+  if (!hasFieldValue(value)) return '';
+  if (Array.isArray(value)) return value.join(', ');
+  return String(value);
+};
+
+const editorValueForField = (fieldKey: string, value: string): Exclude<FieldValue, null | undefined> => {
+  if (fieldKey === 'tags') {
+    return value.split(',').map((tag) => tag.trim()).filter(Boolean);
+  }
+  if (fieldKey === 'explicit' || fieldKey === 'abridged') {
+    return value === 'true';
+  }
+  if (fieldKey === 'duration') {
+    return value;
+  }
+  return value;
+};
+
+const getConfiguredSourceIds = (config?: LibraryScraperConfig | null) => {
+  if (!config) return new Set<string>();
+
+  const keys: Array<keyof LibraryScraperConfig> = [
+    'defaultSources',
+    'default_sources',
+    'coverSources',
+    'cover_sources',
+    'introSources',
+    'intro_sources',
+    'authorSources',
+    'author_sources',
+    'narratorSources',
+    'narrator_sources',
+    'tagsSources',
+    'tags_sources',
+  ];
+
+  return new Set(
+    keys.flatMap((key) => {
+      const value = config[key];
+      return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string' && id.trim().length > 0) : [];
+    })
+  );
+};
+
+const getDefaultEnabledSourceIds = (sourceList: ScraperSource[], config?: LibraryScraperConfig | null) => {
+  const configuredIds = getConfiguredSourceIds(config);
+  if (configuredIds.size === 0) return new Set<string>();
+
+  return new Set(
+    sourceList
+      .filter((source) => source.autoScrape && configuredIds.has(source.id))
+      .map((source) => source.id)
+  );
 };
 
 const getResultKey = (result: ScrapeSearchResult) =>
@@ -235,6 +457,9 @@ const CoverFrame: React.FC<CoverFrameProps> = ({ value, alt, book, className = '
 };
 
 const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
+  const coverShape = useBookshelfCoverShape();
+  const coverAspectClass = getCoverAspectClass(coverShape);
+  const compactCoverClass = coverShape === 'square' ? 'h-24 w-24' : 'h-28 w-20';
   const [book, setBook] = useState<Book | null>(null);
   const [sources, setSources] = useState<ScraperSource[]>([]);
   const [activeSourceId, setActiveSourceId] = useState('');
@@ -277,6 +502,10 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
       return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
     });
   }, [selectedFields]);
+  const filledSelectedCount = useMemo(
+    () => selectedFieldList.filter((selection) => hasFieldValue(selection.value)).length,
+    [selectedFieldList]
+  );
 
   const buildSearchValues = useCallback((source: ScraperSource | null, currentBook: Book) => {
     const values: Record<string, string> = {};
@@ -297,20 +526,27 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
       setLoading(true);
       setError('');
 
-      const [bookRes, sourcesRes] = await Promise.all([
+      const [bookRes, sourcesRes, librariesRes] = await Promise.all([
         apiClient.get(`/api/books/${bookId}`),
         apiClient.get('/api/scraper/sources'),
+        apiClient.get('/api/libraries'),
       ]);
 
       const currentBook = bookRes.data as Book;
       const enabledSources = ((sourcesRes.data.sources || []) as ScraperSource[])
         .filter((source) => source.enabled);
-      const firstSource = enabledSources[0] || null;
+      const libraries = (librariesRes.data || []) as Library[];
+      const currentLibrary = libraries.find((library) => library.id === currentBook.libraryId);
+      const defaultEnabledIds = getDefaultEnabledSourceIds(
+        enabledSources,
+        currentLibrary?.scraperConfig as LibraryScraperConfig | undefined
+      );
+      const firstSource = enabledSources.find((source) => defaultEnabledIds.has(source.id)) || enabledSources[0] || null;
 
       setBook(currentBook);
       setSources(enabledSources);
       setActiveSourceId(firstSource?.id || '');
-      setEnabledSourceIds(new Set(enabledSources.map((source) => source.id)));
+      setEnabledSourceIds(defaultEnabledIds);
       setSearchValuesBySourceId(buildSearchValuesBySource(enabledSources, currentBook));
     } catch (err) {
       console.error('获取刮削信息失败', err);
@@ -476,13 +712,23 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
         })
       );
 
-      const nextResults = responses.flatMap((response) =>
-        response.items.map((item, resultIndex) => ({
-          item,
-          source: response.source,
-          resultIndex,
-        }))
-      );
+      const titleMatchTerms = getTitleMatchTerms(book, enabledSearchSources, searchValuesBySourceId);
+      const nextResults = responses
+        .flatMap((response, sourceIndex) =>
+          response.items.map((item, resultIndex) => ({
+            item,
+            source: response.source,
+            resultIndex,
+            matchScore: getTitleMatchScore(getItemFieldValue(item, 'title'), titleMatchTerms),
+            originalOrder: sourceIndex * 10000 + resultIndex,
+          }))
+        )
+        .sort((a, b) => b.matchScore - a.matchScore || a.originalOrder - b.originalOrder)
+        .map((result) => ({
+          item: result.item,
+          source: result.source,
+          resultIndex: result.resultIndex,
+        }));
       const nextErrors = Object.fromEntries(
         responses
           .filter((response) => response.error)
@@ -569,6 +815,21 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
     });
   };
 
+  const updateSelectedFieldValue = (fieldKey: string, value: string) => {
+    setSelectedFields((prev) => {
+      const current = prev[fieldKey];
+      if (!current) return prev;
+
+      return {
+        ...prev,
+        [fieldKey]: {
+          ...current,
+          value: editorValueForField(fieldKey, value),
+        },
+      };
+    });
+  };
+
   const toggleDescription = (key: string) => {
     setExpandedDescriptions((prev) => {
       const next = new Set(prev);
@@ -588,19 +849,21 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
   };
 
   const handleApply = async () => {
-    if (!book || selectedCount === 0) return;
+    if (!book || filledSelectedCount === 0) return;
 
     try {
       setSaving(true);
       const fields = Object.fromEntries(
-        Object.entries(selectedFields).map(([key, selection]) => [
-          key,
-          {
-            value: fieldValueForApi(selection.value),
-            source: selection.sourceId,
-            externalId: selection.resultId,
-          },
-        ])
+        Object.entries(selectedFields)
+          .filter(([, selection]) => hasFieldValue(selection.value))
+          .map(([key, selection]) => [
+            key,
+            {
+              value: fieldValueForApi(selection.value),
+              source: selection.sourceId,
+              externalId: selection.resultId,
+            },
+          ])
       );
 
       await apiClient.post(`/api/books/${bookId}/scrape-apply`, {
@@ -921,11 +1184,11 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
                             <div className="grid grid-cols-2 gap-3">
                               <div>
                                 <div className="mb-1 text-xs font-bold text-slate-400">当前</div>
-                                <CoverFrame value={currentValue} book={book} alt="当前封面" className="aspect-[2/3]" />
+                                <CoverFrame value={currentValue} book={book} alt="当前封面" className={coverAspectClass} />
                               </div>
                               <div>
                                 <div className="mb-1 text-xs font-bold text-primary-500">应用</div>
-                                <CoverFrame value={value} alt="待应用封面" className="aspect-[2/3]" />
+                                <CoverFrame value={value} alt="待应用封面" className={coverAspectClass} />
                               </div>
                             </div>
                           ) : (
@@ -1017,7 +1280,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
                               className="group rounded-xl border border-slate-200 bg-white p-3 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:hover:border-primary-900"
                             >
                               <div className="flex gap-3">
-                                <CoverFrame value={cover} alt={item.title || '搜索结果封面'} className="h-28 w-20 shrink-0 rounded-lg" />
+                                <CoverFrame value={cover} alt={item.title || '搜索结果封面'} className={`${compactCoverClass} shrink-0 rounded-lg`} />
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-start justify-between gap-2">
                                     <span className="inline-flex max-w-[10rem] rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-300">
@@ -1098,7 +1361,9 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
                 ) : (
                   selectedFieldList.map((selection) => {
                     const definition = FIELD_DEFINITIONS[selection.key];
-                    const currentValue = getDraftBookFieldValue(book, selectedFields, selection.key);
+                    const editorValue = fieldValueForEditor(selection.value);
+                    const isLongText = selection.key === 'description' || selection.key === 'tags';
+                    const isBooleanField = selection.key === 'explicit' || selection.key === 'abridged';
 
                     return (
                       <section key={selection.key} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -1121,30 +1386,48 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
                         </div>
 
                         {definition.cover ? (
-                          <div className="grid grid-cols-2 gap-4 sm:max-w-md">
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-[10rem_1fr]">
+                            <CoverFrame value={selection.value} alt="待应用封面" className={`${coverAspectClass} w-40 max-w-full`} />
                             <div>
-                              <div className="mb-1 text-xs font-bold text-slate-400">当前</div>
-                              <CoverFrame value={currentValue} book={book} alt="当前封面" className="aspect-[2/3]" />
-                            </div>
-                            <div>
-                              <div className="mb-1 text-xs font-bold text-primary-500">应用</div>
-                              <CoverFrame value={selection.value} alt="待应用封面" className="aspect-[2/3]" />
+                              <label className="mb-1.5 block text-xs font-bold text-primary-500">封面 URL</label>
+                              <input
+                                type="url"
+                                value={editorValue}
+                                onChange={(event) => updateSelectedFieldValue(selection.key, event.target.value)}
+                                placeholder="https://example.com/cover.jpg"
+                                className="w-full rounded-xl border border-slate-200 bg-primary-50 px-3 py-3 text-sm font-medium text-slate-950 outline-none transition focus:ring-2 focus:ring-primary-500 dark:border-slate-800 dark:bg-primary-950/25 dark:text-white"
+                              />
                             </div>
                           </div>
                         ) : (
-                          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                            <div>
-                              <div className="mb-1 text-xs font-bold text-slate-400">当前</div>
-                              <div className="min-h-12 rounded-lg bg-slate-50 px-3 py-2 text-sm leading-relaxed text-slate-500 dark:bg-slate-950 dark:text-slate-400">
-                                {formatCurrentValue(currentValue)}
-                              </div>
-                            </div>
-                            <div>
-                              <div className="mb-1 text-xs font-bold text-primary-500">应用</div>
-                              <div className="min-h-12 rounded-lg bg-primary-50 px-3 py-2 text-sm font-semibold leading-relaxed text-slate-950 dark:bg-primary-950/25 dark:text-white">
-                                {formatFieldValue(selection.value)}
-                              </div>
-                            </div>
+                          <div>
+                            <label className="mb-1.5 block text-xs font-bold text-primary-500">
+                              {selection.key === 'tags' ? '应用值（逗号分隔）' : '应用值'}
+                            </label>
+                            {isBooleanField ? (
+                              <select
+                                value={String(Boolean(selection.value))}
+                                onChange={(event) => updateSelectedFieldValue(selection.key, event.target.value)}
+                                className="w-full rounded-xl border border-slate-200 bg-primary-50 px-3 py-3 text-sm font-medium text-slate-950 outline-none transition focus:ring-2 focus:ring-primary-500 dark:border-slate-800 dark:bg-primary-950/25 dark:text-white"
+                              >
+                                <option value="true">是</option>
+                                <option value="false">否</option>
+                              </select>
+                            ) : isLongText ? (
+                              <textarea
+                                value={editorValue}
+                                onChange={(event) => updateSelectedFieldValue(selection.key, event.target.value)}
+                                rows={selection.key === 'description' ? 6 : 3}
+                                className="w-full resize-y rounded-xl border border-slate-200 bg-primary-50 px-3 py-3 text-sm font-medium leading-relaxed text-slate-950 outline-none transition focus:ring-2 focus:ring-primary-500 dark:border-slate-800 dark:bg-primary-950/25 dark:text-white"
+                              />
+                            ) : (
+                              <input
+                                type={selection.key === 'year' ? 'number' : 'text'}
+                                value={editorValue}
+                                onChange={(event) => updateSelectedFieldValue(selection.key, event.target.value)}
+                                className="w-full rounded-xl border border-slate-200 bg-primary-50 px-3 py-3 text-sm font-medium text-slate-950 outline-none transition focus:ring-2 focus:ring-primary-500 dark:border-slate-800 dark:bg-primary-950/25 dark:text-white"
+                              />
+                            )}
                           </div>
                         )}
                       </section>
@@ -1218,7 +1501,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
                 </button>
                 <button
                   onClick={handleApply}
-                  disabled={saving || selectedCount === 0}
+                  disabled={saving || filledSelectedCount === 0}
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-6 py-2.5 font-bold text-white transition-colors hover:bg-primary-700 disabled:opacity-50"
                 >
                   {saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import apiClient from '../api/client';
 import { useAuthStore } from '../store/authStore';
+import { markSessionRestoreLogged } from '../utils/sessionRestore';
 import { Lock, User, Server } from 'lucide-react';
 
 const LoginPage: React.FC = () => {
@@ -72,6 +73,7 @@ const LoginPage: React.FC = () => {
       const response = await apiClient.post('/api/auth/login', { username, password });
       const { token, user } = response.data;
       setAuth(user, token);
+      markSessionRestoreLogged(token);
       navigate('/');
     } catch (err: unknown) {
       console.error('登录错误:', err);
@@ -113,7 +115,7 @@ const LoginPage: React.FC = () => {
                   />
                 </div>
                 <p className="text-[10px] text-slate-400 px-1">
-                  请输入源地址，应用会自动处理重定向。
+                  请输入服务器地址。
                 </p>
               </div>
             )}

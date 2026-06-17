@@ -42,6 +42,32 @@ pub enum MetadataSource {
     Fallback,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanMode {
+    Incremental,
+    Full,
+}
+
+impl ScanMode {
+    pub fn from_str(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "full" | "force" | "rescan" => Self::Full,
+            _ => Self::Incremental,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Incremental => "incremental",
+            Self::Full => "full",
+        }
+    }
+
+    pub fn is_full(&self) -> bool {
+        matches!(self, Self::Full)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ScanStatus {
     Created,
@@ -200,11 +226,29 @@ impl LibraryScanner {
         &self,
         library_id: &str,
         library_path: &str,
+        mode: ScanMode,
         task_id: Option<&str>,
     ) -> Result<ScanResult> {
-        info!(target: "audit::scan", "开始扫描存储库: {} (ID: {})", library_path, library_id);
-        self.update_progress(task_id, format!("开始扫描存储库: {}", library_path))
-            .await;
+        info!(
+            target: "audit::scan",
+            scan_mode = %mode.as_str(),
+            "开始扫描存储库: {} (ID: {})",
+            library_path,
+            library_id
+        );
+        self.update_progress(
+            task_id,
+            format!(
+                "开始扫描存储库: {} ({})",
+                library_path,
+                if mode.is_full() {
+                    "全量同步"
+                } else {
+                    "增量同步"
+                }
+            ),
+        )
+        .await;
         self.check_cancellation(task_id).await?;
 
         // Fetch library to get configuration and type
@@ -220,7 +264,9 @@ impl LibraryScanner {
             .and_then(|json| serde_json::from_str(json).ok())
             .unwrap_or_default();
 
-        let last_scanned = if let Some(ref date_str) = library.last_scanned_at {
+        let last_scanned = if mode.is_full() {
+            None
+        } else if let Some(ref date_str) = library.last_scanned_at {
             chrono::DateTime::parse_from_rfc3339(date_str)
                 .map(|dt| dt.with_timezone(&chrono::Utc))
                 .ok()
@@ -230,7 +276,7 @@ impl LibraryScanner {
 
         // Dispatch based on library type
         let scan_result = if library.library_type == "webdav" {
-            self.scan_webdav_library(&library, task_id, &scraper_config)
+            self.scan_webdav_library(&library, task_id, &scraper_config, mode)
                 .await?
         } else {
             // Local library scan

@@ -181,7 +181,7 @@ const toInstalledCardData = (plugin: Plugin, storeMeta?: StorePlugin): PluginCar
   permissions: plugin.permissions || storeMeta?.permissions,
   configSchema: plugin.configSchema || storeMeta?.configSchema,
   supportedExtensions: plugin.supportedExtensions || storeMeta?.supportedExtensions,
-  scraper: storeMeta?.scraper,
+  scraper: plugin.scraper || storeMeta?.scraper,
   state: plugin.state,
   isInstalled: true,
 });
@@ -648,6 +648,10 @@ const PluginsPage: React.FC = () => {
   };
 
   const filteredStorePlugins = storePlugins.filter((plugin) => {
+    if (activeTab === 'store' && getInstalledVersion(plugin.id)) {
+      return false;
+    }
+
     if (activeTab === 'updates' && !isUpdateAvailable(plugin)) {
       return false;
     }

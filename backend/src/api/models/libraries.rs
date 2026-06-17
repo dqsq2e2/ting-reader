@@ -96,6 +96,13 @@ pub struct LibraryScanResponse {
     pub message: String,
 }
 
+/// Request for library scan.
+#[derive(Debug, Deserialize, Default)]
+pub struct LibraryScanRequest {
+    /// "incremental" or "full". Defaults to incremental.
+    pub mode: Option<String>,
+}
+
 /// Folder information
 #[derive(Debug, Serialize)]
 pub struct FolderInfo {

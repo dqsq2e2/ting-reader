@@ -5,10 +5,12 @@ import type { Book, Library, Series } from '../types';
 import BookCard from '../components/BookCard';
 import SeriesCard from '../components/SeriesCard';
 import SeriesModal from '../components/SeriesModal';
-import { Search, Filter, Database, Plus, Library as LibraryIcon, Layers, Check, X, CheckSquare } from 'lucide-react';
+import DisplaySettingsMenu from '../components/DisplaySettingsMenu';
+import { Search, Database, Plus, Library as LibraryIcon, Layers, Check, X, CheckSquare } from 'lucide-react';
 import { usePlayerStore } from '../store/playerStore';
 import { useAuthStore } from '../store/authStore';
 import { getPinyinInitial } from '../utils/pinyin';
+import { publishBookshelfCoverShape } from '../hooks/useBookshelfCoverShape';
 
 const BookshelfPage: React.FC = () => {
   const currentChapter = usePlayerStore((state) => state.currentChapter);
@@ -19,7 +21,6 @@ const BookshelfPage: React.FC = () => {
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [selectedLibraryId, setSelectedLibraryId] = useState<string>('');
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'createdAt' | 'title' | 'author' | 'year'>('createdAt');
   const [iconSize, setIconSize] = useState<'small' | 'medium' | 'large'>('medium');
   const [coverShape, setCoverShape] = useState<'rect' | 'square'>('rect');
@@ -60,12 +61,12 @@ const BookshelfPage: React.FC = () => {
         observer.unobserve(currentRef);
       }
     };
-  }, [books.length, series.length, searchQuery, sortBy, selectedLibraryId]);
+  }, [books.length, series.length, sortBy, selectedLibraryId]);
 
   // Reset visible count when filters change
   useEffect(() => {
     setVisibleCount(50);
-  }, [searchQuery, sortBy, selectedLibraryId]);
+  }, [sortBy, selectedLibraryId]);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -114,6 +115,7 @@ const BookshelfPage: React.FC = () => {
   const handleCoverShapeChange = (newShape: 'rect' | 'square') => {
     setCoverShape(newShape);
     setShowFilterMenu(false);
+    publishBookshelfCoverShape(newShape);
     apiClient.post('/api/settings', { bookshelfCoverShape: newShape });
   };
 
@@ -175,17 +177,9 @@ const BookshelfPage: React.FC = () => {
   // Collect all book IDs that are in a series
   const booksInSeries = new Set(series.flatMap(s => s.books?.map(b => b.id) || []));
 
-  const filteredBooks = sortedBooks.filter(book => 
-    !booksInSeries.has(book.id) && 
-    (book.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    book.author?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    book.narrator?.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const filteredBooks = sortedBooks.filter(book => !booksInSeries.has(book.id));
 
-  const filteredSeries = series.filter(s => 
-    s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    s.author?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredSeries = series;
 
   const toggleBookSelection = (id: string) => {
     setSelectedBookIds(prev => 
@@ -422,103 +416,50 @@ const BookshelfPage: React.FC = () => {
               </div>
             )}
 
-            <div className="relative w-full min-[550px]:flex-1 md:w-64 order-first min-[550px]:order-none">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input 
-                type="text"
-                placeholder="搜索书名、作者..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 transition-all dark:text-white"
-              />
-            </div>
-            <div className="relative min-w-0 order-3">
-              <button 
-                onClick={() => setShowFilterMenu(!showFilterMenu)}
-                className={`p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors ${showFilterMenu ? 'ring-2 ring-primary-500' : ''}`}
-              >
-                <Filter size={20} />
-              </button>
-
-              {showFilterMenu && (
-                <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-xl z-50 py-2 animate-in zoom-in-95 duration-200">
-                  <div className="px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-50 dark:border-slate-800 mb-1">
-                    排序方式
-                  </div>
-                  <button 
-                    onClick={() => handleSortChange('createdAt')}
-                    className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${sortBy === 'createdAt' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                  >
-                    最近添加
-                    {sortBy === 'createdAt' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
-                  </button>
-                  <button 
-                    onClick={() => handleSortChange('title')}
-                    className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${sortBy === 'title' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                  >
-                    书名排序
-                    {sortBy === 'title' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
-                  </button>
-                  <button 
-                    onClick={() => handleSortChange('author')}
-                    className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${sortBy === 'author' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                  >
-                    作者排序
-                    {sortBy === 'author' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
-                  </button>
-                  <button 
-                    onClick={() => handleSortChange('year')}
-                    className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${sortBy === 'year' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                  >
-                    年份排序
-                    {sortBy === 'year' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
-                  </button>
-
-                  <div className="px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-widest border-t border-b border-slate-50 dark:border-slate-800 mt-2 mb-1">
-                    图标大小
-                  </div>
-                  <button 
-                    onClick={() => handleIconSizeChange('large')}
-                    className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${iconSize === 'large' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                  >
-                    大图标
-                    {iconSize === 'large' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
-                  </button>
-                  <button 
-                    onClick={() => handleIconSizeChange('medium')}
-                    className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${iconSize === 'medium' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                  >
-                    中图标 (默认)
-                    {iconSize === 'medium' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
-                  </button>
-                  <button 
-                    onClick={() => handleIconSizeChange('small')}
-                    className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${iconSize === 'small' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                  >
-                    小图标
-                    {iconSize === 'small' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
-                  </button>
-
-                  <div className="px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-widest border-t border-b border-slate-50 dark:border-slate-800 mt-2 mb-1">
-                    封面形状
-                  </div>
-                  <button 
-                    onClick={() => handleCoverShapeChange('rect')}
-                    className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${coverShape === 'rect' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                  >
-                    3:4 比例 (默认)
-                    {coverShape === 'rect' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
-                  </button>
-                  <button 
-                    onClick={() => handleCoverShapeChange('square')}
-                    className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${coverShape === 'square' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                  >
-                    1:1 方形
-                    {coverShape === 'square' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
-                  </button>
-                </div>
-              )}
-            </div>
+            <Link
+              to="/search"
+              className="w-full min-[550px]:w-auto min-[550px]:min-w-48 md:w-64 order-first min-[550px]:order-none inline-flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-500 dark:text-slate-400 hover:text-primary-600 hover:border-primary-200 dark:hover:border-primary-900 transition-colors"
+            >
+              <Search size={18} className="shrink-0" />
+              <span className="text-sm font-medium truncate">搜索书名、作者、演播者</span>
+            </Link>
+            <DisplaySettingsMenu
+              className="order-3"
+              open={showFilterMenu}
+              onOpenChange={setShowFilterMenu}
+              sections={[
+                {
+                  title: '排序方式',
+                  value: sortBy,
+                  options: [
+                    { value: 'createdAt', label: '最近添加' },
+                    { value: 'title', label: '书名排序' },
+                    { value: 'author', label: '作者排序' },
+                    { value: 'year', label: '年份排序' },
+                  ],
+                  onChange: (value) => handleSortChange(value as 'createdAt' | 'title' | 'author' | 'year'),
+                },
+                {
+                  title: '图标大小',
+                  value: iconSize,
+                  options: [
+                    { value: 'large', label: '大图标' },
+                    { value: 'medium', label: '中图标 (默认)' },
+                    { value: 'small', label: '小图标' },
+                  ],
+                  onChange: (value) => handleIconSizeChange(value as 'small' | 'medium' | 'large'),
+                },
+                {
+                  title: '封面形状',
+                  value: coverShape,
+                  options: [
+                    { value: 'rect', label: '3:4 比例 (默认)' },
+                    { value: 'square', label: '1:1 方形' },
+                  ],
+                  onChange: (value) => handleCoverShapeChange(value as 'rect' | 'square'),
+                },
+              ]}
+            />
           </div>
         </div>
 
@@ -652,8 +593,8 @@ const BookshelfPage: React.FC = () => {
               <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-slate-100 dark:bg-slate-900 text-slate-400 mb-4">
                 <Search size={40} />
               </div>
-              <h3 className="text-lg font-medium dark:text-white">未找到相关内容</h3>
-              <p className="text-slate-500 mt-2">换个关键词试试吧</p>
+              <h3 className="text-lg font-medium dark:text-white">暂无可显示内容</h3>
+              <p className="text-slate-500 mt-2">可以切换媒体库或到搜索页精确查找</p>
             </div>
           )}
         </>

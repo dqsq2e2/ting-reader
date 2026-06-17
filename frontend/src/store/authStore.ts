@@ -1,6 +1,16 @@
 import { create } from 'zustand';
 import type { User } from '../types';
 import { safeStorage } from '../utils/storage';
+import {
+  clearAuthCookie,
+  clearSessionRestoreMarkers,
+  persistAuthCookie,
+} from '../utils/sessionRestore';
+
+const storedToken = safeStorage.getItem('auth_token');
+if (storedToken) {
+  persistAuthCookie(storedToken);
+}
 
 interface AuthState {
   user: User | null;
@@ -18,13 +28,14 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: JSON.parse(safeStorage.getItem('user') || 'null'),
-  token: safeStorage.getItem('auth_token'),
+  token: storedToken,
   serverUrl: safeStorage.getItem('server_url') || (import.meta.env.PROD ? window.location.origin : 'http://localhost:3000'),
   activeUrl: safeStorage.getItem('active_url') || safeStorage.getItem('server_url') || (import.meta.env.PROD ? window.location.origin : 'http://localhost:3000'),
-  isAuthenticated: !!safeStorage.getItem('auth_token'),
+  isAuthenticated: !!storedToken,
   setAuth: (user, token) => {
     safeStorage.setItem('auth_token', token);
     safeStorage.setItem('user', JSON.stringify(user));
+    persistAuthCookie(token);
     set({ user, token, isAuthenticated: true });
   },
   setUser: (user) => {
@@ -33,6 +44,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
   setToken: (token) => {
     safeStorage.setItem('auth_token', token);
+    persistAuthCookie(token);
     set({ token, isAuthenticated: true });
   },
   setServerUrl: (url) => {
@@ -46,6 +58,8 @@ export const useAuthStore = create<AuthState>((set) => ({
   logout: () => {
     safeStorage.removeItem('auth_token');
     safeStorage.removeItem('user');
+    clearAuthCookie();
+    clearSessionRestoreMarkers();
     set({ user: null, token: null, isAuthenticated: false });
   },
 }));

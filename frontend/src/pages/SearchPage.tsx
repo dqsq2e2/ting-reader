@@ -4,6 +4,7 @@ import type { Book, Library, Series } from '../types';
 import BookCard from '../components/BookCard';
 import { Search as SearchIcon, Loader2, BookX, ChevronLeft, ChevronRight, SlidersHorizontal, ChevronUp, ChevronDown } from 'lucide-react';
 import { usePlayerStore } from '../store/playerStore';
+import BackButton from '../components/BackButton';
 
 const SearchPage: React.FC = () => {
   const [query, setQuery] = useState('');
@@ -300,6 +301,8 @@ const SearchPage: React.FC = () => {
 
   return (
     <div className="w-full max-w-screen-2xl mx-auto p-4 sm:p-6 md:p-8 lg:p-10 space-y-6">
+      <BackButton fallback="/bookshelf" />
+
       <div className="text-center space-y-4">
         <h1 className="text-3xl md:text-4xl font-bold dark:text-white">发现精彩内容</h1>
         <p className="text-sm md:text-base text-slate-500">搜索书名、作者、演播者或简介</p>

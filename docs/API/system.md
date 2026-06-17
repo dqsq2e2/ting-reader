@@ -1,25 +1,29 @@
 # 系统管理
 
+除“公共接口”外，本页接口均需要登录；系统管理接口通常需要管理员权限。
+
 ## 公共接口
 
 ### GET /api/health
 
-健康检查（无需认证）。
+健康检查，无需认证。
 
-**响应：** `200 OK`
+响应：`200 OK`
 
 ```json
 {
-  "status": "healthy | unhealthy",
+  "status": "healthy",
   "components": {
     "database": {
-      "status": "healthy | unhealthy",
-      "message": "string",
-      "details": {}
+      "status": "healthy",
+      "message": "Database is operational",
+      "details": {
+        "status": "connected"
+      }
     },
     "plugin_system": {
-      "status": "healthy | unhealthy",
-      "message": "string",
+      "status": "healthy",
+      "message": "Plugin system is operational",
       "details": {
         "total_plugins": 0,
         "active_plugins": 0,
@@ -28,17 +32,15 @@
     }
   },
   "timestamp": "RFC3339",
-  "version": "string"
+  "version": "1.4.2"
 }
 ```
 
----
-
 ### GET /api/stats
 
-获取系统统计信息（无需认证）。
+公共馆藏统计，无需认证。
 
-**响应：** `200 OK`
+响应：`200 OK`
 
 ```json
 {
@@ -49,21 +51,94 @@
 }
 ```
 
----
+## 管理员统计报表
+
+### GET /api/system/statistics
+
+获取后台数据统计报表。普通用户不可访问。
+
+响应：`200 OK`
+
+```json
+{
+  "overview": {
+    "total_books": 0,
+    "total_chapters": 0,
+    "total_duration": 0,
+    "total_libraries": 0,
+    "local_libraries": 0,
+    "webdav_libraries": 0,
+    "total_users": 0,
+    "admin_users": 0,
+    "active_users": 0,
+    "total_progress_records": 0,
+    "total_listen_seconds": 0.0
+  },
+  "library_breakdown": [
+    {
+      "id": "string",
+      "name": "string",
+      "library_type": "local | webdav",
+      "total_books": 0,
+      "total_chapters": 0,
+      "total_duration": 0,
+      "last_scanned_at": "RFC3339 | null"
+    }
+  ],
+  "user_activity": [
+    {
+      "id": "string",
+      "username": "string",
+      "role": "admin | user",
+      "listened_books": 0,
+      "progress_records": 0,
+      "listen_seconds": 0.0,
+      "last_active_at": "RFC3339 | null"
+    }
+  ],
+  "recent_activity": [
+    {
+      "date": "YYYY-MM-DD",
+      "active_users": 0,
+      "progress_updates": 0,
+      "listen_seconds": 0.0
+    }
+  ],
+  "top_books": [
+    {
+      "id": "string",
+      "title": "string | null",
+      "author": "string | null",
+      "library_id": "string",
+      "library_name": "string | null",
+      "listeners": 0,
+      "progress_updates": 0,
+      "listen_seconds": 0.0
+    }
+  ],
+  "generated_at": "RFC3339"
+}
+```
+
+说明：
+
+- 统计使用 `listening_events`，用户清空最近收听不会影响后台历史统计。
+- `recent_activity` 默认返回最近 14 天有记录的活动点。
+- `top_books` 当前最多返回 8 条热门作品。
 
 ## 系统指标
 
-### GET /api/v1/system/metrics
+### GET /api/system/metrics
 
-获取系统指标。支持 JSON 和 Prometheus 格式。
+获取系统指标。支持 JSON 和 Prometheus 文本格式。
 
-**请求头：**
+请求头：
 
 | Header | 说明 |
-|--------|------|
-| `Accept` | `application/json`（默认）或 `text/plain`（Prometheus 格式） |
+| --- | --- |
+| `Accept` | `application/json` 或 `text/plain` |
 
-**响应（JSON）：** `200 OK`
+响应：`200 OK`
 
 ```json
 {
@@ -111,15 +186,13 @@
 }
 ```
 
----
-
 ## 系统配置
 
-### GET /api/v1/system/config
+### GET /api/system/config
 
 获取系统配置。
 
-**响应：** `200 OK`
+响应：`200 OK`
 
 ```json
 {
@@ -147,8 +220,8 @@
   },
   "logging": {
     "level": "info",
-    "format": "text",
-    "output": "stdout",
+    "format": "text | json",
+    "output": "stdout | file",
     "log_file": "string | null",
     "max_file_size": 10485760,
     "max_backups": 5
@@ -171,13 +244,11 @@
 }
 ```
 
----
+### PUT /api/system/config
 
-### PUT /api/v1/system/config
+更新系统配置。请求体中所有字段均可选。
 
-更新系统配置。
-
-**请求体：** 与响应结构相同，所有字段均为可选。
+请求体示例：
 
 ```json
 {
@@ -192,7 +263,7 @@
 }
 ```
 
-**响应：** `200 OK`
+响应：`200 OK`
 
 ```json
 {
@@ -202,51 +273,79 @@
 }
 ```
 
----
-
 ## 系统更新
 
-### GET /api/v1/system/check-update
+### GET /api/system/check-update
 
-检查系统更新。
+检查服务端更新。
 
-**响应：** `200 OK` — 返回更新信息 JSON
+响应：`200 OK`
 
----
-
-## 系统日志
-
-### GET /api/v1/system/logs
-
-获取系统日志。
-
-**查询参数：**
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| level | string | 日志级别过滤（可选） |
-| search | string | 搜索关键词（可选） |
-| page | number | 页码（可选） |
-| page_size | number | 每页数量（可选） |
-
-**响应：** `200 OK`
+返回更新服务的原始 JSON，例如：
 
 ```json
 {
-  "logs": [],
+  "version": "v1.4.3",
+  "downloadUrl": "https://...",
+  "size": "string",
+  "date": "RFC3339"
+}
+```
+
+## 系统日志
+
+### GET /api/system/logs
+
+获取系统日志与任务日志。
+
+查询参数：
+
+| 参数 | 类型 | 说明 |
+| --- | --- | --- |
+| `level` | string | 日志级别过滤，如 `INFO`、`WARN`、`ERROR` |
+| `module` | string | 模块过滤，如 `audit`、`audit::login`、`audit::playback`、`audit::scan`、`audit::notification`、`all` |
+| `page` | number | 页码，默认 `1` |
+| `page_size` | number | 每页数量，默认 `50` |
+
+响应：`200 OK`
+
+```json
+{
+  "logs": [
+    {
+      "timestamp": "RFC3339",
+      "level": "INFO",
+      "module": "audit::login",
+      "message": "用户 'admin' 登录成功",
+      "fields": {
+        "user_id": "string",
+        "username": "admin",
+        "real_ip": "127.0.0.1",
+        "user_agent": "Mozilla/5.0 ...",
+        "device": "Windows / Chrome"
+      },
+      "task_id": "string | null",
+      "task_status": "queued | running | completed | failed | cancelled | null",
+      "task_type": "string | null"
+    }
+  ],
   "total": 0,
   "page": 1,
   "page_size": 50
 }
 ```
 
----
+说明：
 
-### DELETE /api/v1/system/logs
+- 登录日志会记录 `real_ip`、`user_agent`、`device`。
+- 扫描完成日志会记录媒体库 ID、名称、类型、路径、新增/更新/删除数量。
+- `fields` 为结构化日志字段，不含 `message`。
 
-清除系统日志。
+### DELETE /api/system/logs
 
-**响应：** `200 OK`
+清空系统日志文件。
+
+响应：`200 OK`
 
 ```json
 {
@@ -254,10 +353,18 @@
 }
 ```
 
----
+### GET /api/system/logs/export
 
-### GET /api/v1/system/logs/export
+导出系统日志文本。
 
-导出系统日志。
+查询参数：
 
-**响应：** 日志文件下载
+| 参数 | 类型 | 说明 |
+| --- | --- | --- |
+| `level` | string | 可选，仅导出指定级别 |
+
+响应：`200 OK`，`text/plain` 文件下载。
+
+## 通知与事件
+
+Webhook 通知管理接口见 [notifications.md](notifications.md)。

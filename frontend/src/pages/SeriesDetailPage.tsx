@@ -4,16 +4,21 @@ import apiClient from '../api/client';
 import type { Book, Series } from '../types';
 import BookCard from '../components/BookCard';
 import BookSelector from '../components/BookSelector';
-import { ArrowLeft, Trash2, Save, Settings, X, Plus, Filter } from 'lucide-react';
+import DisplaySettingsMenu from '../components/DisplaySettingsMenu';
+import { ArrowLeft, Trash2, Save, Settings, X, Plus } from 'lucide-react';
 import { getCoverUrl } from '../utils/image';
 import { usePlayerStore } from '../store/playerStore';
 import { useAuthStore } from '../store/authStore';
+import { getCoverAspectClass, useBookshelfCoverShape } from '../hooks/useBookshelfCoverShape';
+
+type SeriesSortBy = 'default' | 'title' | 'author';
 
 const SeriesDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const isAdmin = user?.role === 'admin';
+  const coverShape = useBookshelfCoverShape();
   const [series, setSeries] = useState<Series | null>(null);
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,9 +27,8 @@ const SeriesDetailPage: React.FC = () => {
   const { setIsSeriesEditing } = usePlayerStore();
   
   // Filter & Sort state
-  const [sortBy, setSortBy] = useState<'default' | 'title' | 'author' | 'createdAt'>('default');
+  const [sortBy, setSortBy] = useState<SeriesSortBy>('default');
   const [iconSize, setIconSize] = useState<'small' | 'medium' | 'large'>('medium');
-  const [coverShape, setCoverShape] = useState<'rect' | 'square'>('rect');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
 
   // Edit form state
@@ -57,14 +61,11 @@ const SeriesDetailPage: React.FC = () => {
         const res = await apiClient.get('/api/settings');
         const settings = res.data.settingsJson || {};
         
-        if (settings.seriesSortBy) {
+        if (settings.seriesSortBy === 'default' || settings.seriesSortBy === 'title' || settings.seriesSortBy === 'author') {
           setSortBy(settings.seriesSortBy);
         }
-        if (settings.seriesIconSize) {
+        if (settings.seriesIconSize === 'small' || settings.seriesIconSize === 'medium' || settings.seriesIconSize === 'large') {
           setIconSize(settings.seriesIconSize);
-        }
-        if (settings.bookshelfCoverShape) {
-          setCoverShape(settings.bookshelfCoverShape);
         }
       } catch (err) {
         console.error('加载设置失败', err);
@@ -85,7 +86,7 @@ const SeriesDetailPage: React.FC = () => {
     };
   }, [isEditing, setIsSeriesEditing]);
 
-  const handleSortChange = (newSort: 'default' | 'title' | 'author' | 'createdAt') => {
+  const handleSortChange = (newSort: SeriesSortBy) => {
     setSortBy(newSort);
     setShowFilterMenu(false);
     apiClient.post('/api/settings', { seriesSortBy: newSort });
@@ -114,7 +115,6 @@ const SeriesDetailPage: React.FC = () => {
     return [...books].sort((a, b) => {
       if (sortBy === 'title') return a.title.localeCompare(b.title, 'zh-CN');
       if (sortBy === 'author') return (a.author || '').localeCompare(b.author || '', 'zh-CN');
-      if (sortBy === 'createdAt') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       return 0;
     });
   };
@@ -173,84 +173,44 @@ const SeriesDetailPage: React.FC = () => {
           </h1>
         </div>
         {!isEditing && (
-            <div className="flex items-center gap-2 relative">
-                <button 
-                  onClick={() => setShowFilterMenu(!showFilterMenu)}
-                  className={`p-2.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ${showFilterMenu ? 'ring-2 ring-primary-500' : ''}`}
-                >
-                  <Filter size={20} />
-                </button>
+          <div className="flex items-center gap-2">
+            <DisplaySettingsMenu
+              open={showFilterMenu}
+              onOpenChange={setShowFilterMenu}
+              sheetLabel="关闭系列展示设置"
+              sections={[
+                {
+                  title: '排序方式',
+                  value: sortBy,
+                  options: [
+                    { value: 'default', label: '默认排序' },
+                    { value: 'title', label: '书名排序' },
+                    { value: 'author', label: '作者排序' },
+                  ],
+                  onChange: (value) => handleSortChange(value as SeriesSortBy),
+                },
+                {
+                  title: '图标大小',
+                  value: iconSize,
+                  options: [
+                    { value: 'large', label: '大图标' },
+                    { value: 'medium', label: '中图标（默认）' },
+                    { value: 'small', label: '小图标' },
+                  ],
+                  onChange: (value) => handleIconSizeChange(value as 'small' | 'medium' | 'large'),
+                },
+              ]}
+            />
 
-                {isAdmin && (
-                  <button 
-                    onClick={() => setIsEditing(true)}
-                    className="p-2.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-                  >
-                    <Settings size={20} />
-                  </button>
-                )}
-
-                {showFilterMenu && (
-                    <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-xl z-50 py-2 animate-in zoom-in-95 duration-200">
-                    <div className="px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-50 dark:border-slate-800 mb-1">
-                        排序方式
-                    </div>
-                    <button 
-                        onClick={() => handleSortChange('default')}
-                        className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${sortBy === 'default' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                    >
-                        默认排序
-                        {sortBy === 'default' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
-                    </button>
-                    <button 
-                        onClick={() => handleSortChange('createdAt')}
-                        className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${sortBy === 'createdAt' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                    >
-                        最近添加
-                        {sortBy === 'createdAt' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
-                    </button>
-                    <button 
-                        onClick={() => handleSortChange('title')}
-                        className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${sortBy === 'title' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                    >
-                        书名排序
-                        {sortBy === 'title' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
-                    </button>
-                    <button 
-                        onClick={() => handleSortChange('author')}
-                        className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${sortBy === 'author' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                    >
-                        作者排序
-                        {sortBy === 'author' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
-                    </button>
-
-                    <div className="px-4 py-2 text-xs font-bold text-slate-400 uppercase tracking-widest border-t border-b border-slate-50 dark:border-slate-800 mt-2 mb-1">
-                        图标大小
-                    </div>
-                    <button 
-                        onClick={() => handleIconSizeChange('large')}
-                        className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${iconSize === 'large' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                    >
-                        大图标
-                        {iconSize === 'large' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
-                    </button>
-                    <button 
-                        onClick={() => handleIconSizeChange('medium')}
-                        className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${iconSize === 'medium' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                    >
-                        中图标 (默认)
-                        {iconSize === 'medium' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
-                    </button>
-                    <button 
-                        onClick={() => handleIconSizeChange('small')}
-                        className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between ${iconSize === 'small' ? 'text-primary-600 font-bold bg-primary-50/50 dark:bg-primary-900/20' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                    >
-                        小图标
-                        {iconSize === 'small' && <div className="w-1.5 h-1.5 rounded-full bg-primary-600" />}
-                    </button>
-                    </div>
-                )}
-            </div>
+            {isAdmin && (
+              <button
+                onClick={() => setIsEditing(true)}
+                className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+              >
+                <Settings size={20} />
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -259,7 +219,7 @@ const SeriesDetailPage: React.FC = () => {
         <div className="grid md:grid-cols-[300px_1fr] gap-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
           {/* Sidebar Info - Editing */}
           <div className="space-y-6">
-            <div className="aspect-[3/4] rounded-2xl overflow-hidden shadow-lg">
+            <div className={`${getCoverAspectClass(coverShape)} rounded-2xl overflow-hidden shadow-lg`}>
               <img 
                 src={getCoverUrl(coverUrl, series.libraryId)} 
                 className="w-full h-full object-cover"
@@ -349,7 +309,7 @@ const SeriesDetailPage: React.FC = () => {
                     </button>
                   </div>
                   
-                  <div className="w-12 h-16 rounded overflow-hidden flex-shrink-0">
+                  <div className={`w-12 ${getCoverAspectClass(coverShape)} rounded overflow-hidden flex-shrink-0`}>
                     <img src={getCoverUrl(book.coverUrl, book.libraryId, book.id)} className="w-full h-full object-cover" alt="" />
                   </div>
                   

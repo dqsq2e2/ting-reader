@@ -12,20 +12,26 @@ use crate::api::handlers::{
     check_update,
     clear_all_caches,
     clear_plugin_cache,
+    clear_recent_progress,
     clear_system_logs,
     clear_tasks,
     create_book,
     create_library,
+    create_notification_webhook,
+    create_playlist,
     create_series,
     create_user,
     delete_book,
     delete_chapter_cache,
     delete_library,
+    delete_notification_webhook,
+    delete_playlist,
     delete_series,
     delete_task,
     delete_user,
     export_system_logs,
     generate_regex,
+    get_admin_statistics,
     get_book,
     get_book_chapters,
     get_book_progress,
@@ -34,6 +40,7 @@ use crate::api::handlers::{
     // Favorites management
     get_favorites,
     get_metrics,
+    get_playlist,
     get_plugin_config,
     get_plugin_detail,
     // Progress management
@@ -55,6 +62,9 @@ use crate::api::handlers::{
     list_books,
     // Library management
     list_libraries,
+    list_notification_events,
+    list_notification_webhooks,
+    list_playlists,
     list_plugins,
     // Series management
     list_series,
@@ -79,6 +89,8 @@ use crate::api::handlers::{
     update_chapter,
     update_config,
     update_library,
+    update_notification_webhook,
+    update_playlist,
     update_plugin_config,
     update_progress,
     update_series,
@@ -129,7 +141,10 @@ pub fn build_api_routes(state: AppState) -> Router {
         // User endpoints
         .route("/api/me", get(get_me).patch(update_me))
         // Progress management endpoints
-        .route("/api/progress/recent", get(get_recent_progress))
+        .route(
+            "/api/progress/recent",
+            get(get_recent_progress).delete(clear_recent_progress),
+        )
         .route("/api/progress/:bookId", get(get_book_progress))
         .route("/api/progress", post(update_progress))
         // Favorites management endpoints
@@ -137,6 +152,24 @@ pub fn build_api_routes(state: AppState) -> Router {
         .route(
             "/api/favorites/:bookId",
             post(add_favorite).delete(remove_favorite),
+        )
+        // Playlist endpoints
+        .route("/api/playlists", get(list_playlists).post(create_playlist))
+        .route(
+            "/api/playlists/:id",
+            get(get_playlist)
+                .put(update_playlist)
+                .delete(delete_playlist),
+        )
+        .route(
+            "/api/v1/playlists",
+            get(list_playlists).post(create_playlist),
+        )
+        .route(
+            "/api/v1/playlists/:id",
+            get(get_playlist)
+                .put(update_playlist)
+                .delete(delete_playlist),
         )
         // User settings endpoints
         .route(
@@ -216,8 +249,21 @@ pub fn build_api_routes(state: AppState) -> Router {
         .route("/api/v1/tasks/:id/cancel", post(cancel_task))
         .route("/api/v1/tasks/batch-delete", post(batch_delete_tasks))
         // System management endpoints
+        .route("/api/v1/system/statistics", get(get_admin_statistics))
         .route("/api/v1/system/metrics", get(get_metrics))
         .route("/api/v1/system/config", get(get_config).put(update_config))
+        .route(
+            "/api/v1/system/notifications",
+            get(list_notification_webhooks).post(create_notification_webhook),
+        )
+        .route(
+            "/api/v1/system/notifications/events",
+            get(list_notification_events),
+        )
+        .route(
+            "/api/v1/system/notifications/:id",
+            put(update_notification_webhook).delete(delete_notification_webhook),
+        )
         .route("/api/v1/system/check-update", get(check_update))
         .route(
             "/api/v1/system/logs",
@@ -280,8 +326,21 @@ pub fn build_api_routes(state: AppState) -> Router {
         .route("/api/tasks/:id/cancel", post(cancel_task))
         .route("/api/tasks/batch-delete", post(batch_delete_tasks))
         // System management endpoints (without /v1)
+        .route("/api/system/statistics", get(get_admin_statistics))
         .route("/api/system/metrics", get(get_metrics))
         .route("/api/system/config", get(get_config).put(update_config))
+        .route(
+            "/api/system/notifications",
+            get(list_notification_webhooks).post(create_notification_webhook),
+        )
+        .route(
+            "/api/system/notifications/events",
+            get(list_notification_events),
+        )
+        .route(
+            "/api/system/notifications/:id",
+            put(update_notification_webhook).delete(delete_notification_webhook),
+        )
         .route("/api/system/check-update", get(check_update))
         .route(
             "/api/system/logs",

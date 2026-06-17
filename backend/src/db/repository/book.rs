@@ -236,6 +236,33 @@ impl BookRepository {
             Ok(books)
         }).await
     }
+
+    pub async fn check_access(&self, book_id: &str, user_id: &str, is_admin: bool) -> Result<bool> {
+        if is_admin {
+            return Ok(true);
+        }
+
+        let book_id = book_id.to_string();
+        let user_id = user_id.to_string();
+        self.db
+            .execute(move |conn| {
+                conn.query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM books b
+                        WHERE b.id = ? AND (
+                            b.library_id IN (SELECT library_id FROM user_library_access WHERE user_id = ?)
+                            OR
+                            b.id IN (SELECT book_id FROM user_book_access WHERE user_id = ?)
+                        )
+                    )",
+                    rusqlite::params![&book_id, &user_id, &user_id],
+                    |row| row.get(0),
+                )
+                .map_err(TingError::DatabaseError)
+            })
+            .await
+    }
+
     pub async fn cleanup_orphans(&self) -> Result<()> {
         self.db
             .execute(move |conn| {

@@ -8,11 +8,17 @@ import BookDetailPage from './pages/BookDetailPage';
 import SeriesDetailPage from './pages/SeriesDetailPage';
 import SearchPage from './pages/SearchPage';
 import FavoritesPage from './pages/FavoritesPage';
+import MyPage from './pages/MyPage';
+import MyPlaylistsPage from './pages/MyPlaylistsPage';
+import PlaylistDetailPage from './pages/PlaylistDetailPage';
+import HistoryPage from './pages/HistoryPage';
+import PersonalizationPage from './pages/PersonalizationPage';
+import NotificationSettingsPage from './pages/NotificationSettingsPage';
 import AdminLibraries from './pages/AdminLibraries';
 import AdminUsers from './pages/AdminUsers';
+import AdminStatisticsPage from './pages/AdminStatisticsPage';
 import LogsPage from './pages/LogsPage';
 import PluginsPage from './pages/PluginsPage';
-import SettingsPage from './pages/SettingsPage';
 import DownloadsPage from './pages/DownloadsPage';
 import WidgetPage from './pages/WidgetPage';
 import { useAuthStore } from './store/authStore';
@@ -48,9 +54,30 @@ function App() {
           <Route path="series/:id" element={<SeriesDetailPage />} />
           <Route path="search" element={<SearchPage />} />
           <Route path="favorites" element={<FavoritesPage />} />
-          <Route path="settings" element={<SettingsPage />} />
+          <Route path="mine" element={<MyPage />} />
+          <Route path="history" element={<HistoryPage />} />
+          <Route path="playlists" element={<MyPlaylistsPage />} />
+          <Route path="playlists/:id" element={<PlaylistDetailPage />} />
+          <Route path="personalization" element={<PersonalizationPage />} />
+          <Route path="notifications" element={
+            <AdminRoute>
+              <NotificationSettingsPage />
+            </AdminRoute>
+          } />
+          <Route path="about" element={<Navigate to="/mine" replace />} />
+          <Route path="settings" element={<Navigate to="/personalization" replace />} />
           <Route path="downloads" element={<DownloadsPage />} />
+          <Route path="statistics" element={
+            <AdminRoute>
+              <AdminStatisticsPage />
+            </AdminRoute>
+          } />
           
+          <Route path="admin/statistics" element={
+            <AdminRoute>
+              <Navigate to="/statistics" replace />
+            </AdminRoute>
+          } />
           <Route path="admin/libraries" element={
             <AdminRoute>
               <AdminLibraries />
@@ -69,6 +96,11 @@ function App() {
           <Route path="admin/plugins" element={
             <AdminRoute>
               <PluginsPage />
+            </AdminRoute>
+          } />
+          <Route path="admin/widget-config" element={
+            <AdminRoute>
+              <Navigate to="/personalization" replace />
             </AdminRoute>
           } />
         </Route>

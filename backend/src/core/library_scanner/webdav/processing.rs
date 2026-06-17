@@ -617,28 +617,30 @@ impl LibraryScanner {
                 (t, d)
             };
 
-            // Determine Title
-            let raw_title = if use_json_chapters {
-                // Use JSON title directly
-                meta_title
-            } else if let Some(rt) = regex_title {
-                rt
+            // metadata.json is a fallback title source. Explicit chapter regex
+            // and filename-based titles still override it and go through cleaner.
+            let (raw_title, should_clean_title) = if let Some(rt) = regex_title {
+                (rt, true)
             } else if scraper_config.use_filename_as_title {
-                filename
+                (filename.clone(), true)
+            } else if use_json_chapters {
+                (meta_title, false)
             } else if !meta_title.trim().is_empty()
                 && !meta_title.to_lowercase().starts_with("track")
             {
-                meta_title
+                (meta_title, true)
             } else {
-                filename
+                (filename, true)
             };
 
-            // Clean Title (skip if using JSON)
-            let (final_title, is_extra) = if use_json_chapters {
-                (raw_title, false)
-            } else {
+            let (final_title, is_extra) = if should_clean_title {
                 self.text_cleaner
                     .clean_chapter_title(&raw_title, book.title.as_deref())
+            } else {
+                let (_, is_extra) = self
+                    .text_cleaner
+                    .clean_chapter_title(&raw_title, book.title.as_deref());
+                (raw_title, is_extra)
             };
 
             let counter_idx = if is_extra {
@@ -671,6 +673,7 @@ impl LibraryScanner {
                 if existing.manual_corrected == 0 {
                     existing.title = chapter.title;
                     existing.chapter_index = chapter.chapter_index;
+                    existing.is_extra = chapter.is_extra;
                 }
                 existing.duration = chapter.duration;
                 existing.book_id = book_id.clone(); // Ensure it belongs to this book

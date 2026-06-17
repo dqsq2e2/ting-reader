@@ -1,12 +1,14 @@
 use super::AppState;
 use crate::api::models::{
-    BatchDeleteTasksRequest, BatchDeleteTasksResponse, CancelTaskResponse, ClearTasksQuery,
+    AdminStatisticsOverview, AdminStatisticsResponse, BatchDeleteTasksRequest,
+    BatchDeleteTasksResponse, BookActivityStatistics, CancelTaskResponse, ClearTasksQuery,
     ClearTasksResponse, ComponentHealth, ComponentStatus, ComponentsHealth, ConfigResponse,
     DatabaseConfigResponse, DatabaseMetrics, DeleteTaskResponse, HealthResponse, HealthStatus,
-    LoggingConfigResponse, MetricsResponse, PluginMetrics, PluginSystemConfigResponse,
-    SecurityConfigResponse, ServerConfigResponse, StorageConfigResponse, SystemMetrics,
-    TaskDetailResponse, TaskInfoResponse, TaskQueueConfigResponse, TaskQueueMetrics, TasksQuery,
-    UpdateConfigRequest, UpdateConfigResponse,
+    LibraryStatistics, LoggingConfigResponse, MetricsResponse, PluginMetrics,
+    PluginSystemConfigResponse, RecentActivityPoint, SecurityConfigResponse, ServerConfigResponse,
+    StorageConfigResponse, SystemMetrics, TaskDetailResponse, TaskInfoResponse,
+    TaskQueueConfigResponse, TaskQueueMetrics, TasksQuery, UpdateConfigRequest,
+    UpdateConfigResponse, UserActivityStatistics,
 };
 use crate::core::error::{Result, TingError};
 use crate::db::repository::Repository;
@@ -233,6 +235,214 @@ pub async fn health_check(State(state): State<AppState>) -> Result<impl IntoResp
     };
 
     Ok(Json(response))
+}
+
+/// Handler for GET /api/system/statistics - Admin statistics dashboard
+pub async fn get_admin_statistics(
+    State(state): State<AppState>,
+    user: crate::auth::middleware::AuthUser,
+) -> Result<impl IntoResponse> {
+    if user.role != "admin" {
+        return Err(TingError::PermissionDenied(
+            "Admin access required".to_string(),
+        ));
+    }
+
+    let generated_at = Utc::now().to_rfc3339();
+    let report = state
+        .book_repo
+        .db()
+        .execute(move |conn| {
+            let (total_books, total_chapters, total_duration): (i64, i64, i64) = conn
+                .query_row(
+                    "SELECT \
+                        (SELECT COUNT(*) FROM books), \
+                        (SELECT COUNT(*) FROM chapters), \
+                        COALESCE((SELECT SUM(duration) FROM chapters), 0)",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .map_err(TingError::DatabaseError)?;
+
+            let (total_libraries, local_libraries, webdav_libraries): (i64, i64, i64) = conn
+                .query_row(
+                    "SELECT \
+                        COUNT(*), \
+                        COALESCE(SUM(CASE WHEN LOWER(type) = 'local' THEN 1 ELSE 0 END), 0), \
+                        COALESCE(SUM(CASE WHEN LOWER(type) = 'webdav' THEN 1 ELSE 0 END), 0) \
+                     FROM libraries",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .map_err(TingError::DatabaseError)?;
+
+            let (total_users, admin_users): (i64, i64) = conn
+                .query_row(
+                    "SELECT \
+                        COUNT(*), \
+                        COALESCE(SUM(CASE WHEN role = 'admin' THEN 1 ELSE 0 END), 0) \
+                     FROM users",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(TingError::DatabaseError)?;
+
+            let (active_users, total_progress_records, total_listen_seconds): (i64, i64, f64) =
+                conn.query_row(
+                    "SELECT COUNT(DISTINCT user_id), COUNT(*), COALESCE(SUM(listen_seconds), 0.0) FROM listening_events",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .map_err(TingError::DatabaseError)?;
+
+            let mut library_stmt = conn
+                .prepare(
+                    "SELECT \
+                        l.id, l.name, l.type, \
+                        COUNT(DISTINCT b.id) AS total_books, \
+                        COUNT(c.id) AS total_chapters, \
+                        COALESCE(SUM(c.duration), 0) AS total_duration, \
+                        l.last_scanned_at \
+                     FROM libraries l \
+                     LEFT JOIN books b ON b.library_id = l.id \
+                     LEFT JOIN chapters c ON c.book_id = b.id \
+                     GROUP BY l.id, l.name, l.type, l.last_scanned_at \
+                     ORDER BY total_books DESC, l.name ASC",
+                )
+                .map_err(TingError::DatabaseError)?;
+            let library_breakdown = library_stmt
+                .query_map([], |row| {
+                    Ok(LibraryStatistics {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        library_type: row.get(2)?,
+                        total_books: row.get(3)?,
+                        total_chapters: row.get(4)?,
+                        total_duration: row.get(5)?,
+                        last_scanned_at: row.get(6)?,
+                    })
+                })
+                .map_err(TingError::DatabaseError)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(TingError::DatabaseError)?;
+
+            let mut user_stmt = conn
+                .prepare(
+                    "SELECT \
+                        u.id, u.username, u.role, \
+                        COUNT(DISTINCT e.book_id) AS listened_books, \
+                        COUNT(e.id) AS progress_records, \
+                        COALESCE(SUM(e.listen_seconds), 0.0) AS listen_seconds, \
+                        MAX(e.created_at) AS last_active_at \
+                     FROM users u \
+                     LEFT JOIN listening_events e ON e.user_id = u.id \
+                     GROUP BY u.id, u.username, u.role \
+                     ORDER BY MAX(e.created_at) IS NULL, MAX(e.created_at) DESC, listen_seconds DESC",
+                )
+                .map_err(TingError::DatabaseError)?;
+            let user_activity = user_stmt
+                .query_map([], |row| {
+                    Ok(UserActivityStatistics {
+                        id: row.get(0)?,
+                        username: row.get(1)?,
+                        role: row.get(2)?,
+                        listened_books: row.get(3)?,
+                        progress_records: row.get(4)?,
+                        listen_seconds: row.get(5)?,
+                        last_active_at: row.get(6)?,
+                    })
+                })
+                .map_err(TingError::DatabaseError)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(TingError::DatabaseError)?;
+
+            let mut recent_stmt = conn
+                .prepare(
+                    "SELECT activity_date, active_users, progress_updates, listen_seconds \
+                     FROM ( \
+                        SELECT \
+                            substr(created_at, 1, 10) AS activity_date, \
+                            COUNT(DISTINCT user_id) AS active_users, \
+                            COUNT(*) AS progress_updates, \
+                            COALESCE(SUM(listen_seconds), 0.0) AS listen_seconds \
+                        FROM listening_events \
+                        WHERE created_at IS NOT NULL \
+                        GROUP BY activity_date \
+                        ORDER BY activity_date DESC \
+                        LIMIT 14 \
+                     ) \
+                     ORDER BY activity_date ASC",
+                )
+                .map_err(TingError::DatabaseError)?;
+            let recent_activity = recent_stmt
+                .query_map([], |row| {
+                    Ok(RecentActivityPoint {
+                        date: row.get(0)?,
+                        active_users: row.get(1)?,
+                        progress_updates: row.get(2)?,
+                        listen_seconds: row.get(3)?,
+                    })
+                })
+                .map_err(TingError::DatabaseError)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(TingError::DatabaseError)?;
+
+            let mut top_books_stmt = conn
+                .prepare(
+                    "SELECT \
+                        b.id, b.title, b.author, b.library_id, l.name, \
+                        COUNT(DISTINCT e.user_id) AS listeners, \
+                        COUNT(e.id) AS progress_updates, \
+                        COALESCE(SUM(e.listen_seconds), 0.0) AS listen_seconds \
+                     FROM listening_events e \
+                     JOIN books b ON b.id = e.book_id \
+                     LEFT JOIN libraries l ON l.id = b.library_id \
+                     GROUP BY b.id, b.title, b.author, b.library_id, l.name \
+                     ORDER BY listeners DESC, listen_seconds DESC \
+                     LIMIT 8",
+                )
+                .map_err(TingError::DatabaseError)?;
+            let top_books = top_books_stmt
+                .query_map([], |row| {
+                    Ok(BookActivityStatistics {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        author: row.get(2)?,
+                        library_id: row.get(3)?,
+                        library_name: row.get(4)?,
+                        listeners: row.get(5)?,
+                        progress_updates: row.get(6)?,
+                        listen_seconds: row.get(7)?,
+                    })
+                })
+                .map_err(TingError::DatabaseError)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(TingError::DatabaseError)?;
+
+            Ok(AdminStatisticsResponse {
+                overview: AdminStatisticsOverview {
+                    total_books,
+                    total_chapters,
+                    total_duration,
+                    total_libraries,
+                    local_libraries,
+                    webdav_libraries,
+                    total_users,
+                    admin_users,
+                    active_users,
+                    total_progress_records,
+                    total_listen_seconds,
+                },
+                library_breakdown,
+                user_activity,
+                recent_activity,
+                top_books,
+                generated_at,
+            })
+        })
+        .await?;
+
+    Ok(Json(report))
 }
 
 async fn check_database_health(state: &AppState) -> ComponentHealth {

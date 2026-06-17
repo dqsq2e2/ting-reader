@@ -22,13 +22,13 @@ import {
   RotateCcw,
   RotateCw,
   Zap,
-  ArrowLeft,
   ListMusic,
   X,
   Check
 } from 'lucide-react';
 import { getCoverUrl } from '../utils/image';
 import { setAlpha, toSolidColor, isLight, isTooLight } from '../utils/color';
+import { useBookshelfCoverShape } from '../hooks/useBookshelfCoverShape';
 
 interface ProgressBarProps {
   isMini?: boolean;
@@ -132,6 +132,7 @@ const isAppleMobileBrowser = () => {
 const isStrmPath = (path?: string) => path?.toLowerCase().split('?')[0].endsWith('.strm') ?? false;
 
 const Player: React.FC = () => {
+  const coverShape = useBookshelfCoverShape();
   const { token, activeUrl } = useAuthStore();
   const API_BASE_URL = activeUrl || import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? '' : 'http://localhost:3000');
   const toAbsoluteMediaUrl = (url: string) => {
@@ -139,6 +140,10 @@ const Player: React.FC = () => {
     const base = API_BASE_URL || window.location.origin;
     return `${base.replace(/\/$/, '')}${url.startsWith('/') ? url : `/${url}`}`;
   };
+  const streamStartOffsetRef = useRef<{ chapterId: string | null; offset: number }>({
+    chapterId: null,
+    offset: 0,
+  });
 
   const getStreamUrl = (chapterId: string) => {
     let url = '';
@@ -155,9 +160,13 @@ const Player: React.FC = () => {
       url += '&transcode=mp3';
     }
     
-    // Add seek parameter for transcoded streams (FFmpeg pipe doesn't support Range requests)
-    if (shouldTranscode && seekOffset !== null && seekOffset > 0) {
-      url += `&seek=${seekOffset}`;
+    // Keep this fixed per chapter so the backend can log the start position without reloading as progress changes.
+    const initialOffset = streamStartOffsetRef.current.chapterId === chapterId
+      ? streamStartOffsetRef.current.offset
+      : 0;
+    const requestSeekOffset = seekOffset !== null ? seekOffset : initialOffset;
+    if (requestSeekOffset > 0) {
+      url += `&seek=${Math.floor(requestSeekOffset)}`;
     }
     
     // Add retry count to force URL refresh even if shouldTranscode didn't change (e.g. network retry)
@@ -193,6 +202,13 @@ const Player: React.FC = () => {
     setIsCollapsed,
     isSeriesEditing
   } = usePlayerStore();
+
+  if (currentChapter?.id && streamStartOffsetRef.current.chapterId !== currentChapter.id) {
+    streamStartOffsetRef.current = {
+      chapterId: currentChapter.id,
+      offset: Math.max(0, Math.floor(currentTime || 0)),
+    };
+  }
 
   const { sendProgress: wsSendProgress } = useWebSocket();
 
@@ -234,6 +250,15 @@ const Player: React.FC = () => {
   }, []);
 
   const effectiveThemeColor = themeColor && !isTooLight(themeColor) ? themeColor : undefined;
+  const collapsedCoverSizeClass = coverShape === 'square'
+    ? 'w-14 h-14 sm:w-16 sm:h-16'
+    : 'w-12 sm:w-14 aspect-[3/4]';
+  const miniCoverSizeClass = coverShape === 'square'
+    ? 'w-12 h-12 max-[380px]:w-10 max-[380px]:h-10 sm:w-16 sm:h-16'
+    : 'w-10 max-[380px]:w-8 sm:w-12 aspect-[3/4]';
+  const expandedCoverSizeClass = coverShape === 'square'
+    ? 'w-full max-w-[240px] sm:max-w-[320px] lg:max-w-[400px] aspect-square'
+    : 'w-full max-w-[220px] sm:max-w-[280px] lg:max-w-[320px] aspect-[3/4]';
   // Always use the theme color for the mini player progress bar, even in dark mode
   const miniPlayerThemeColor = effectiveThemeColor;
   // Determine if we should use dark mode text colors (white/gray) for controls
@@ -1094,6 +1119,47 @@ const Player: React.FC = () => {
     nextChapter();
   };
 
+  const openChapterList = () => {
+    if (currentChapter && chapters.length > 0) {
+      const isExtra = !!currentChapter.isExtra || /番外|SP|Extra/i.test(currentChapter.title);
+      const targetTab = isExtra ? 'extra' : 'main';
+      if (activeTab !== targetTab) setActiveTab(targetTab);
+
+      const targetList = chapters.filter(chapter => {
+        const chapterIsExtra = !!chapter.isExtra || /番外|SP|Extra/i.test(chapter.title);
+        return chapterIsExtra === isExtra;
+      });
+
+      const index = targetList.findIndex(chapter => chapter.id === currentChapter.id);
+      if (index !== -1) {
+        const groupIndex = Math.floor(index / chaptersPerGroup);
+        setCurrentGroupIndex(groupIndex);
+
+        setTimeout(() => {
+          const chapterEl = document.getElementById(`player-chapter-${currentChapter.id}`);
+          if (chapterEl) {
+            chapterEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          }
+
+          const groupTab = document.getElementById(`player-group-tab-${groupIndex}`);
+          const container = scrollRef.current;
+          if (groupTab && container) {
+            const containerWidth = container.offsetWidth;
+            const tabWidth = groupTab.offsetWidth;
+            const tabLeft = groupTab.offsetLeft;
+
+            container.scrollTo({
+              left: tabLeft - containerWidth / 2 + tabWidth / 2,
+              behavior: 'smooth'
+            });
+          }
+        }, 100);
+      }
+    }
+
+    setShowChapters(true);
+  };
+
   return (
     <div 
       className={`
@@ -1177,7 +1243,7 @@ const Player: React.FC = () => {
               onClick={() => setIsCollapsed(false)}
             >
               <div 
-                className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl overflow-hidden shadow-2xl cursor-pointer hover:scale-105 transition-transform border-2 border-white/50 dark:border-slate-700/50"
+                className={`${collapsedCoverSizeClass} rounded-xl overflow-hidden shadow-2xl cursor-pointer hover:scale-105 transition-transform border-2 border-white/50 dark:border-slate-700/50`}
                 style={{ 
                   borderColor: miniPlayerThemeColor ? setAlpha(miniPlayerThemeColor, 0.3) : undefined
                 }}
@@ -1210,7 +1276,7 @@ const Player: React.FC = () => {
             {/* Info */}
             <div className={`flex items-center gap-2 sm:gap-3 min-w-0 ${isWidgetMode ? 'max-[380px]:w-full max-[380px]:max-w-none' : ''} max-[500px]:max-w-[48px] max-[380px]:max-w-[40px] sm:max-w-[200px] md:max-w-[240px] lg:max-w-[320px] md:flex-none flex-1`}>
               <div 
-                className="w-12 h-12 max-[380px]:w-10 max-[380px]:h-10 sm:w-16 sm:h-16 rounded-lg sm:rounded-xl overflow-hidden shadow-md cursor-pointer shrink-0"
+                className={`${miniCoverSizeClass} rounded-lg sm:rounded-xl overflow-hidden shadow-md cursor-pointer shrink-0`}
                 onClick={toggleFullscreen}
               >
                 <img 
@@ -1485,79 +1551,29 @@ const Player: React.FC = () => {
           style={{ backgroundColor: isWidgetMode ? (effectiveThemeColor ? toSolidColor(effectiveThemeColor) : '#1e293b') : (effectiveThemeColor ? setAlpha(effectiveThemeColor, 0.05) : undefined) }}
         >
           {/* Header */}
-          <div className="flex items-center justify-between w-full max-w-4xl mx-auto mb-4 sm:mb-8 bg-white/60 dark:bg-slate-900/60 backdrop-blur-md p-2 sm:p-3 rounded-2xl shadow-sm border border-slate-200/30 dark:border-slate-800/30">
+          <div className="flex items-center justify-between w-full max-w-[520px] mx-auto pb-3">
             <button 
               onClick={handleExitExpanded}
-              className="p-1.5 sm:p-2 hover:bg-slate-100/50 dark:hover:bg-slate-800/50 rounded-full transition-colors"
+              className="p-2 -ml-2 rounded-full text-slate-700 dark:text-white hover:bg-white/50 dark:hover:bg-slate-800/60 transition-colors"
+              title="收起播放器"
             >
-              <ArrowLeft size={20} className="sm:w-6 sm:h-6 dark:text-white text-[#4A3728]" />
+              <ChevronUp size={24} className="rotate-180" />
             </button>
-            <div className="flex-1 text-center px-2 sm:px-4 min-w-0">
-              <h2 className="text-sm sm:text-lg font-bold dark:text-white text-[#4A3728] truncate">{currentBook?.title}</h2>
-              <p className="text-[10px] sm:text-xs text-slate-500 truncate">{currentChapter.title}</p>
+            <div className="flex-1 text-center px-3 min-w-0">
+              <h2 className="text-sm sm:text-base font-bold dark:text-white text-[#4A3728] truncate">{currentChapter.title}</h2>
+              <p className="text-[10px] sm:text-xs text-slate-500 truncate">{currentBook?.title}</p>
             </div>
-            <div className="flex items-center gap-0.5 sm:gap-1">
-              <button 
-                onClick={() => {
-                  // Calculate group index for current chapter
-                  if (currentChapter && chapters.length > 0) {
-                    // Determine if target chapter is in main or extra
-                    const isExtra = !!currentChapter.isExtra || /番外|SP|Extra/i.test(currentChapter.title);
-                    const targetTab = isExtra ? 'extra' : 'main';
-                    if (activeTab !== targetTab) setActiveTab(targetTab);
-
-                    const targetList = chapters.filter(c => {
-                         const cIsExtra = !!c.isExtra || /番外|SP|Extra/i.test(c.title);
-                         return (cIsExtra === isExtra);
-                    });
-                    
-                    const index = targetList.findIndex(c => c.id === currentChapter.id);
-                    if (index !== -1) {
-                      const groupIndex = Math.floor(index / chaptersPerGroup);
-                      setCurrentGroupIndex(groupIndex);
-                      
-                      // Auto scroll to current chapter and group tab
-                      setTimeout(() => {
-                        // 1. Scroll to chapter
-                        const chapterEl = document.getElementById(`player-chapter-${currentChapter.id}`);
-                        if (chapterEl) {
-                          chapterEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
-                        }
-
-                        // 2. Scroll group tab into view
-                        const groupTab = document.getElementById(`player-group-tab-${groupIndex}`);
-                        const container = scrollRef.current;
-                        if (groupTab && container) {
-                          const containerWidth = container.offsetWidth;
-                          const tabWidth = groupTab.offsetWidth;
-                          const tabLeft = groupTab.offsetLeft;
-                          
-                          container.scrollTo({
-                            left: tabLeft - containerWidth / 2 + tabWidth / 2,
-                            behavior: 'smooth'
-                          });
-                        }
-                      }, 100);
-                    }
-                  }
-                  setShowChapters(true);
-                }}
-                className="p-1.5 sm:p-2 hover:bg-slate-100/50 dark:hover:bg-slate-800/50 rounded-full transition-colors"
-                title="章节列表"
-              >
-                <ListMusic size={18} className="sm:w-5 sm:h-5 dark:text-white text-[#4A3728]" />
-              </button>
-              <button 
-                onClick={() => setShowSettings(true)}
-                className="p-1.5 sm:p-2 hover:bg-slate-100/50 dark:hover:bg-slate-800/50 rounded-full transition-colors"
-              >
-                <Settings size={18} className="sm:w-5 sm:h-5 dark:text-white text-[#4A3728]" />
-              </button>
-            </div>
+            <button 
+              onClick={() => setShowSettings(true)}
+              className="p-2 -mr-2 rounded-full text-slate-700 dark:text-white hover:bg-white/50 dark:hover:bg-slate-800/60 transition-colors"
+              title="播放设置"
+            >
+              <Settings size={22} />
+            </button>
           </div>
 
-          <div className="flex-1 flex flex-col items-center justify-center max-w-4xl mx-auto w-full gap-4 sm:gap-8">
-            <div className="w-full max-w-[240px] sm:max-w-[320px] lg:max-w-[400px] aspect-square rounded-[32px] sm:rounded-[40px] overflow-hidden shadow-2xl border-4 sm:border-8 border-white dark:border-slate-800 transition-all duration-500">
+          <div className="flex-1 flex flex-col items-center justify-center max-w-[520px] mx-auto w-full gap-5 sm:gap-7">
+            <div className={`${expandedCoverSizeClass} rounded-[28px] sm:rounded-[36px] overflow-hidden shadow-2xl border-4 sm:border-8 border-white dark:border-slate-800 transition-all duration-500`}>
               <img 
                 src={getCoverUrl(currentBook?.coverUrl, currentBook?.libraryId, currentBook?.id)} 
                 alt={currentBook?.title}
@@ -1569,109 +1585,70 @@ const Player: React.FC = () => {
               />
             </div>
 
-            <div className="w-full space-y-8 sm:space-y-12">
+            <div className="text-center w-full min-w-0">
+              <h1 className="text-xl sm:text-2xl font-black leading-snug dark:text-white text-[#4A3728] line-clamp-2">
+                {currentChapter.title}
+              </h1>
+              <p className="mt-1.5 text-sm text-slate-500 truncate">
+                {currentBook?.narrator || currentBook?.author || currentBook?.title || '未知作者'}
+              </p>
+            </div>
+
+            {error && (
+              <div className="w-full rounded-2xl bg-red-500/15 border border-red-200/30 px-4 py-2 text-center text-xs font-bold text-red-600 dark:text-red-200">
+                {error}
+              </div>
+            )}
+
+            <div className="w-full flex flex-col gap-7 sm:gap-8">
               {/* Progress Bar Section */}
-              <div className="px-2 sm:px-4">
-                <div className="flex items-center gap-3 sm:gap-6">
-                  <span className="text-[10px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 min-w-[40px] text-right">
-                    {formatTime(currentTime)}
-                  </span>
-                  <div className="flex-1">
-                    <ProgressBar 
-                      isSeeking={isSeeking}
-                      seekTime={seekTime}
-                      currentTime={currentTime}
-                      duration={duration}
-                      bufferedTime={bufferedTime}
-                      themeColor={themeColor}
-                      onSeek={handleSeek}
-                      onSeekStart={handleSeekStart}
-                      onSeekEnd={handleSeekEnd}
-                    />
-                  </div>
-                  <span className="text-[10px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 min-w-[40px]">
-                    {formatTime(duration)}
-                  </span>
-
-                  {/* Volume Control */}
-                  <div className="relative" ref={volumeControlRef}>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowVolumeControl(!showVolumeControl);
-                      }}
-                      className="p-1.5 sm:p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
-                      title="音量"
-                    >
-                      {isMuted || volume === 0 ? (
-                        <VolumeX size={18} className="sm:w-5 sm:h-5" />
-                      ) : (
-                        <Volume2 size={18} className={`sm:w-5 sm:h-5 ${showVolumeControl ? 'text-primary-600' : ''}`} />
-                      )}
-                    </button>
-
-                    {showVolumeControl && (
-                      <div 
-                        className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 bg-white dark:bg-slate-800 shadow-xl rounded-full py-4 border border-slate-100 dark:border-slate-700 w-12 flex flex-col items-center gap-3 z-[220] animate-in zoom-in-95 duration-200 cursor-default"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <span className="text-[10px] font-bold text-slate-500 min-w-[24px] text-center select-none">
-                          {Math.round(volume * 100)}
-                        </span>
-                        
-                        <div className="h-24 w-full flex items-center justify-center relative">
-                          <input 
-                            type="range" 
-                            min="0" 
-                            max="1" 
-                            step="0.01"
-                            value={volume}
-                            onChange={(e) => {
-                              setVolume(parseFloat(e.target.value));
-                              if (isMuted && parseFloat(e.target.value) > 0) setIsMuted(false);
-                            }}
-                            className="absolute w-24 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-primary-600 -rotate-90 hover:accent-primary-500"
-                          />
-                        </div>
-
-                        <button
-                          onClick={() => setIsMuted(!isMuted)}
-                          className={`p-2 rounded-full transition-colors ${
-                            isMuted 
-                              ? 'bg-primary-100 text-primary-600 dark:bg-primary-900/30' 
-                              : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
-                          }`}
-                          title={isMuted ? "取消静音" : "静音"}
-                        >
-                          {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
-                        </button>
-                      </div>
-                    )}
-                  </div>
+              <div className="px-1 sm:px-2 order-2">
+                <ProgressBar 
+                  isSeeking={isSeeking}
+                  seekTime={seekTime}
+                  currentTime={currentTime}
+                  duration={duration}
+                  bufferedTime={bufferedTime}
+                  themeColor={effectiveThemeColor || '#60a5fa'}
+                  onSeek={handleSeek}
+                  onSeekStart={handleSeekStart}
+                  onSeekEnd={handleSeekEnd}
+                />
+                <div className="mt-3 grid grid-cols-[auto_auto_1fr_auto_auto] items-center gap-3 text-xs font-bold text-slate-500 dark:text-slate-400">
+                  <button
+                    onClick={() => seekToTime(currentTime - 15)}
+                    className="relative w-9 h-9 rounded-full hover:bg-white/50 dark:hover:bg-slate-800/60 transition-colors text-slate-600 dark:text-slate-300"
+                    title="快退 15 秒"
+                  >
+                    <RotateCcw size={27} strokeWidth={2.2} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" />
+                    <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[46%] text-[9px] font-black leading-none tabular-nums">15</span>
+                  </button>
+                  <span>{formatTime(currentTime)}</span>
+                  <span />
+                  <span>{formatTime(duration)}</span>
+                  <button
+                    onClick={() => seekToTime(currentTime + 15)}
+                    className="relative w-9 h-9 rounded-full hover:bg-white/50 dark:hover:bg-slate-800/60 transition-colors text-slate-600 dark:text-slate-300"
+                    title="快进 15 秒"
+                  >
+                    <RotateCw size={27} strokeWidth={2.2} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" />
+                    <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[46%] text-[9px] font-black leading-none tabular-nums">15</span>
+                  </button>
                 </div>
               </div>
 
               {/* Main Controls */}
-              <div className="flex items-center justify-center gap-4 sm:gap-10 md:gap-14">
-                <button
-                  onClick={() => seekToTime(currentTime - 15)}
-                  className="text-slate-600 dark:text-slate-400 p-1.5 sm:p-2 hover:scale-110 transition-transform"
-                >
-                  <div className="relative">
-                    <RotateCcw size={24} className="sm:w-8 sm:h-8" />
-                    <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[8px] sm:text-[10px] font-bold mt-0.5">15</span>
-                  </div>
-                </button>
+              <div className="flex items-center justify-center gap-6 sm:gap-8 order-3">
                 <button 
                   onClick={prevChapter}
-                  className="text-slate-900 dark:text-white p-1.5 sm:p-2 hover:scale-110 transition-transform"
+                  className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white/60 dark:bg-slate-800/60 text-slate-900 dark:text-white flex items-center justify-center backdrop-blur-sm shadow-lg shadow-black/5 hover:bg-white/80 dark:hover:bg-slate-800 hover:scale-105 active:scale-95 transition-all"
                 >
-                  <SkipBack size={28} className="sm:w-9 sm:h-9" fill="currentColor" />
+                  <SkipBack size={26} fill="currentColor" />
                 </button>
                 
                 <button
                   onClick={togglePlay}
-                  className={`w-16 h-16 sm:w-24 sm:h-24 rounded-full text-white flex items-center justify-center shadow-2xl transform hover:scale-105 active:scale-95 transition-all ${!effectiveThemeColor ? 'bg-primary-600' : ''}`}
+                  className={`w-20 h-20 sm:w-24 sm:h-24 rounded-full text-white flex items-center justify-center shadow-2xl transform hover:scale-105 active:scale-95 transition-all ${!effectiveThemeColor ? 'bg-primary-600' : ''}`}
                   style={effectiveThemeColor ? { 
                     backgroundColor: toSolidColor(effectiveThemeColor),
                     color: isLight(effectiveThemeColor) ? '#475569' : '#ffffff'
@@ -1682,58 +1659,91 @@ const Player: React.FC = () => {
 
                 <button 
                   onClick={nextChapter}
-                  className="text-slate-900 dark:text-white p-1.5 sm:p-2 hover:scale-110 transition-transform"
+                  className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white/60 dark:bg-slate-800/60 text-slate-900 dark:text-white flex items-center justify-center backdrop-blur-sm shadow-lg shadow-black/5 hover:bg-white/80 dark:hover:bg-slate-800 hover:scale-105 active:scale-95 transition-all"
                 >
-                  <SkipForward size={28} className="sm:w-9 sm:h-9" fill="currentColor" />
-                </button>
-                <button
-                  onClick={() => seekToTime(currentTime + 15)}
-                  className="text-slate-600 dark:text-slate-400 p-1.5 sm:p-2 hover:scale-110 transition-transform"
-                >
-                  <div className="relative">
-                    <RotateCw size={24} className="sm:w-8 sm:h-8" />
-                    <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[8px] sm:text-[10px] font-bold mt-0.5">15</span>
-                  </div>
+                  <SkipForward size={26} fill="currentColor" />
                 </button>
               </div>
 
               {/* Bottom Row Controls */}
-              <div className="flex justify-between items-center max-w-2xl mx-auto w-full px-2 sm:px-4 text-slate-600 dark:text-slate-400">
+              <div className="grid grid-cols-4 items-start gap-1 sm:gap-2 w-full text-slate-600 dark:text-slate-400 order-1">
                 <button 
                   onClick={() => setPlaybackSpeed(playbackSpeed >= 2 ? 0.5 : playbackSpeed + 0.25)}
-                  className="flex flex-col items-center gap-1 sm:gap-1.5 transition-all active:scale-95 group relative"
+                  className="flex flex-col items-center gap-1.5 transition-all active:scale-95 group"
+                  title="播放速度"
                 >
-                  <div className="p-2 rounded-xl group-hover:bg-white/40 dark:group-hover:bg-slate-800/40 transition-colors">
-                    <Zap size={18} className={`sm:w-5 sm:h-5 ${playbackSpeed !== 1 ? 'text-primary-600 animate-pulse' : ''}`} />
+                  <div className="w-10 h-10 rounded-2xl bg-white/50 dark:bg-slate-800/60 flex items-center justify-center group-hover:bg-white/70 dark:group-hover:bg-slate-800 transition-colors">
+                    <Zap size={18} className={playbackSpeed !== 1 ? 'text-primary-600' : ''} />
                   </div>
-                  <span className="text-[10px] sm:text-xs font-bold">{playbackSpeed}x</span>
+                  <span className="text-[10px] sm:text-xs font-bold leading-none">{playbackSpeed}x</span>
                 </button>
 
+                <div className="relative" ref={volumeControlRef}>
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowVolumeControl(!showVolumeControl);
+                    }}
+                    className="w-full flex flex-col items-center gap-1.5 transition-all active:scale-95 group"
+                    title="音量"
+                  >
+                    <div className="w-10 h-10 rounded-2xl bg-white/50 dark:bg-slate-800/60 flex items-center justify-center group-hover:bg-white/70 dark:group-hover:bg-slate-800 transition-colors">
+                      {isMuted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                    </div>
+                    <span className="text-[10px] sm:text-xs font-bold leading-none">
+                      {isMuted || volume === 0 ? '静音' : `${Math.round(volume * 100)}%`}
+                    </span>
+                  </button>
 
+                  {showVolumeControl && (
+                    <div 
+                      className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 bg-white dark:bg-slate-800 shadow-2xl rounded-full py-4 border border-slate-100 dark:border-slate-700 w-12 flex flex-col items-center gap-3 z-[220] animate-in zoom-in-95 duration-200 cursor-default"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <span className="text-[10px] font-bold text-slate-500 min-w-[24px] text-center select-none">
+                        {Math.round(volume * 100)}
+                      </span>
 
-                <div className="flex flex-col items-center gap-1 sm:gap-1.5">
-                  <div className="p-2">
-                    <SkipBack size={18} className="sm:w-5 sm:h-5" />
-                  </div>
-                  <span className="text-[10px] sm:text-xs font-bold whitespace-nowrap">片头 {currentBook?.skipIntro || 0}s</span>
-                </div>
+                      <div className="h-24 w-full flex items-center justify-center relative">
+                        <input 
+                          type="range" 
+                          min="0" 
+                          max="1" 
+                          step="0.01"
+                          value={volume}
+                          onChange={(e) => {
+                            setVolume(parseFloat(e.target.value));
+                            if (isMuted && parseFloat(e.target.value) > 0) setIsMuted(false);
+                          }}
+                          className="absolute w-24 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-primary-600 -rotate-90 hover:accent-primary-500"
+                        />
+                      </div>
 
-                <div className="flex flex-col items-center gap-1 sm:gap-1.5">
-                  <div className="p-2">
-                    <SkipForward size={18} className="sm:w-5 sm:h-5" />
-                  </div>
-                  <span className="text-[10px] sm:text-xs font-bold whitespace-nowrap">片尾 {currentBook?.skipOutro || 0}s</span>
+                      <button
+                        onClick={() => setIsMuted(!isMuted)}
+                        className={`p-2 rounded-full transition-colors ${
+                          isMuted 
+                            ? 'bg-primary-100 text-primary-600 dark:bg-primary-900/30' 
+                            : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
+                        }`}
+                        title={isMuted ? "取消静音" : "静音"}
+                      >
+                        {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <div className="relative" ref={timerMenuRef}>
                   <button 
                     onClick={() => setShowSleepTimer(!showSleepTimer)}
-                    className="flex flex-col items-center gap-1 sm:gap-1.5 transition-all active:scale-95 group"
+                    className="w-full flex flex-col items-center gap-1.5 transition-all active:scale-95 group"
+                    title="睡眠定时"
                   >
-                    <div className="p-2 rounded-xl group-hover:bg-white/40 dark:group-hover:bg-slate-800/40 transition-colors">
-                      <Clock size={18} className={`sm:w-5 sm:h-5 ${sleepTimer ? 'text-primary-600' : ''}`} />
+                    <div className="w-10 h-10 rounded-2xl bg-white/50 dark:bg-slate-800/60 flex items-center justify-center group-hover:bg-white/70 dark:group-hover:bg-slate-800 transition-colors">
+                      <Clock size={18} className={sleepTimer ? 'text-primary-600' : ''} />
                     </div>
-                    <span className="text-[10px] sm:text-xs font-bold whitespace-nowrap">
+                    <span className="text-[10px] sm:text-xs font-bold leading-none whitespace-nowrap">
                       {sleepTimer ? `${Math.floor(sleepTimer / 60)}:${(sleepTimer % 60).toString().padStart(2, '0')}` : '定时'}
                     </span>
                   </button>
@@ -1810,6 +1820,17 @@ const Player: React.FC = () => {
                     </div>
                   )}
                 </div>
+
+                <button
+                  onClick={openChapterList}
+                  className="flex flex-col items-center gap-1.5 transition-all active:scale-95 group"
+                  title="章节列表"
+                >
+                  <div className="w-10 h-10 rounded-2xl bg-white/50 dark:bg-slate-800/60 flex items-center justify-center group-hover:bg-white/70 dark:group-hover:bg-slate-800 transition-colors">
+                    <ListMusic size={18} />
+                  </div>
+                  <span className="text-[10px] sm:text-xs font-bold leading-none">选集</span>
+                </button>
               </div>
             </div>
           </div>
@@ -1965,7 +1986,7 @@ const Player: React.FC = () => {
                   </div>
                 )}
 
-                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                <div className="flex-1 overflow-y-auto p-1.5 min-[361px]:p-2 min-[431px]:p-2.5 sm:p-4 space-y-1 min-[361px]:space-y-1.5 min-[431px]:space-y-2 sm:space-y-3">
                   {(groups[currentGroupIndex]?.chapters || currentChapters).map((chapter, index) => {
                     const actualIndex = currentGroupIndex * chaptersPerGroup + index;
                     const isCurrent = currentChapter?.id === chapter.id;
@@ -1978,7 +1999,7 @@ const Player: React.FC = () => {
                           playChapter(currentBook!, currentChapters, chapter);
                           setShowChapters(false);
                         }}
-                        className={`group flex items-center justify-between p-4 rounded-2xl cursor-pointer transition-all border ${
+                        className={`group flex items-start sm:items-center justify-between gap-1 min-[361px]:gap-1.5 min-[431px]:gap-2 p-1.5 min-[361px]:p-2 min-[431px]:p-2.5 sm:p-4 rounded-md min-[361px]:rounded-lg min-[431px]:rounded-xl sm:rounded-2xl cursor-pointer transition-all border ${
                           isCurrent 
                             ? 'bg-opacity-10 border-opacity-20' 
                             : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 hover:border-primary-200 dark:hover:border-primary-800'
@@ -1988,9 +2009,9 @@ const Player: React.FC = () => {
                           borderColor: effectiveThemeColor ? setAlpha(effectiveThemeColor, 0.3) : undefined,
                         } : {}}
                       >
-                        <div className="flex items-center gap-4 min-w-0">
+                        <div className="flex items-start sm:items-center gap-1.5 min-[361px]:gap-2 min-[431px]:gap-2.5 sm:gap-4 min-w-0 flex-1">
                           <div 
-                            className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center font-bold text-base sm:text-lg shrink-0 ${
+                            className={`w-6 h-6 min-[361px]:w-7 min-[361px]:h-7 min-[431px]:w-8 min-[431px]:h-8 sm:w-12 sm:h-12 rounded min-[361px]:rounded-md min-[431px]:rounded-lg sm:rounded-xl flex items-center justify-center font-medium text-[10px] min-[361px]:text-[11px] min-[431px]:text-xs sm:text-base shrink-0 ${
                               isCurrent ? `text-white ${!effectiveThemeColor ? 'bg-primary-600' : ''}` : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
                             }`}
                             style={isCurrent ? { 
@@ -2000,21 +2021,21 @@ const Player: React.FC = () => {
                           >
                             {chapter.chapterIndex || (actualIndex + 1)}
                           </div>
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <p 
-                              className={`text-sm sm:text-base font-bold truncate ${isCurrent ? '' : 'text-slate-900 dark:text-white'}`}
+                              className={`text-xs min-[361px]:text-[13px] min-[431px]:text-sm sm:text-base font-medium leading-normal line-clamp-2 break-words ${isCurrent ? '' : 'text-slate-900 dark:text-white'}`}
                               style={isCurrent ? { color: effectiveThemeColor ? toSolidColor(effectiveThemeColor) : undefined } : {}}
                             >
                               {chapter.title}
                             </p>
-                            <div className="flex items-center gap-3 mt-1">
-                              <div className="flex items-center gap-1 text-[10px] sm:text-xs text-slate-400 font-medium">
-                                <Clock size={12} />
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+                              <div className="flex items-center gap-1 text-[9px] min-[361px]:text-[10px] min-[431px]:text-[11px] sm:text-xs text-slate-400 font-normal">
+                                <Clock size={10} className="w-2 h-2 min-[361px]:w-2.5 min-[361px]:h-2.5 sm:w-3 sm:h-3" />
                                 {formatTime(chapter.duration)}
                               </div>
                               {getChapterProgressText(chapter) && (
                                 <div 
-                                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+                                  className={`text-[8px] min-[361px]:text-[9px] min-[431px]:text-[10px] font-medium px-0.5 min-[361px]:px-1 min-[431px]:px-1.5 py-0.5 rounded ${
                                     getChapterProgressText(chapter) === '已播完' 
                                       ? 'bg-green-50 text-green-500 dark:bg-green-900/20' 
                                       : 'bg-primary-50 text-primary-600 dark:bg-primary-900/20'
@@ -2027,10 +2048,10 @@ const Player: React.FC = () => {
                           </div>
                         </div>
                         {isCurrent && isPlaying && (
-                          <div className="flex gap-1 items-end h-5">
-                            <div className={`w-1 animate-music-bar-1 rounded-full ${!effectiveThemeColor ? 'bg-primary-600' : ''}`} style={{ backgroundColor: effectiveThemeColor ? toSolidColor(effectiveThemeColor) : undefined }}></div>
-                            <div className={`w-1 animate-music-bar-2 rounded-full ${!effectiveThemeColor ? 'bg-primary-600' : ''}`} style={{ backgroundColor: effectiveThemeColor ? toSolidColor(effectiveThemeColor) : undefined }}></div>
-                            <div className={`w-1 animate-music-bar-3 rounded-full ${!effectiveThemeColor ? 'bg-primary-600' : ''}`} style={{ backgroundColor: effectiveThemeColor ? toSolidColor(effectiveThemeColor) : undefined }}></div>
+                          <div className="flex gap-0.5 sm:gap-1 items-end h-3 min-[361px]:h-3.5 min-[431px]:h-4 sm:h-5 shrink-0 pt-0.5 sm:pt-0">
+                            <div className={`w-0.5 sm:w-1 animate-music-bar-1 rounded-full ${!effectiveThemeColor ? 'bg-primary-600' : ''}`} style={{ backgroundColor: effectiveThemeColor ? toSolidColor(effectiveThemeColor) : undefined }}></div>
+                            <div className={`w-0.5 sm:w-1 animate-music-bar-2 rounded-full ${!effectiveThemeColor ? 'bg-primary-600' : ''}`} style={{ backgroundColor: effectiveThemeColor ? toSolidColor(effectiveThemeColor) : undefined }}></div>
+                            <div className={`w-0.5 sm:w-1 animate-music-bar-3 rounded-full ${!effectiveThemeColor ? 'bg-primary-600' : ''}`} style={{ backgroundColor: effectiveThemeColor ? toSolidColor(effectiveThemeColor) : undefined }}></div>
                           </div>
                         )}
                       </div>

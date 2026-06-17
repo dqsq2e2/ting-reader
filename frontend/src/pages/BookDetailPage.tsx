@@ -837,7 +837,7 @@ const BookDetailPage: React.FC = () => {
                 key={chapter.id}
                 id={`chapter-${chapter.id}`}
                 onClick={() => playChapter(book!, currentChapters, chapter)}
-                className={`group flex items-center justify-between p-4 rounded-2xl cursor-pointer transition-all border ${
+                className={`group flex items-start sm:items-center justify-between gap-1 min-[361px]:gap-1.5 min-[431px]:gap-2 p-1.5 min-[361px]:p-2 min-[431px]:p-2.5 sm:p-4 rounded-md min-[361px]:rounded-lg min-[431px]:rounded-xl sm:rounded-2xl cursor-pointer transition-all border ${
                   isActive 
                     ? 'bg-opacity-10 border-opacity-20' 
                     : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 hover:border-primary-200 dark:hover:border-primary-800'
@@ -848,10 +848,10 @@ const BookDetailPage: React.FC = () => {
                 } : {}}
               >
                 <div 
-                  className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1 cursor-pointer"
+                  className="flex items-start sm:items-center gap-1.5 min-[361px]:gap-2 min-[431px]:gap-2.5 sm:gap-4 min-w-0 flex-1 cursor-pointer"
                 >
                   <div 
-                    className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center font-bold text-base sm:text-lg shrink-0 ${
+                    className={`w-6 h-6 min-[361px]:w-7 min-[361px]:h-7 min-[431px]:w-8 min-[431px]:h-8 sm:w-12 sm:h-12 rounded min-[361px]:rounded-md min-[431px]:rounded-lg sm:rounded-xl flex items-center justify-center font-medium text-[10px] min-[361px]:text-[11px] min-[431px]:text-xs sm:text-base shrink-0 ${
                       isActive ? `text-white ${!effectiveThemeColor ? 'bg-primary-600' : ''}` : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
                     }`}
                     style={isActive && effectiveThemeColor ? { 
@@ -861,21 +861,21 @@ const BookDetailPage: React.FC = () => {
                   >
                     {chapter.chapter_index || (actualIndex + 1)}
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p 
-                      className={`font-bold truncate ${isActive ? '' : 'text-slate-900 dark:text-white'}`}
+                      className={`text-xs min-[361px]:text-[13px] min-[431px]:text-sm sm:text-base font-medium leading-normal line-clamp-2 break-words ${isActive ? '' : 'text-slate-900 dark:text-white'}`}
                       style={isActive && effectiveThemeColor ? { color: toSolidColor(effectiveThemeColor) } : {}}
                     >
                       {chapter.title}
                     </p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <div className="flex items-center gap-1 text-xs text-slate-400 font-medium">
-                        <Clock size={12} />
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+                      <div className="flex items-center gap-1 text-[9px] min-[361px]:text-[10px] min-[431px]:text-[11px] sm:text-xs text-slate-400 font-normal">
+                        <Clock size={10} className="w-2 h-2 min-[361px]:w-2.5 min-[361px]:h-2.5 sm:w-3 sm:h-3" />
                         {formatDuration(chapter.duration)}
                       </div>
                       {getChapterProgressText(chapter) && (
                         <div 
-                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md whitespace-nowrap ${
+                          className={`text-[8px] min-[361px]:text-[9px] min-[431px]:text-[10px] font-medium px-0.5 min-[361px]:px-1 min-[431px]:px-1.5 py-0.5 rounded whitespace-nowrap ${
                             getChapterProgressText(chapter) === '已播完' 
                               ? 'bg-green-50 text-green-500 dark:bg-green-900/20' 
                               : 'bg-primary-50 text-primary-600 dark:bg-primary-900/20'
@@ -888,22 +888,22 @@ const BookDetailPage: React.FC = () => {
                   </div>
                 </div>
                 
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-1 min-[361px]:gap-1.5 min-[431px]:gap-2 sm:gap-4 shrink-0 pt-0.5 sm:pt-0">
                   {isCurrent && isPlaying ? (
-                    <div className="flex gap-1 items-end h-5">
-                      <div className={`w-1 animate-music-bar-1 rounded-full ${!effectiveThemeColor ? 'bg-primary-600' : ''}`} style={effectiveThemeColor ? { backgroundColor: toSolidColor(effectiveThemeColor) } : {}}></div>
-                      <div className={`w-1 animate-music-bar-2 rounded-full ${!effectiveThemeColor ? 'bg-primary-600' : ''}`} style={effectiveThemeColor ? { backgroundColor: toSolidColor(effectiveThemeColor) } : {}}></div>
-                      <div className={`w-1 animate-music-bar-3 rounded-full ${!effectiveThemeColor ? 'bg-primary-600' : ''}`} style={effectiveThemeColor ? { backgroundColor: toSolidColor(effectiveThemeColor) } : {}}></div>
+                    <div className="flex gap-0.5 sm:gap-1 items-end h-3 min-[361px]:h-3.5 min-[431px]:h-4 sm:h-5">
+                      <div className={`w-0.5 sm:w-1 animate-music-bar-1 rounded-full ${!effectiveThemeColor ? 'bg-primary-600' : ''}`} style={effectiveThemeColor ? { backgroundColor: toSolidColor(effectiveThemeColor) } : {}}></div>
+                      <div className={`w-0.5 sm:w-1 animate-music-bar-2 rounded-full ${!effectiveThemeColor ? 'bg-primary-600' : ''}`} style={effectiveThemeColor ? { backgroundColor: toSolidColor(effectiveThemeColor) } : {}}></div>
+                      <div className={`w-0.5 sm:w-1 animate-music-bar-3 rounded-full ${!effectiveThemeColor ? 'bg-primary-600' : ''}`} style={effectiveThemeColor ? { backgroundColor: toSolidColor(effectiveThemeColor) } : {}}></div>
                     </div>
                   ) : (
                     <div 
-                      className="w-10 h-10 rounded-full bg-slate-50 dark:bg-slate-800 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer hover:scale-105"
+                      className="w-6 h-6 min-[361px]:w-7 min-[361px]:h-7 min-[431px]:w-8 min-[431px]:h-8 sm:w-10 sm:h-10 rounded-full bg-slate-50 dark:bg-slate-800 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer hover:scale-105"
                       onClick={(e) => {
                         e.stopPropagation();
                         playChapter(book!, currentChapters, chapter);
                       }}
                     >
-                      <Play size={16} className="text-primary-600 ml-1" fill="currentColor" style={effectiveThemeColor ? { color: toSolidColor(effectiveThemeColor) } : {}} />
+                      <Play size={12} className="text-primary-600 ml-0.5 w-3 h-3 min-[431px]:w-3.5 min-[431px]:h-3.5 sm:ml-1 sm:w-4 sm:h-4" fill="currentColor" style={effectiveThemeColor ? { color: toSolidColor(effectiveThemeColor) } : {}} />
                     </div>
                   )}
                 </div>
@@ -916,6 +916,7 @@ const BookDetailPage: React.FC = () => {
       {/* Chapter Manager Modal */}
       {isChapterManagerOpen && book && (
         <ChapterManagerModal
+          book={book}
           bookId={book.id}
           initialChapters={chapters}
           onClose={() => setIsChapterManagerOpen(false)}

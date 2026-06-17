@@ -1,3 +1,4 @@
+use crate::plugin::types::ScraperCapabilities;
 use serde::{Deserialize, Serialize};
 
 // Plugin Management API models
@@ -47,6 +48,9 @@ pub struct PluginInfoResponse {
     /// Plugin repository
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repo: Option<String>,
+    /// Scraper capability declaration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scraper: Option<ScraperCapabilities>,
 }
 
 /// Plugin statistics response
@@ -101,6 +105,9 @@ pub struct PluginDetailResponse {
     /// Configuration schema (JSON Schema format)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_schema: Option<serde_json::Value>,
+    /// Scraper capability declaration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scraper: Option<ScraperCapabilities>,
     /// Plugin statistics
     pub stats: Option<PluginStatsResponse>,
 }

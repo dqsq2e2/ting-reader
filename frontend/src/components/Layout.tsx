@@ -3,10 +3,7 @@ import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { 
   Home, 
   Library, 
-  Search, 
-  Heart, 
-  Settings, 
-  // User, 
+  User,
   LogOut, 
   Menu, 
   X,
@@ -15,14 +12,27 @@ import {
   Terminal,
   // Headphones,
   Download,
+  ListMusic,
   Puzzle
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useTheme } from '../hooks/useTheme';
 import { usePlayerStore } from '../store/playerStore';
+import {
+  getBrowserSessionId,
+  hasSessionRestoreLogged,
+  markSessionRestoreLogged,
+} from '../utils/sessionRestore';
 import apiClient from '../api/client';
 
 import Player from './Player';
+
+type NavItem = {
+  icon: React.ReactNode;
+  label: string;
+  path: string;
+  matches?: string[];
+};
 
 const Layout: React.FC = () => {
   const { refreshTheme } = useTheme(); // Initialize theme application
@@ -34,6 +44,8 @@ const Layout: React.FC = () => {
   
   // Use selectors to prevent unnecessary re-renders when currentTime updates
   const user = useAuthStore(state => state.user);
+  const token = useAuthStore(state => state.token);
+  const setUser = useAuthStore(state => state.setUser);
   const logout = useAuthStore(state => state.logout);
   const hasCurrentChapter = usePlayerStore(state => !!state.currentChapter);
   const setPlaybackSpeed = usePlayerStore(state => state.setPlaybackSpeed);
@@ -44,8 +56,19 @@ const Layout: React.FC = () => {
       setIsConnecting(true);
       setConnectionError(null);
       try {
-        // Try to fetch current user info to validate token
-        await apiClient.get('/api/me');
+        if (hasSessionRestoreLogged(token)) {
+          const response = await apiClient.get('/api/me');
+          setUser(response.data);
+        } else {
+          const sessionId = getBrowserSessionId();
+          const response = await apiClient.post(
+            '/api/auth/session-restore',
+            { sessionId },
+            { headers: { 'X-Ting-Session-Id': sessionId } },
+          );
+          setUser(response.data.user);
+          markSessionRestoreLogged(token);
+        }
         setIsConnecting(false);
       } catch (err: unknown) {
         console.error('连接验证失败', err);
@@ -55,12 +78,12 @@ const Layout: React.FC = () => {
       }
     };
 
-    if (user) {
+    if (token) {
       validateConnection();
     } else {
       setIsConnecting(false);
     }
-  }, [user]);
+  }, [token, setUser]);
 
   // Fetch and apply user settings
   React.useEffect(() => {
@@ -83,10 +106,10 @@ const Layout: React.FC = () => {
 
   const menuItems = [
     { icon: <Home size={20} />, label: '首页', path: '/' },
-    { icon: <Library size={20} />, label: '书架', path: '/bookshelf' },
-    { icon: <Search size={20} />, label: '搜索', path: '/search' },
-    { icon: <Heart size={20} />, label: '收藏', path: '/favorites' },
-  ];
+    { icon: <Library size={20} />, label: '书架', path: '/bookshelf', matches: ['/bookshelf', '/book/', '/series/', '/search'] },
+    { icon: <ListMusic size={20} />, label: '书单', path: '/playlists', matches: ['/playlists'] },
+    { icon: <User size={20} />, label: '我的', path: '/mine', matches: ['/mine', '/history', '/favorites', '/personalization', '/notifications', '/statistics', '/admin/statistics'] },
+  ] satisfies NavItem[];
 
   const adminItems = [
     { icon: <Database size={20} />, label: '库管理', path: '/admin/libraries' },
@@ -94,7 +117,7 @@ const Layout: React.FC = () => {
     { icon: <Puzzle size={20} />, label: '插件管理', path: '/admin/plugins' },
     { icon: <Terminal size={20} />, label: '系统日志', path: '/admin/logs' },
     { icon: <Users size={20} />, label: '用户管理', path: '/admin/users' },
-  ];
+  ] satisfies NavItem[];
 
   const handleLogout = () => {
     logout();
@@ -154,8 +177,10 @@ const Layout: React.FC = () => {
     );
   }
 
-  const NavLink = ({ item, mobile = false }: { item: typeof menuItems[0], mobile?: boolean }) => {
-    const isActive = location.pathname === item.path;
+  const NavLink = ({ item, mobile = false }: { item: NavItem, mobile?: boolean }) => {
+    const isActive = item.path === '/'
+      ? location.pathname === '/'
+      : location.pathname === item.path || item.matches?.some(match => location.pathname.startsWith(match));
     
     if (mobile) {
       return (
@@ -217,22 +242,12 @@ const Layout: React.FC = () => {
               {menuItems.map((item) => <NavLink key={item.path} item={item} />)}
             </div>
 
-            <div className="xl:mt-8">
-              <div className="text-xs font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 mt-4 xl:mt-0">管理后台</div>
-              {user?.role === 'admin' && adminItems.map((item) => <NavLink key={item.path} item={item} />)}
-              <Link
-                to="/settings"
-                onClick={() => setIsSidebarOpen(false)}
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
-                  location.pathname === '/settings'
-                    ? 'bg-primary-600 text-white shadow-lg shadow-primary-500/30'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
-              >
-                <Settings size={20} />
-                <span className="font-medium">系统设置</span>
-              </Link>
-            </div>
+            {user?.role === 'admin' && (
+              <div className="xl:mt-8">
+                <div className="text-xs font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 mt-4 xl:mt-0">管理后台</div>
+                {adminItems.map((item) => <NavLink key={item.path} item={item} />)}
+              </div>
+            )}
           </nav>
 
           <div className="mt-auto pt-4 border-t border-slate-100 dark:border-slate-800">

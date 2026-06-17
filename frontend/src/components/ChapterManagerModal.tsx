@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import type { Chapter, Book } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import type { Chapter, Book, Library } from '../types';
 import apiClient from '../api/client';
 import { X, Save, Loader2, Search, ArrowRight, Folder, CheckSquare, Square, ListOrdered, ListTodo } from 'lucide-react';
 import FixedSizeList from './VirtualList';
@@ -8,13 +8,14 @@ import AutoSizer from './AutoSizer';
 import BookSelector from './BookSelector';
 
 interface Props {
+  book: Book;
   bookId: string;
   initialChapters: Chapter[];
   onClose: () => void;
   onSave: () => void;
 }
 
-const ChapterManagerModal: React.FC<Props> = ({ bookId, initialChapters, onClose, onSave }) => {
+const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, onClose, onSave }) => {
   const [chapters, setChapters] = useState<Chapter[]>(initialChapters);
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
@@ -23,6 +24,7 @@ const ChapterManagerModal: React.FC<Props> = ({ bookId, initialChapters, onClose
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBookSelector, setShowBookSelector] = useState(false);
   const [moving, setMoving] = useState(false);
+  const [pathLibrary, setPathLibrary] = useState<Library | null>(null);
 
   // Filter chapters
   const filteredChapters = useMemo(() => {
@@ -30,6 +32,29 @@ const ChapterManagerModal: React.FC<Props> = ({ bookId, initialChapters, onClose
     const lower = search.toLowerCase();
     return chapters.filter(c => c.title.toLowerCase().includes(lower));
   }, [chapters, search]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPathContext = async () => {
+      try {
+        const librariesRes = await apiClient.get('/api/libraries');
+
+        if (cancelled) return;
+
+        const libraries = librariesRes.data as Library[];
+        setPathLibrary(libraries.find(library => library.id === book.libraryId) || null);
+      } catch (err) {
+        console.error('Failed to load chapter path context', err);
+      }
+    };
+
+    loadPathContext();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [book.libraryId]);
 
   const handleTitleChange = (id: string, newTitle: string) => {
     setChapters(prev => prev.map(c => 
@@ -129,10 +154,109 @@ const ChapterManagerModal: React.FC<Props> = ({ bookId, initialChapters, onClose
     }
   };
 
+  const normalizePath = (path: string) => {
+    return safeDecode(path)
+      .replace(/\\/g, '/')
+      .replace(/([^:])\/{2,}/g, '$1/')
+      .replace(/\/+$/g, '');
+  };
+
+  const stripOuterSlashes = (path: string) => {
+    return path.replace(/^\/+|\/+$/g, '');
+  };
+
+  const joinDisplayPath = (...parts: Array<string | undefined | null>) => {
+    return parts
+      .map(part => stripOuterSlashes(part || ''))
+      .filter(Boolean)
+      .join('/');
+  };
+
+  const getPathName = (path: string) => {
+    const parts = stripOuterSlashes(normalizePath(path)).split('/').filter(Boolean);
+    return parts[parts.length - 1] || path;
+  };
+
+  const relativeFromRoot = (path: string, root: string) => {
+    const normalizedPath = normalizePath(path);
+    const normalizedRoot = normalizePath(root);
+    if (!normalizedRoot || normalizedRoot === '/') return null;
+
+    const lowerPath = normalizedPath.toLowerCase();
+    const lowerRoot = normalizedRoot.toLowerCase();
+    if (lowerPath === lowerRoot) return '';
+    if (lowerPath.startsWith(`${lowerRoot}/`)) {
+      return stripOuterSlashes(normalizedPath.slice(normalizedRoot.length + 1));
+    }
+    return null;
+  };
+
+  const relativeFromPathSegment = (path: string, segment: string) => {
+    const pathParts = stripOuterSlashes(normalizePath(path)).split('/').filter(Boolean);
+    const segmentParts = stripOuterSlashes(normalizePath(segment)).split('/').filter(Boolean);
+    if (segmentParts.length === 0 || segmentParts.length > pathParts.length) return null;
+
+    const lowerPathParts = pathParts.map(part => part.toLowerCase());
+    const lowerSegmentParts = segmentParts.map(part => part.toLowerCase());
+
+    for (let i = 0; i <= pathParts.length - segmentParts.length; i += 1) {
+      const matched = lowerSegmentParts.every((part, offset) => lowerPathParts[i + offset] === part);
+      if (matched) {
+        return pathParts.slice(i + segmentParts.length).join('/');
+      }
+    }
+
+    return null;
+  };
+
+  const getRelativeChapterPath = (chapterPath: string) => {
+    const roots: string[] = [];
+
+    if (pathLibrary) {
+      if (pathLibrary.libraryType === 'webdav') {
+        roots.push(joinDisplayPath(pathLibrary.url, pathLibrary.rootPath));
+      }
+      roots.push(pathLibrary.url);
+      roots.push(pathLibrary.rootPath);
+    }
+
+    for (const root of roots.filter(Boolean).sort((a, b) => b.length - a.length)) {
+      const relativePath = relativeFromRoot(chapterPath, root);
+      if (relativePath !== null) return relativePath;
+    }
+
+    if (pathLibrary?.libraryType === 'local') {
+      for (const segment of [pathLibrary.url, pathLibrary.rootPath].filter(Boolean)) {
+        const relativePath = relativeFromPathSegment(chapterPath, segment);
+        if (relativePath !== null) return relativePath;
+      }
+    }
+
+    if (book.path) {
+      const relativeToBook = relativeFromRoot(chapterPath, book.path);
+      if (relativeToBook !== null) {
+        return joinDisplayPath(getPathName(book.path), relativeToBook);
+      }
+    }
+
+    const normalizedPath = normalizePath(chapterPath);
+    if (!normalizedPath.includes(':') && !normalizedPath.startsWith('/')) {
+      return stripOuterSlashes(normalizedPath);
+    }
+    return getPathName(chapterPath);
+  };
+
+  const formatChapterLocation = (chapter: Chapter) => {
+    const libraryName = pathLibrary?.name || '未知存储库';
+    const relativePath = getRelativeChapterPath(chapter.path);
+    return relativePath ? `${libraryName} / ${relativePath}` : libraryName;
+  };
+
   const Row = ({ index, style }: { index: number, style: React.CSSProperties }) => {
     const chapter = filteredChapters[index];
     const isSelected = selectedIds.has(chapter.id);
     const isChanged = changedIds.has(chapter.id);
+    const audioLocation = formatChapterLocation(chapter);
 
     return (
       <div style={style} className="px-6 py-1">
@@ -187,9 +311,9 @@ const ChapterManagerModal: React.FC<Props> = ({ bookId, initialChapters, onClose
           </button>
 
           {/* Path (Tooltip on hover) */}
-          <div className="hidden md:flex items-center gap-2 max-w-[200px] text-xs text-slate-400 shrink-0" title={safeDecode(chapter.path)}>
+          <div className="hidden md:flex items-center gap-2 max-w-[260px] text-xs text-slate-400 shrink-0" title={audioLocation}>
             <Folder size={14} />
-            <span className="truncate direction-rtl">{safeDecode(chapter.path)}</span>
+            <span className="truncate">{audioLocation}</span>
           </div>
 
         </div>

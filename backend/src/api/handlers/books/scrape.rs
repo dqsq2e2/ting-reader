@@ -10,6 +10,20 @@ use axum::{
     Json,
 };
 
+#[derive(Default)]
+struct SelectedScrapeExtendedMetadata {
+    subtitle: Option<String>,
+    published_year: Option<String>,
+    published_date: Option<String>,
+    publisher: Option<String>,
+    isbn: Option<String>,
+    asin: Option<String>,
+    language: Option<String>,
+    explicit: Option<bool>,
+    abridged: Option<bool>,
+    duration: Option<u64>,
+}
+
 /// Handler for POST /api/v1/books/:id/scrape-diff - Get scrape diff
 pub async fn scrape_book_diff(
     State(state): State<AppState>,
@@ -102,7 +116,7 @@ pub async fn scrape_book_diff(
         cover_url: best_match.cover_url.clone(),
         intro: best_match.intro.clone().unwrap_or_default(),
         tags: best_match.tags.clone(),
-        chapter_count: best_match.chapter_count.unwrap_or(0),
+        chapter_count: 0,
         duration: best_match.duration,
         subtitle: best_match.subtitle.clone(),
         published_year: best_match.published_year.clone(),
@@ -113,7 +127,7 @@ pub async fn scrape_book_diff(
         language: best_match.language.clone(),
         explicit: best_match.explicit.unwrap_or(false),
         abridged: best_match.abridged.unwrap_or(false),
-        genre: None,
+        genre: best_match.genre.clone(),
     };
 
     // 4. Handle Specific Field Sources (Merge Strategy)
@@ -341,6 +355,9 @@ pub async fn apply_scrape_result(
         .ok_or_else(|| TingError::NotFound(format!("Book with id {} not found", id)))?;
 
     if let Some(fields) = &req.fields {
+        let mut extended = SelectedScrapeExtendedMetadata::default();
+        let mut has_extended = false;
+
         for (field, selection) in fields {
             match field.as_str() {
                 "title" => {
@@ -384,23 +401,78 @@ pub async fn apply_scrape_result(
                         if let Ok(year) = value.parse::<i32>() {
                             book.year = Some(year);
                         }
+                        extended.published_year = Some(value);
+                        has_extended = true;
                     } else if let Some(year) = selection.value.as_i64() {
                         book.year = Some(year as i32);
+                        extended.published_year = Some(year.to_string());
+                        has_extended = true;
+                    }
+                }
+                "subtitle" => {
+                    if let Some(value) = scrape_value_to_string(&selection.value) {
+                        extended.subtitle = Some(value);
+                        has_extended = true;
+                    }
+                }
+                "published_date" | "publishedDate" => {
+                    if let Some(value) = scrape_value_to_string(&selection.value) {
+                        extended.published_date = Some(value);
+                        has_extended = true;
+                    }
+                }
+                "publisher" => {
+                    if let Some(value) = scrape_value_to_string(&selection.value) {
+                        extended.publisher = Some(value);
+                        has_extended = true;
+                    }
+                }
+                "isbn" => {
+                    if let Some(value) = scrape_value_to_string(&selection.value) {
+                        extended.isbn = Some(value);
+                        has_extended = true;
+                    }
+                }
+                "asin" => {
+                    if let Some(value) = scrape_value_to_string(&selection.value) {
+                        extended.asin = Some(value);
+                        has_extended = true;
+                    }
+                }
+                "language" => {
+                    if let Some(value) = scrape_value_to_string(&selection.value) {
+                        extended.language = Some(value);
+                        has_extended = true;
+                    }
+                }
+                "explicit" => {
+                    if let Some(value) = scrape_value_to_bool(&selection.value) {
+                        extended.explicit = Some(value);
+                        has_extended = true;
+                    }
+                }
+                "abridged" => {
+                    if let Some(value) = scrape_value_to_bool(&selection.value) {
+                        extended.abridged = Some(value);
+                        has_extended = true;
+                    }
+                }
+                "duration" => {
+                    if let Some(value) = scrape_value_to_u64(&selection.value) {
+                        extended.duration = Some(value);
+                        has_extended = true;
                     }
                 }
                 _ => {}
             }
         }
 
-        book.manual_corrected = 1;
-        if let Some(title) = &book.title {
-            if !title.trim().is_empty() {
-                book.match_pattern = Some(regex::escape(title));
-            }
-        }
-
         state.book_repo.update(&book).await?;
+        sync_manual_scrape_lock(&state, &mut book).await?;
         sync_basic_scrape_outputs(&state, &book).await?;
+        if has_extended {
+            sync_scrape_extended_metadata(&state, &book, &extended).await?;
+        }
 
         return Ok(Json(BookResponse::from(book)));
     }
@@ -484,11 +556,8 @@ pub async fn apply_scrape_result(
             }
         }
 
-        // Set manual corrected
-        book.manual_corrected = 1; // 1 for true
-        book.match_pattern = Some(regex::escape(&detail.title)); // Set default match pattern to exact title
-
         state.book_repo.update(&book).await?;
+        sync_manual_scrape_lock(&state, &mut book).await?;
 
         // Check NFO writing
         if let Ok(Some(library)) = state.library_repo.find_by_id(&book.library_id).await {
@@ -705,6 +774,30 @@ fn scrape_value_to_tags(value: &serde_json::Value) -> Option<String> {
     }
 }
 
+fn scrape_value_to_bool(value: &serde_json::Value) -> Option<bool> {
+    match value {
+        serde_json::Value::Bool(value) => Some(*value),
+        serde_json::Value::String(value) => {
+            let normalized = value.trim().to_ascii_lowercase();
+            match normalized.as_str() {
+                "true" | "1" | "yes" | "y" | "是" => Some(true),
+                "false" | "0" | "no" | "n" | "否" => Some(false),
+                _ => None,
+            }
+        }
+        serde_json::Value::Number(value) => value.as_i64().map(|value| value != 0),
+        _ => None,
+    }
+}
+
+fn scrape_value_to_u64(value: &serde_json::Value) -> Option<u64> {
+    match value {
+        serde_json::Value::Number(value) => value.as_u64(),
+        serde_json::Value::String(value) => value.trim().parse::<u64>().ok(),
+        _ => None,
+    }
+}
+
 async fn recalculate_cover_theme_color(
     state: &AppState,
     book: &mut crate::db::models::Book,
@@ -751,6 +844,29 @@ async fn recalculate_cover_theme_color(
             tracing::warn!("璁＄畻涓婚棰滆壊澶辫触: {}", e);
         }
     }
+}
+
+async fn sync_manual_scrape_lock(
+    state: &AppState,
+    book: &mut crate::db::models::Book,
+) -> Result<()> {
+    let match_pattern = book
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .map(regex::escape);
+
+    state
+        .merge_service
+        .update_manual_correction(&book.id, true, match_pattern)
+        .await?;
+
+    if let Some(updated_book) = state.book_repo.find_by_id(&book.id).await? {
+        *book = updated_book;
+    }
+
+    Ok(())
 }
 
 async fn sync_basic_scrape_outputs(state: &AppState, book: &crate::db::models::Book) -> Result<()> {
@@ -901,6 +1017,126 @@ async fn sync_basic_scrape_outputs(state: &AppState, book: &crate::db::models::B
             crate::core::metadata_writer::write_metadata_json(&target_dir, &metadata_json)
         {
             tracing::error!(target: "audit::metadata", "涓轰功绫?{} 鍐欏叆 metadata.json 澶辫触: {}", book.title.as_deref().unwrap_or("?"), e);
+        }
+    }
+
+    Ok(())
+}
+
+async fn sync_scrape_extended_metadata(
+    state: &AppState,
+    book: &crate::db::models::Book,
+    extended: &SelectedScrapeExtendedMetadata,
+) -> Result<()> {
+    let Some(library) = state.library_repo.find_by_id(&book.library_id).await? else {
+        return Ok(());
+    };
+
+    let config: crate::db::models::ScraperConfig = library
+        .scraper_config
+        .as_ref()
+        .and_then(|json| serde_json::from_str(json).ok())
+        .unwrap_or_default();
+
+    if !config.nfo_writing_enabled && !config.metadata_writing_enabled {
+        return Ok(());
+    }
+
+    let target_dir = if library.library_type == "webdav" {
+        let mut hasher = sha2::Sha256::new();
+        use sha2::Digest;
+        hasher.update(book.path.as_bytes());
+        let book_hash = format!("{:x}", hasher.finalize());
+        let temp_book_dir = std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join("temp")
+            .join(&book_hash);
+        if !temp_book_dir.exists() {
+            std::fs::create_dir_all(&temp_book_dir).ok();
+        }
+        temp_book_dir
+    } else {
+        std::path::PathBuf::from(&book.path)
+    };
+
+    if config.nfo_writing_enabled {
+        let mut metadata = BookMetadata::new(
+            book.title.clone().unwrap_or_default(),
+            "ting-reader".to_string(),
+            book.id.clone(),
+            0,
+        );
+        metadata.author = book.author.clone();
+        metadata.narrator = book.narrator.clone();
+        metadata.subtitle = extended.subtitle.clone();
+        metadata.intro = book.description.clone();
+        metadata.cover_url = book.cover_url.clone();
+        metadata.total_duration = extended.duration;
+        if let Some(tags_str) = &book.tags {
+            metadata.tags.items = tags_str
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+        }
+        if let Some(genre) = &book.genre {
+            metadata.genre.items = genre
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+        }
+        metadata.touch();
+
+        if let Err(e) = state
+            .nfo_manager
+            .write_book_nfo_to_dir(&target_dir, &metadata)
+        {
+            tracing::warn!(
+                "为书籍 {} 写入扩展 NFO 失败: {}",
+                book.title.as_deref().unwrap_or("?"),
+                e
+            );
+        }
+    }
+
+    if config.metadata_writing_enabled {
+        let mut metadata_json = crate::core::metadata_writer::read_metadata_json(&target_dir)
+            .unwrap_or(None)
+            .unwrap_or_default();
+
+        if extended.subtitle.is_some() {
+            metadata_json.subtitle = extended.subtitle.clone();
+        }
+        if extended.published_year.is_some() {
+            metadata_json.published_year = extended.published_year.clone();
+        }
+        if extended.published_date.is_some() {
+            metadata_json.published_date = extended.published_date.clone();
+        }
+        if extended.publisher.is_some() {
+            metadata_json.publisher = extended.publisher.clone();
+        }
+        if extended.isbn.is_some() {
+            metadata_json.isbn = extended.isbn.clone();
+        }
+        if extended.asin.is_some() {
+            metadata_json.asin = extended.asin.clone();
+        }
+        if extended.language.is_some() {
+            metadata_json.language = extended.language.clone();
+        }
+        if let Some(explicit) = extended.explicit {
+            metadata_json.explicit = explicit;
+        }
+        if let Some(abridged) = extended.abridged {
+            metadata_json.abridged = abridged;
+        }
+
+        if let Err(e) =
+            crate::core::metadata_writer::write_metadata_json(&target_dir, &metadata_json)
+        {
+            tracing::error!(target: "audit::metadata", "为书籍 {} 写入扩展 metadata.json 失败: {}", book.title.as_deref().unwrap_or("?"), e);
         }
     }
 

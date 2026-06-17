@@ -14,22 +14,23 @@ impl ProgressRepository {
         Self { db }
     }
 
-    /// Get recent progress for a user (last 4 books)
+    /// Get recent progress for a user
     pub async fn get_recent(&self, user_id: &str, limit: i32) -> Result<Vec<Progress>> {
         let user_id = user_id.to_string();
         self.db
             .execute(move |conn| {
                 let mut stmt = conn
                     .prepare(
-                        "SELECT id, user_id, book_id, chapter_id, position, duration, updated_at \
-                 FROM progress \
-                 WHERE id IN ( \
-                   SELECT id FROM progress \
-                   WHERE user_id = ? \
-                   GROUP BY book_id \
-                   HAVING MAX(updated_at) \
+                        "SELECT p.id, p.user_id, p.book_id, p.chapter_id, p.position, p.duration, p.updated_at \
+                 FROM progress p \
+                 WHERE p.user_id = ? \
+                 AND NOT EXISTS ( \
+                   SELECT 1 FROM progress newer \
+                   WHERE newer.user_id = p.user_id \
+                   AND newer.book_id = p.book_id \
+                   AND (newer.updated_at > p.updated_at OR (newer.updated_at = p.updated_at AND newer.id > p.id)) \
                  ) \
-                 ORDER BY updated_at DESC LIMIT ?",
+                 ORDER BY p.updated_at DESC LIMIT ?",
                     )
                     .map_err(TingError::DatabaseError)?;
 
@@ -77,11 +78,12 @@ impl ProgressRepository {
                  FROM progress p \
                  JOIN books b ON p.book_id = b.id \
                  LEFT JOIN chapters c ON p.chapter_id = c.id \
-                 WHERE p.id IN ( \
-                   SELECT id FROM progress \
-                   WHERE user_id = ? \
-                   GROUP BY book_id \
-                   HAVING MAX(updated_at) \
+                 WHERE p.user_id = ? \
+                 AND NOT EXISTS ( \
+                   SELECT 1 FROM progress newer \
+                   WHERE newer.user_id = p.user_id \
+                   AND newer.book_id = p.book_id \
+                   AND (newer.updated_at > p.updated_at OR (newer.updated_at = p.updated_at AND newer.id > p.id)) \
                  ) \
                  ORDER BY p.updated_at DESC \
                  LIMIT ?"
@@ -141,10 +143,104 @@ impl ProgressRepository {
             .await
     }
 
+    pub async fn exists_for_chapter(
+        &self,
+        user_id: &str,
+        book_id: &str,
+        chapter_id: Option<&str>,
+    ) -> Result<bool> {
+        let user_id = user_id.to_string();
+        let book_id = book_id.to_string();
+        let chapter_id = chapter_id.map(str::to_string);
+        self.db
+            .execute(move |conn| {
+                let count: i64 = if let Some(chapter_id) = chapter_id {
+                    conn.query_row(
+                        "SELECT COUNT(*) FROM progress WHERE user_id = ? AND book_id = ? AND chapter_id = ?",
+                        rusqlite::params![&user_id, &book_id, &chapter_id],
+                        |row| row.get(0),
+                    )
+                } else {
+                    conn.query_row(
+                        "SELECT COUNT(*) FROM progress WHERE user_id = ? AND book_id = ? AND chapter_id IS NULL",
+                        rusqlite::params![&user_id, &book_id],
+                        |row| row.get(0),
+                    )
+                }
+                .map_err(TingError::DatabaseError)?;
+
+                Ok(count > 0)
+            })
+            .await
+    }
+
+    /// Clear all playback progress for a user
+    pub async fn clear_by_user(&self, user_id: &str) -> Result<usize> {
+        let user_id = user_id.to_string();
+        self.db
+            .execute(move |conn| {
+                conn.execute("DELETE FROM progress WHERE user_id = ?", [&user_id])
+                    .map_err(TingError::DatabaseError)
+            })
+            .await
+    }
+
     /// Upsert progress (insert or update)
     pub async fn upsert(&self, progress: &Progress) -> Result<()> {
         let progress = progress.clone();
         self.db.execute(move |conn| {
+            let progress_position: Option<f64> = if progress.chapter_id.is_none() {
+                conn.query_row(
+                    "SELECT position FROM progress WHERE user_id = ? AND book_id = ? AND chapter_id IS NULL",
+                    rusqlite::params![&progress.user_id, &progress.book_id],
+                    |row| row.get(0),
+                ).optional().map_err(TingError::DatabaseError)?
+            } else {
+                conn.query_row(
+                    "SELECT position FROM progress WHERE user_id = ? AND book_id = ? AND chapter_id = ?",
+                    rusqlite::params![&progress.user_id, &progress.book_id, &progress.chapter_id],
+                    |row| row.get(0),
+                ).optional().map_err(TingError::DatabaseError)?
+            };
+            let previous_position: Option<f64> = if progress_position.is_some() {
+                progress_position
+            } else if progress.chapter_id.is_none() {
+                conn.query_row(
+                    "SELECT position FROM listening_events WHERE user_id = ? AND book_id = ? AND chapter_id IS NULL ORDER BY created_at DESC LIMIT 1",
+                    rusqlite::params![&progress.user_id, &progress.book_id],
+                    |row| row.get(0),
+                ).optional().map_err(TingError::DatabaseError)?
+            } else {
+                conn.query_row(
+                    "SELECT position FROM listening_events WHERE user_id = ? AND book_id = ? AND chapter_id = ? ORDER BY created_at DESC LIMIT 1",
+                    rusqlite::params![&progress.user_id, &progress.book_id, &progress.chapter_id],
+                    |row| row.get(0),
+                ).optional().map_err(TingError::DatabaseError)?
+            };
+
+            let listen_seconds = if !progress.position.is_finite() || progress.position <= 0.0 {
+                0.0
+            } else if let Some(previous) = previous_position {
+                (progress.position - previous).max(0.0)
+            } else {
+                progress.position
+            };
+
+            conn.execute(
+                "INSERT INTO listening_events (id, user_id, book_id, chapter_id, position, duration, listen_seconds, created_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                rusqlite::params![
+                    &progress.id,
+                    &progress.user_id,
+                    &progress.book_id,
+                    &progress.chapter_id,
+                    progress.position,
+                    progress.duration,
+                    listen_seconds,
+                ],
+            )
+            .map_err(TingError::DatabaseError)?;
+
             // Handle NULL chapter_id carefully since SQLite UNIQUE constraint treats NULLs as distinct
             if progress.chapter_id.is_none() {
                 // If chapter_id is NULL, we just insert or update based on user_id and book_id

@@ -13,7 +13,9 @@ use crate::core::text_cleaner::TextCleaner;
 use crate::core::StorageService;
 use crate::db::manager::DatabaseManager;
 use crate::db::models::TaskRecord;
-use crate::db::repository::{LibraryRepository, Repository, TaskRepository};
+use crate::db::repository::{
+    LibraryRepository, NotificationWebhookRepository, Repository, TaskRepository,
+};
 use crate::plugin::manager::PluginManager;
 
 use chrono::SecondsFormat;
@@ -50,6 +52,7 @@ pub struct TaskQueue {
     plugin_manager: Option<Arc<PluginManager>>,
     storage_service: Option<Arc<StorageService>>,
     merge_service: Option<Arc<MergeService>>,
+    notification_repo: Option<Arc<NotificationWebhookRepository>>,
     encryption_key: Option<Arc<[u8; 32]>>,
     temp_dir: std::path::PathBuf,
 }
@@ -77,6 +80,7 @@ impl TaskQueue {
             plugin_manager: None,
             storage_service: None,
             merge_service: None,
+            notification_repo: None,
             encryption_key: None,
             temp_dir,
         }
@@ -140,6 +144,14 @@ impl TaskQueue {
     /// Set merge service for task execution
     pub fn with_merge_service(mut self, merge_service: Arc<MergeService>) -> Self {
         self.merge_service = Some(merge_service);
+        self
+    }
+
+    pub fn with_notification_repo(
+        mut self,
+        notification_repo: Arc<NotificationWebhookRepository>,
+    ) -> Self {
+        self.notification_repo = Some(notification_repo);
         self
     }
 
@@ -659,12 +671,14 @@ impl TaskQueue {
         &self,
         library_id: &str,
         library_path: &str,
+        mode: crate::core::library_scanner::ScanMode,
     ) -> Result<String> {
         let task_payload = TaskPayload::Custom {
             task_type: "library_scan".to_string(),
             data: serde_json::json!({
                 "library_id": library_id,
                 "library_path": library_path,
+                "mode": mode.as_str(),
             }),
         };
 

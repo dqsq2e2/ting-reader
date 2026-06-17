@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import apiClient from '../api/client';
 import { Trash2, HardDrive, Download, Database, ChevronDown, ChevronRight } from 'lucide-react';
+import { getCoverAspectClass, useBookshelfCoverShape } from '../hooks/useBookshelfCoverShape';
 // import { useNavigate } from 'react-router-dom';
 
 const DownloadsPage: React.FC = () => {
+  const coverShape = useBookshelfCoverShape();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [cachedFiles, setCachedFiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -156,7 +158,7 @@ const DownloadsPage: React.FC = () => {
                                 {expandedBookTitle === group.title ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
                             </div>
 
-                            <div className="w-10 h-14 bg-slate-200 dark:bg-slate-700 rounded-md shrink-0 flex items-center justify-center overflow-hidden">
+                            <div className={`w-10 ${getCoverAspectClass(coverShape)} bg-slate-200 dark:bg-slate-700 rounded-md shrink-0 flex items-center justify-center overflow-hidden`}>
                                 {group.coverUrl ? (
                                     <img src={group.coverUrl} alt={group.title} className="w-full h-full object-cover" />
                                 ) : (

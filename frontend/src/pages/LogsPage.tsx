@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import apiClient from '../api/client';
 import { 
+  BellRing,
   Terminal, 
   RefreshCw, 
   Download,
@@ -11,11 +12,12 @@ import {
   Database,
   Trash2,
   StopCircle,
-  CheckSquare,
   FileSignature,
   Activity,
   LogOut,
   PlayCircle,
+  ChevronDown,
+  ChevronRight,
   MoreHorizontal,
   Eraser
 } from 'lucide-react';
@@ -27,6 +29,7 @@ interface LogEntry {
   level: string;
   module: string;
   message: string;
+  fields?: Record<string, unknown>;
   task_id?: string;
   task_status?: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   task_type?: string;
@@ -39,6 +42,7 @@ const MODULE_OPTIONS = [
   { label: '扫描记录', value: 'audit::scan' },
   { label: '元数据记录', value: 'audit::metadata' },
   { label: '存储库记录', value: 'audit::library' },
+  { label: '通知记录', value: 'audit::notification' },
   { label: '系统所有日志', value: 'all' }
 ];
 
@@ -57,9 +61,8 @@ const LogsPage: React.FC = () => {
   const [levelFilter, setLevelFilter] = useState('');
   
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
-  const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [expandedLogKeys, setExpandedLogKeys] = useState<Set<string>>(new Set());
 
   const page = 1;
   const pageSize = 100;
@@ -75,17 +78,17 @@ const LogsPage: React.FC = () => {
         }
       });
       
-      const newLogs: LogEntry[] = response.data.logs || [];
+      const newLogs: LogEntry[] = (response.data.logs || []).map((log: LogEntry & {
+        taskId?: string;
+        taskStatus?: LogEntry['task_status'];
+        taskType?: string;
+      }) => ({
+        ...log,
+        task_id: log.task_id || log.taskId,
+        task_status: log.task_status || log.taskStatus,
+        task_type: log.task_type || log.taskType,
+      }));
       setLogs(newLogs);
-
-      // Clean up selected task IDs that no longer exist
-      setSelectedTaskIds(prev => {
-        const newSet = new Set<string>();
-        newLogs.forEach((log) => {
-            if (log.task_id && prev.has(log.task_id)) newSet.add(log.task_id);
-        });
-        return newSet;
-      });
 
     } catch (err) {
       console.error('获取日志数据失败', err);
@@ -112,7 +115,7 @@ const LogsPage: React.FC = () => {
     await fetchData();
   };
 
-  // ---------------- Tasks Actions ----------------
+  // ---------------- Task Log Actions ----------------
   const handleCancelTask = async (taskId: string) => {
     try {
       await apiClient.post(`/api/tasks/${taskId}/cancel`);
@@ -123,61 +126,12 @@ const LogsPage: React.FC = () => {
   };
 
   const handleDeleteTask = async (taskId: string) => {
-    if (!confirm('确定要删除这条任务记录吗？')) return;
+    if (!confirm('确定要删除这条任务日志吗？')) return;
     try {
       await apiClient.delete(`/api/tasks/${taskId}`);
       manualFetchData();
     } catch (err) {
-      console.error('Failed to delete task', err);
-    }
-  };
-
-  const handleBatchDeleteTasks = async () => {
-    if (selectedTaskIds.size === 0) return;
-    if (!confirm(`确定要删除选中的 ${selectedTaskIds.size} 条任务记录吗？`)) return;
-    
-    try {
-        await apiClient.post('/api/tasks/batch-delete', { ids: Array.from(selectedTaskIds) });
-        setSelectedTaskIds(new Set());
-        setIsSelectionMode(false);
-        manualFetchData();
-    } catch (err) {
-        console.error('Failed to batch delete tasks', err);
-    }
-  };
-
-  const toggleSelectTask = (id: string) => {
-    const newSet = new Set(selectedTaskIds);
-    if (newSet.has(id)) {
-        newSet.delete(id);
-    } else {
-        newSet.add(id);
-    }
-    setSelectedTaskIds(newSet);
-    
-    if (newSet.size === 0) {
-        setIsSelectionMode(false);
-    }
-  };
-
-  const deletableTasks = logs.filter(l => l.task_id && l.task_status !== 'running');
-
-  const toggleSelectAllTasks = () => {
-    if (selectedTaskIds.size === deletableTasks.length && deletableTasks.length > 0) {
-        setSelectedTaskIds(new Set());
-        setIsSelectionMode(false);
-    } else {
-        const newSet = new Set(deletableTasks.map(l => l.task_id as string));
-        setSelectedTaskIds(newSet);
-    }
-  };
-
-  const toggleSelectionMode = () => {
-    if (isSelectionMode) {
-        setSelectedTaskIds(new Set());
-        setIsSelectionMode(false);
-    } else {
-        setIsSelectionMode(true);
+      console.error('Failed to delete task log', err);
     }
   };
 
@@ -215,9 +169,8 @@ const LogsPage: React.FC = () => {
   };
 
   const handleClearLogs = async () => {
-    if (!confirm('确定要清空所有日志和任务记录吗？这将删除所有系统日志和已完成/失败的任务。')) return;
+    if (!confirm('确定要清空所有日志和任务日志吗？')) return;
     try {
-      // 同时清空任务记录和系统日志文件
       await Promise.all([
         apiClient.delete('/api/tasks'),
         apiClient.delete('/api/v1/system/logs')
@@ -235,6 +188,7 @@ const LogsPage: React.FC = () => {
     if (module.startsWith('audit::scan')) return '扫描记录';
     if (module.startsWith('audit::metadata')) return '元数据记录';
     if (module.startsWith('audit::library')) return '存储库记录';
+    if (module.startsWith('audit::notification')) return '通知记录';
     if (module.startsWith('audit::task')) return '任务记录';
     if (module === 'audit') return '核心业务';
     if (module.startsWith('auth')) return '鉴权系统';
@@ -246,6 +200,7 @@ const LogsPage: React.FC = () => {
   const getLogIcon = (module: string) => {
     if (module.includes('login') || module.includes('auth')) return <LogOut size={20} className="sm:w-6 sm:h-6" />;
     if (module.includes('playback')) return <PlayCircle size={20} className="sm:w-6 sm:h-6" />;
+    if (module.includes('notification')) return <BellRing size={20} className="sm:w-6 sm:h-6" />;
     if (module.includes('scan')) return <Database size={20} className="sm:w-6 sm:h-6" />;
     if (module.includes('metadata')) return <FileSignature size={20} className="sm:w-6 sm:h-6" />;
     return <Activity size={20} className="sm:w-6 sm:h-6" />;
@@ -261,6 +216,30 @@ const LogsPage: React.FC = () => {
     }
   };
 
+  const formatFieldValue = (value: unknown) => {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      return String(value);
+    }
+    return JSON.stringify(value);
+  };
+
+  const getLogKey = (log: LogEntry, index: number) => {
+    return [log.task_id || '', log.timestamp, log.module, log.message, index].join('|');
+  };
+
+  const toggleLogDetails = (key: string) => {
+    setExpandedLogKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
   const getStatusIcon = (status?: string) => {
     switch (status) {
       case 'completed': return <CheckCircle2 className="text-green-500" size={20} />;
@@ -270,10 +249,6 @@ const LogsPage: React.FC = () => {
       default: return <Clock className="text-slate-400" size={20} />;
     }
   };
-
-  const isAllSelected = deletableTasks.length > 0 && selectedTaskIds.size === deletableTasks.length;
-  const isIndeterminate = selectedTaskIds.size > 0 && selectedTaskIds.size < deletableTasks.length;
-  const hasTasksInView = deletableTasks.length > 0;
 
   return (
     <div className="w-full max-w-screen-2xl mx-auto p-4 sm:p-6 md:p-8 lg:p-10 space-y-8">
@@ -292,11 +267,7 @@ const LogsPage: React.FC = () => {
             <span className="text-sm text-slate-500 ml-2">模块</span>
             <select 
               value={moduleFilter} 
-              onChange={(e) => {
-                setModuleFilter(e.target.value);
-                setIsSelectionMode(false);
-                setSelectedTaskIds(new Set());
-              }}
+              onChange={(e) => setModuleFilter(e.target.value)}
               className="bg-transparent border-none text-sm focus:ring-0 text-slate-700 dark:text-slate-300 cursor-pointer"
             >
               {MODULE_OPTIONS.map(opt => (
@@ -367,28 +338,6 @@ const LogsPage: React.FC = () => {
             )}
           </div>
 
-          {isSelectionMode && selectedTaskIds.size > 0 && (
-            <button
-              onClick={handleBatchDeleteTasks}
-              className="flex items-center gap-1.5 sm:gap-2 px-3 py-2 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-colors text-sm font-medium border border-red-100"
-            >
-              <Trash2 size={16} />
-              <span>删除 ({selectedTaskIds.size})</span>
-            </button>
-          )}
-
-          {hasTasksInView && (
-            <button
-              onClick={toggleSelectionMode}
-              className={`p-2 sm:p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl transition-colors shadow-sm ${
-                  isSelectionMode ? 'text-primary-600 bg-primary-50 border-primary-200' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50'
-              }`}
-              title={isSelectionMode ? "退出选择" : "选择任务"}
-            >
-              <CheckSquare size={18} className="sm:w-5 sm:h-5" />
-            </button>
-          )}
-
           <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-slate-500 bg-white dark:bg-slate-900 p-2 sm:p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
             <span className="whitespace-nowrap">自动刷新</span>
             <button
@@ -413,52 +362,18 @@ const LogsPage: React.FC = () => {
       </div>
 
       <div className="bg-white dark:bg-slate-900 rounded-3xl overflow-hidden border border-slate-100 dark:border-slate-800 shadow-sm">
-        {/* Task Selection Header */}
-        {hasTasksInView && isSelectionMode && (
-          <div className="px-6 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center bg-slate-50/50 dark:bg-slate-800/30">
-            <div className="flex items-center gap-4">
-              <div className="relative flex items-center">
-                <input
-                  type="checkbox"
-                  className="w-5 h-5 rounded border-slate-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
-                  checked={isAllSelected}
-                  ref={input => {
-                    if (input) input.indeterminate = isIndeterminate;
-                  }}
-                  onChange={toggleSelectAllTasks}
-                  disabled={deletableTasks.length === 0}
-                />
-              </div>
-              <span className="text-sm font-medium text-slate-500">
-                {selectedTaskIds.size > 0 ? `已选择 ${selectedTaskIds.size} 项任务` : '全选未运行任务'}
-              </span>
-            </div>
-          </div>
-        )}
-
         <div className="divide-y divide-slate-100 dark:divide-slate-800">
           {logs.map((log, index) => {
             const isTask = !!log.task_id;
-            const isSelected = isTask && selectedTaskIds.has(log.task_id as string);
+            const logKey = getLogKey(log, index);
+            const fieldEntries = log.fields ? Object.entries(log.fields) : [];
+            const hasDetails = fieldEntries.length > 0;
+            const isExpanded = expandedLogKeys.has(logKey);
 
             return (
-              <div key={log.task_id || `log-${index}`} className={`p-4 sm:p-6 transition-colors ${
-                isSelected ? 'bg-blue-50/50 dark:bg-blue-900/10' : 'hover:bg-slate-50/50 dark:hover:bg-slate-800/30'
-              }`}>
+              <div key={log.task_id || `log-${index}`} className="p-4 sm:p-6 transition-colors hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
                 <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
                   <div className="flex items-start gap-4 w-full sm:w-auto">
-                    {isSelectionMode && isTask && (
-                      <div className="flex items-center h-10 sm:h-12 shrink-0">
-                        <input
-                          type="checkbox"
-                          className="w-5 h-5 sm:w-5 sm:h-5 rounded border-slate-300 text-primary-600 focus:ring-primary-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed scale-90 sm:scale-100"
-                          checked={isSelected}
-                          onChange={() => toggleSelectTask(log.task_id as string)}
-                          disabled={log.task_status === 'running'}
-                        />
-                      </div>
-                    )}
-                    
                     <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 ${
                       isTask ? (
                         (log.task_type === 'scan' || log.task_type === 'library_scan') ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/20' : 
@@ -490,6 +405,17 @@ const LogsPage: React.FC = () => {
                             {getTaskStatusText(log.task_status)}
                           </span>
                         )}
+
+                        {hasDetails && (
+                          <button
+                            type="button"
+                            onClick={() => toggleLogDetails(logKey)}
+                            className="inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
+                          >
+                            {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                            详情
+                          </button>
+                        )}
                         
                       </div>
 
@@ -497,6 +423,25 @@ const LogsPage: React.FC = () => {
                       <p className={`text-sm break-all font-mono whitespace-pre-wrap mt-2 ${isTask ? 'text-slate-500' : 'text-slate-600 dark:text-slate-300'}`}>
                         {log.message}
                       </p>
+
+                      {hasDetails && isExpanded && (
+                        <div className="mt-3 rounded-2xl border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/30">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+                            {fieldEntries.map(([key, value]) => (
+                              <div
+                                key={key}
+                                className="min-w-0 rounded-xl bg-white px-3 py-2 text-[11px] shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-800"
+                                title={formatFieldValue(value)}
+                              >
+                                <div className="mb-1 font-semibold text-slate-500 dark:text-slate-400">{key}</div>
+                                <div className="break-all font-mono text-slate-800 dark:text-slate-200">
+                                  {formatFieldValue(value)}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Task error state if present */}
                       {isTask && log.level === 'ERROR' && log.message.includes('错误') && (

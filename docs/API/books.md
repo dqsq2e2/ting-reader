@@ -89,6 +89,8 @@
 
 **响应：** `201 Created` — 返回 `BookResponse`
 
+说明：如果配置了 Webhook 监听，会触发 `book.created`。
+
 ---
 
 ### PUT /api/v1/books/:id
@@ -124,6 +126,8 @@
 | id | string | 书籍 ID |
 
 **响应：** `204 No Content`
+
+说明：如果配置了 Webhook 监听，会触发 `book.deleted`。
 
 ---
 

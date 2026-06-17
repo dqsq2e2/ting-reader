@@ -280,6 +280,117 @@ DROP TABLE IF EXISTS plugin_dependencies;
 DROP TABLE IF EXISTS plugin_registry;
 "#;
 
+/// Fifteenth schema migration (version 15)
+const MIGRATION_V15: &str = r#"
+-- User playlists
+CREATE TABLE IF NOT EXISTS playlists (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Playlist books junction table
+CREATE TABLE IF NOT EXISTS playlist_books (
+    playlist_id TEXT NOT NULL,
+    book_id TEXT NOT NULL,
+    book_order INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (playlist_id, book_id),
+    FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_playlists_user_id ON playlists(user_id);
+CREATE INDEX IF NOT EXISTS idx_playlist_books_playlist_id ON playlist_books(playlist_id);
+CREATE INDEX IF NOT EXISTS idx_playlist_books_book_id ON playlist_books(book_id);
+"#;
+
+/// Sixteenth schema migration (version 16)
+const MIGRATION_V16: &str = r#"
+-- Durable listening statistics. These records are not deleted when users clear visible history.
+CREATE TABLE IF NOT EXISTS listening_events (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    book_id TEXT NOT NULL,
+    chapter_id TEXT,
+    position REAL DEFAULT 0,
+    duration REAL,
+    listen_seconds REAL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
+    FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE SET NULL
+);
+
+INSERT OR IGNORE INTO listening_events (
+    id,
+    user_id,
+    book_id,
+    chapter_id,
+    position,
+    duration,
+    listen_seconds,
+    created_at
+)
+SELECT
+    'legacy-' || id,
+    user_id,
+    book_id,
+    chapter_id,
+    position,
+    duration,
+    CASE WHEN position > 0 THEN position ELSE 0 END,
+    updated_at
+FROM progress;
+
+CREATE INDEX IF NOT EXISTS idx_listening_events_user_id ON listening_events(user_id);
+CREATE INDEX IF NOT EXISTS idx_listening_events_book_id ON listening_events(book_id);
+CREATE INDEX IF NOT EXISTS idx_listening_events_created_at ON listening_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_listening_events_user_created_at ON listening_events(user_id, created_at);
+"#;
+
+/// Seventeenth schema migration (version 17)
+const MIGRATION_V17: &str = r#"
+-- Admin-configured webhook notification listeners.
+CREATE TABLE IF NOT EXISTS notification_webhooks (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    events TEXT NOT NULL DEFAULT '[]',
+    secret TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_notification_webhooks_enabled ON notification_webhooks(enabled);
+"#;
+
+/// Eighteenth schema migration (version 18)
+const MIGRATION_V18: &str = r#"
+-- Playlist items preserve whether a playlist entry is a book or an entire series.
+CREATE TABLE IF NOT EXISTS playlist_items (
+    playlist_id TEXT NOT NULL,
+    item_type TEXT NOT NULL CHECK(item_type IN ('book', 'series')),
+    item_id TEXT NOT NULL,
+    item_order INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (playlist_id, item_type, item_id),
+    FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE
+);
+
+INSERT OR IGNORE INTO playlist_items (playlist_id, item_type, item_id, item_order, created_at)
+SELECT playlist_id, 'book', book_id, book_order, created_at
+FROM playlist_books;
+
+CREATE INDEX IF NOT EXISTS idx_playlist_items_playlist_id ON playlist_items(playlist_id);
+CREATE INDEX IF NOT EXISTS idx_playlist_items_item ON playlist_items(item_type, item_id);
+"#;
+
 /// Run all pending database migrations
 ///
 /// This function applies database schema migrations in order.
@@ -416,6 +527,31 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_migration(conn, 14, MIGRATION_V14)?;
     }
 
+    if current_version < 15 {
+        info!("Applying migration v15: User playlists");
+        apply_migration(conn, 15, MIGRATION_V15)?;
+    }
+
+    if current_version < 16 {
+        info!("Applying migration v16: Durable listening statistics");
+        apply_migration(conn, 16, MIGRATION_V16)?;
+    }
+
+    if current_version < 17 {
+        info!("Applying migration v17: Notification webhooks");
+        apply_migration(conn, 17, MIGRATION_V17)?;
+    }
+
+    if current_version < 18 {
+        info!("Applying migration v18: Playlist typed items");
+        apply_migration(conn, 18, MIGRATION_V18)?;
+    }
+
+    if current_version < 19 {
+        info!("Applying migration v19: Remove playlist accent column");
+        migrate_playlist_without_accent(conn)?;
+    }
+
     info!("数据库迁移成功完成");
     Ok(())
 }
@@ -524,5 +660,64 @@ fn apply_migration(conn: &mut Connection, version: i64, sql: &str) -> Result<()>
     tx.commit().map_err(|e| TingError::DatabaseError(e))?;
 
     info!("Migration v{} applied successfully", version);
+    Ok(())
+}
+
+fn migrate_playlist_without_accent(conn: &mut Connection) -> Result<()> {
+    let has_accent: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('playlists') WHERE name = 'accent'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0)
+        > 0;
+
+    if !has_accent {
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_migrations (version) VALUES (19)",
+            [],
+        )
+        .map_err(TingError::DatabaseError)?;
+        info!("Migration v19 applied successfully");
+        return Ok(());
+    }
+
+    conn.execute_batch("PRAGMA foreign_keys = OFF;")
+        .map_err(TingError::DatabaseError)?;
+
+    let migration_result = (|| -> Result<()> {
+        conn.execute_batch(
+            r#"
+CREATE TABLE playlists_new (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+INSERT INTO playlists_new (id, user_id, title, description, created_at, updated_at)
+SELECT id, user_id, title, description, created_at, updated_at
+FROM playlists;
+
+DROP TABLE playlists;
+ALTER TABLE playlists_new RENAME TO playlists;
+CREATE INDEX IF NOT EXISTS idx_playlists_user_id ON playlists(user_id);
+"#,
+        )
+        .map_err(TingError::DatabaseError)?;
+        conn.execute("INSERT INTO schema_migrations (version) VALUES (19)", [])
+            .map_err(TingError::DatabaseError)?;
+        Ok(())
+    })();
+
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .map_err(TingError::DatabaseError)?;
+    migration_result?;
+
+    info!("Migration v19 applied successfully");
     Ok(())
 }

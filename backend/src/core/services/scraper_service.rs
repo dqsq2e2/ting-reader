@@ -415,7 +415,7 @@ impl ScraperService {
                             cover_url: item.cover_url.clone(),
                             intro: item.intro.clone().unwrap_or_default(),
                             tags: item.tags.clone(),
-                            chapter_count: item.chapter_count.unwrap_or(0),
+                            chapter_count: 0,
                             duration: item.duration,
                             subtitle: item.subtitle.clone(),
                             published_year: item.published_year.clone(),
@@ -426,7 +426,7 @@ impl ScraperService {
                             language: item.language.clone(),
                             explicit: item.explicit.unwrap_or(false),
                             abridged: item.abridged.unwrap_or(false),
-                            genre: None,
+                            genre: item.genre.clone(),
                         };
                         source_results.insert(source_id, detail);
                     }

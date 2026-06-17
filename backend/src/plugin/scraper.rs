@@ -14,6 +14,7 @@ use super::Plugin;
 use crate::core::error::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Scraper plugin trait
 ///
@@ -105,9 +106,11 @@ pub struct BookItem {
     pub id: String,
 
     /// Book title
+    #[serde(default)]
     pub title: String,
 
     /// Author name
+    #[serde(default)]
     pub author: String,
 
     /// Cover image URL (optional)
@@ -150,6 +153,10 @@ pub struct BookItem {
     #[serde(default)]
     pub language: Option<String>,
 
+    /// Genre
+    #[serde(default)]
+    pub genre: Option<String>,
+
     /// Explicit content
     #[serde(default)]
     pub explicit: Option<bool>,
@@ -162,13 +169,13 @@ pub struct BookItem {
     #[serde(default)]
     pub tags: Vec<String>,
 
-    /// Total number of chapters (optional)
-    #[serde(default)]
-    pub chapter_count: Option<u32>,
-
     /// Total duration in seconds (optional)
     #[serde(default)]
     pub duration: Option<u64>,
+
+    /// Additional plugin-specific metadata fields.
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
 /// Detailed book information
@@ -298,11 +305,12 @@ mod tests {
                 isbn: None,
                 asin: None,
                 language: None,
+                genre: None,
                 explicit: None,
                 abridged: None,
                 tags: vec![],
-                chapter_count: None,
                 duration: None,
+                extra: HashMap::new(),
             }],
             total: 100,
             page: 1,

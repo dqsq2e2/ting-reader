@@ -15,6 +15,22 @@ use axum::{
 };
 use uuid::Uuid;
 
+fn mask_restricted_settings(response: &mut UserSettingsResponse, is_admin: bool) {
+    if is_admin {
+        return;
+    }
+
+    response.auto_cache = false;
+    response.widget_css = None;
+
+    if let Some(settings_json) = response.settings_json.as_mut() {
+        if let Some(obj) = settings_json.as_object_mut() {
+            obj.remove("autoCache");
+            obj.remove("widgetCss");
+        }
+    }
+}
+
 /// Handler for GET /api/users - Get all users (admin only)
 pub async fn list_users(
     State(state): State<AppState>,
@@ -224,6 +240,8 @@ pub async fn get_user_settings(
                 }
             }
 
+            mask_restricted_settings(&mut response, user.role == "admin");
+
             Ok(Json(response))
         }
         None => {
@@ -237,7 +255,10 @@ pub async fn get_user_settings(
                 settings_json: None,
                 updated_at: chrono::Utc::now().to_rfc3339(),
             };
-            Ok(Json(UserSettingsResponse::from(default_settings)))
+            let mut response = UserSettingsResponse::from(default_settings);
+            mask_restricted_settings(&mut response, user.role == "admin");
+
+            Ok(Json(response))
         }
     }
 }
@@ -266,18 +287,18 @@ pub async fn update_user_settings(
     if let Some(auto_preload) = req.auto_preload {
         settings_obj["autoPreload"] = serde_json::json!(auto_preload);
     }
-    if let Some(auto_cache) = req.auto_cache {
-        settings_obj["autoCache"] = serde_json::json!(auto_cache);
-    }
 
     // Restricted settings (admin only)
     if user.role == "admin" {
+        if let Some(auto_cache) = req.auto_cache {
+            settings_obj["autoCache"] = serde_json::json!(auto_cache);
+        }
         if let Some(widget_css) = &req.widget_css {
             settings_obj["widgetCss"] = serde_json::json!(widget_css);
         }
     } else {
         // If non-admin tries to update these, we silently ignore them or log a warning
-        if req.widget_css.is_some() {
+        if req.widget_css.is_some() || req.auto_cache.is_some() {
             tracing::warn!(user_id = %user.id, "非管理员用户尝试更新受限设置");
         }
     }
@@ -348,6 +369,8 @@ pub async fn update_user_settings(
             }
         }
     }
+
+    mask_restricted_settings(&mut response, user.role == "admin");
 
     Ok(Json(response))
 }
@@ -428,7 +451,10 @@ pub async fn get_recent_progress(
     State(state): State<AppState>,
     user: crate::auth::middleware::AuthUser,
 ) -> Result<impl IntoResponse> {
-    let progress_list = state.progress_repo.get_recent_enriched(&user.id, 4).await?;
+    let progress_list = state
+        .progress_repo
+        .get_recent_enriched(&user.id, 100)
+        .await?;
     let progress: Vec<ProgressResponse> = progress_list
         .into_iter()
         .map(|(p, b_title, c_url, l_id, c_title, c_dur)| {
@@ -443,6 +469,15 @@ pub async fn get_recent_progress(
         .collect();
 
     Ok(Json(progress))
+}
+
+/// Handler for DELETE /api/progress/recent - Clear playback history
+pub async fn clear_recent_progress(
+    State(state): State<AppState>,
+    user: crate::auth::middleware::AuthUser,
+) -> Result<impl IntoResponse> {
+    state.progress_repo.clear_by_user(&user.id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Handler for GET /api/progress/:bookId - Get book playback progress
@@ -472,6 +507,7 @@ pub async fn update_progress(
         .await?
         .ok_or_else(|| TingError::NotFound(format!("Book {} not found", req.book_id)))?;
 
+    let mut chapter_title = None;
     if let Some(ref chapter_id) = req.chapter_id {
         let chapter = state
             .chapter_repo
@@ -484,7 +520,13 @@ pub async fn update_progress(
                 "Chapter does not belong to the specified book".to_string(),
             ));
         }
+        chapter_title = chapter.title.clone();
     }
+
+    let is_first_progress = !state
+        .progress_repo
+        .exists_for_chapter(&user.id, &req.book_id, req.chapter_id.as_deref())
+        .await?;
 
     let progress = crate::db::models::Progress {
         id: Uuid::new_v4().to_string(),
@@ -497,6 +539,28 @@ pub async fn update_progress(
     };
 
     state.progress_repo.upsert(&progress).await?;
+
+    let book_title = book.title.clone().unwrap_or_else(|| "Unknown".to_string());
+    if is_first_progress {
+        crate::core::notifications::dispatch_notification_event(
+            state.notification_repo.clone(),
+            crate::core::notifications::NotificationEventPayload::new(
+                "playback.play",
+                "播放开始",
+                format!("用户 {} 开始播放 {}", user.username, book_title),
+                serde_json::json!({
+                    "userId": user.id,
+                    "username": user.username,
+                    "bookId": book.id,
+                    "bookTitle": book_title,
+                    "chapterId": req.chapter_id,
+                    "chapterTitle": chapter_title,
+                    "position": progress.position,
+                    "duration": progress.duration,
+                }),
+            ),
+        );
+    }
 
     Ok((StatusCode::OK, Json(ProgressResponse::from(progress))))
 }

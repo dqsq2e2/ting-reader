@@ -46,6 +46,7 @@ pub mod audio_streamer;
 pub mod event_bus;
 pub mod library_scanner;
 pub mod nfo_manager;
+pub mod notifications;
 pub mod services;
 pub mod task_queue;
 

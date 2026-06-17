@@ -4,7 +4,7 @@ LOG_FILE="${TRIM_TEMP_LOGFILE}"
 PID_FILE="${TRIM_PKGVAR}/app.pid"
 
 export RUST_LOG=info
-export TING_SERVER__HOST=0.0.0.0
+export TING_SERVER__HOST=::
 export TING_SERVER__PORT=3000
 
 if [ -n "$wizard_port" ]; then
@@ -52,10 +52,17 @@ start_process() {
     log_msg "PLUGINS_DIR: $PLUGINS_DIR"
     log_msg "TEMP_DIR: $TEMP_DIR"
     log_msg "PORT: $TING_SERVER__PORT"
+    log_msg "SERVER_DIR: ${TRIM_APPDEST}/server"
     
-    $CMD > /dev/null 2>&1 &
-    
-    printf "%s" "$!" > ${PID_FILE}
+    (
+        cd "${TRIM_APPDEST}/server" || exit 1
+        $CMD > /dev/null 2>&1 &
+        printf "%s" "$!" > "${PID_FILE}"
+    ) || {
+        log_msg "Failed to start process from ${TRIM_APPDEST}/server"
+        return 1
+    }
+
     return 0
 }
 

@@ -19,7 +19,7 @@ use crate::db::manager::DatabaseManager;
 use crate::db::repository::BookRepository;
 use axum::{extract::Request, middleware, middleware::Next, response::Json, routing::get, Router};
 use serde_json::{json, Value};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::signal;
 use tower::ServiceBuilder;
@@ -78,6 +78,10 @@ impl ApiServer {
         let library_repo = Arc::new(crate::db::repository::LibraryRepository::new(db.clone()));
         let chapter_repo = Arc::new(crate::db::repository::ChapterRepository::new(db.clone()));
         let series_repo = Arc::new(crate::db::repository::SeriesRepository::new(db.clone()));
+        let playlist_repo = Arc::new(crate::db::repository::PlaylistRepository::new(db.clone()));
+        let notification_repo = Arc::new(
+            crate::db::repository::NotificationWebhookRepository::new(db.clone()),
+        );
 
         // 自动派生主密钥（基于机器特征，无需用户配置）
         let encryption_key =
@@ -175,6 +179,7 @@ impl ApiServer {
             .with_plugin_manager(plugin_manager.clone())
             .with_storage_service(storage_service.clone())
             .with_merge_service(merge_service.clone())
+            .with_notification_repo(notification_repo.clone())
             .with_encryption_key(Arc::new(encryption_key)),
         );
 
@@ -242,6 +247,8 @@ impl ApiServer {
             library_repo,
             chapter_repo,
             series_repo,
+            playlist_repo,
+            notification_repo,
             book_service,
             scraper_service,
             plugin_manager,
@@ -272,6 +279,22 @@ impl ApiServer {
             .route(
                 "/api/auth/login",
                 axum::routing::post(crate::auth::handlers::login),
+            )
+            .route(
+                "/api/auth/token-login",
+                axum::routing::post(crate::auth::handlers::token_login),
+            )
+            .route(
+                "/api/auth/session-restore",
+                axum::routing::post(crate::auth::handlers::session_restore),
+            )
+            .route(
+                "/api/v1/auth/token-login",
+                axum::routing::post(crate::auth::handlers::token_login),
+            )
+            .route(
+                "/api/v1/auth/session-restore",
+                axum::routing::post(crate::auth::handlers::session_restore),
             )
             .route(
                 "/api/auth/register",
@@ -351,8 +374,10 @@ impl ApiServer {
     ///
     /// This method will block until the server is shut down gracefully.
     pub async fn serve(self) -> anyhow::Result<()> {
-        let addr = format!("{}:{}", self.config.host, self.config.port);
-        let socket_addr: SocketAddr = addr.parse()?;
+        let socket_addr = match self.config.host.parse::<IpAddr>() {
+            Ok(ip) => SocketAddr::new(ip, self.config.port),
+            Err(_) => format!("{}:{}", self.config.host, self.config.port).parse()?,
+        };
 
         info!(
             host = %self.config.host,
@@ -368,9 +393,13 @@ impl ApiServer {
         info!(addr = %socket_addr, "HTTP 服务器正在监听");
 
         // Serve with graceful shutdown
-        axum::serve(listener, self.router)
-            .with_graceful_shutdown(shutdown_signal())
-            .await?;
+        axum::serve(
+            listener,
+            self.router
+                .into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
 
         info!("HTTP server shut down gracefully");
 

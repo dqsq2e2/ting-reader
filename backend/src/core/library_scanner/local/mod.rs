@@ -4,7 +4,8 @@ mod metadata;
 use super::{LibraryScanner, ScanResult, ScanStatus};
 use crate::core::error::Result;
 use crate::core::library_scanner::shared::{
-    parse_chapter_range_dir_name, select_mergeable_range_group, ChapterRangeDir,
+    infer_series_directories, parse_chapter_range_dir_name, select_mergeable_range_group,
+    ChapterRangeDir, SeriesDirectoryCandidate,
 };
 use crate::core::nfo_manager::BookMetadata;
 use crate::db::repository::Repository;
@@ -63,6 +64,7 @@ impl LibraryScanner {
         // 2. Process each directory group as a book
         let (dir_groups, coalesced_range_dirs) =
             coalesce_local_range_directory_groups(path, dir_groups);
+        let inferred_series = infer_local_series_directories(path, dir_groups.keys());
         let total_groups = dir_groups.len();
         let mut processed_count = 0;
 
@@ -164,6 +166,19 @@ impl LibraryScanner {
                         ScanStatus::Skipped => scan_result.books_skipped += 1,
                     }
                     found_book_ids.insert(book_id.clone());
+                    if let Some(series_info) = inferred_series.get(&dir) {
+                        if let Err(e) = self
+                            .link_book_to_inferred_series(library_id, &book_id, series_info)
+                            .await
+                        {
+                            warn!(
+                                path = ?dir,
+                                book_id = %book_id,
+                                error = %e,
+                                "Failed to link book to inferred series"
+                            );
+                        }
+                    }
                     if let Some(child_dirs) = coalesced_range_dirs.get(&dir) {
                         for child_dir in child_dirs {
                             if let Some((child_book_id, manual_corrected, _)) =
@@ -940,4 +955,30 @@ fn coalesce_local_range_directory_groups(
     }
 
     (dir_groups, coalesced_range_dirs)
+}
+
+fn infer_local_series_directories<'a>(
+    root: &Path,
+    dirs: impl Iterator<Item = &'a PathBuf>,
+) -> HashMap<PathBuf, crate::core::library_scanner::shared::InferredSeriesInfo> {
+    let candidates: Vec<SeriesDirectoryCandidate<PathBuf>> = dirs
+        .filter_map(|dir| {
+            let parent = dir.parent()?;
+            let name = dir.file_name()?.to_str()?;
+            let parent_name = parent
+                .file_name()
+                .and_then(|value| value.to_str())
+                .or_else(|| root.file_name().and_then(|value| value.to_str()))
+                .unwrap_or("");
+
+            Some(SeriesDirectoryCandidate {
+                key: dir.clone(),
+                parent_key: parent.to_string_lossy().to_string(),
+                parent_name: parent_name.to_string(),
+                name: name.to_string(),
+            })
+        })
+        .collect();
+
+    infer_series_directories(&candidates)
 }

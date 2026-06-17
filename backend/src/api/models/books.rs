@@ -139,7 +139,7 @@ pub struct UpdateBookRequest {
 }
 
 /// Response for book operations
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BookResponse {
     pub id: String,
@@ -387,7 +387,7 @@ pub struct UpdateSeriesRequest {
     pub book_ids: Option<Vec<String>>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SeriesResponse {
     pub id: String,

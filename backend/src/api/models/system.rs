@@ -2,6 +2,74 @@ use serde::{Deserialize, Serialize};
 
 // Metrics API models
 
+/// Response for admin statistics dashboard
+#[derive(Debug, Serialize)]
+pub struct AdminStatisticsResponse {
+    pub overview: AdminStatisticsOverview,
+    pub library_breakdown: Vec<LibraryStatistics>,
+    pub user_activity: Vec<UserActivityStatistics>,
+    pub recent_activity: Vec<RecentActivityPoint>,
+    pub top_books: Vec<BookActivityStatistics>,
+    pub generated_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AdminStatisticsOverview {
+    pub total_books: i64,
+    pub total_chapters: i64,
+    pub total_duration: i64,
+    pub total_libraries: i64,
+    pub local_libraries: i64,
+    pub webdav_libraries: i64,
+    pub total_users: i64,
+    pub admin_users: i64,
+    pub active_users: i64,
+    pub total_progress_records: i64,
+    pub total_listen_seconds: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LibraryStatistics {
+    pub id: String,
+    pub name: String,
+    pub library_type: String,
+    pub total_books: i64,
+    pub total_chapters: i64,
+    pub total_duration: i64,
+    pub last_scanned_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UserActivityStatistics {
+    pub id: String,
+    pub username: String,
+    pub role: String,
+    pub listened_books: i64,
+    pub progress_records: i64,
+    pub listen_seconds: f64,
+    pub last_active_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RecentActivityPoint {
+    pub date: String,
+    pub active_users: i64,
+    pub progress_updates: i64,
+    pub listen_seconds: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BookActivityStatistics {
+    pub id: String,
+    pub title: Option<String>,
+    pub author: Option<String>,
+    pub library_id: String,
+    pub library_name: Option<String>,
+    pub listeners: i64,
+    pub progress_updates: i64,
+    pub listen_seconds: f64,
+}
+
 /// Response for metrics endpoint
 #[derive(Debug, Serialize)]
 pub struct MetricsResponse {

@@ -40,6 +40,7 @@ pub async fn list_plugins(State(state): State<AppState>) -> Result<impl IntoResp
             permissions: Some(info.permissions),
             license: info.license,
             repo: info.repo,
+            scraper: info.scraper,
         })
         .collect();
 
@@ -88,6 +89,7 @@ pub async fn get_plugin_detail(
             .collect(),
         supported_extensions: metadata.supported_extensions.clone(),
         config_schema: metadata.config_schema.clone(),
+        scraper: metadata.scraper.clone(),
         stats: Some(PluginStatsResponse {
             total_calls: plugin_info.total_calls,
             successful_calls: plugin_info.successful_calls,
