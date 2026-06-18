@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import apiClient from '../api/client';
-import type { Book, Chapter } from '../types';
+import type { Book, Chapter, Progress } from '../types';
 import { usePlayerStore } from '../store/playerStore';
 
 import ChapterManagerModal from '../components/ChapterManagerModal';
@@ -39,6 +39,11 @@ const BookDetailPage: React.FC = () => {
   const { user } = useAuthStore();
   const [book, setBook] = useState<Book | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [chapterTotals, setChapterTotals] = useState({ total: 0, main: 0, extra: 0 });
+  const [chapterPageLoading, setChapterPageLoading] = useState(false);
+  const [bookProgress, setBookProgress] = useState<Progress | null>(null);
+  const [chapterManagerChapters, setChapterManagerChapters] = useState<Chapter[]>([]);
+  const [chapterManagerLoading, setChapterManagerLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isFavorite, setIsFavorite] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -62,6 +67,7 @@ const BookDetailPage: React.FC = () => {
   const [highlightedChapterId, setHighlightedChapterId] = useState<string | null>(null);
   const playButtonContainerRef = useRef<HTMLDivElement>(null);
   const [isPlayButtonTextOverflowing, setIsPlayButtonTextOverflowing] = useState(false);
+  const allChaptersCacheRef = useRef<Chapter[] | null>(null);
 
   // User Settings
   const [coverShape, setCoverShape] = useState<'rect' | 'square'>('rect');
@@ -100,6 +106,10 @@ const BookDetailPage: React.FC = () => {
   useEffect(() => {
     hasInitialScrolled.current = false;
     setHighlightedChapterId(null);
+    allChaptersCacheRef.current = null;
+    setChapters([]);
+    setChapterTotals({ total: 0, main: 0, extra: 0 });
+    setBookProgress(null);
   }, [id]);
 
   // Clear highlighted chapter when current chapter changes (user plays a new chapter)
@@ -121,31 +131,24 @@ const BookDetailPage: React.FC = () => {
     }
   };
 
-  const { mainChapters, extraChapters } = React.useMemo(() => {
-    return {
-      mainChapters: chapters.filter(c => !c.isExtra),
-      extraChapters: chapters.filter(c => c.isExtra)
-    };
-  }, [chapters]);
-
-  const currentChapters = activeTab === 'main' ? mainChapters : extraChapters;
+  const activeTotal = activeTab === 'main' ? chapterTotals.main : chapterTotals.extra;
 
   const chaptersPerGroup = 100;
   const groups = React.useMemo(() => {
     const g = [];
-    for (let i = 0; i < currentChapters.length; i += chaptersPerGroup) {
-      const slice = currentChapters.slice(i, i + chaptersPerGroup);
+    for (let i = 0; i < activeTotal; i += chaptersPerGroup) {
       g.push({
         start: i + 1,
-        end: i + slice.length,
-        chapters: slice
+        end: Math.min(i + chaptersPerGroup, activeTotal),
+        offset: i,
       });
     }
     return g;
-  }, [currentChapters]);
+  }, [activeTotal]);
 
   const isPlaying = usePlayerStore((state) => state.isPlaying);
   const playChapter = usePlayerStore((state) => state.playChapter);
+  const storeChapters = usePlayerStore((state) => state.chapters);
 
   useEffect(() => {
     if (book) {
@@ -158,14 +161,19 @@ const BookDetailPage: React.FC = () => {
     const fetchBookDetails = async () => {
       try {
         setLoading(true);
-        const [bookRes, chaptersRes, settingsRes] = await Promise.all([
+        const progressRequest = apiClient
+          .get(`/api/progress/${id}`)
+          .then(res => res.data as Progress)
+          .catch(() => null);
+        const [bookRes, progressRes, settingsRes] = await Promise.all([
           apiClient.get(`/api/books/${id}`),
-          apiClient.get(`/api/books/${id}/chapters`),
+          progressRequest,
           apiClient.get('/api/settings')
         ]);
         const fetchedBook = bookRes.data;
         setBook(fetchedBook);
-        setChapters(chaptersRes.data);
+        setBookProgress(progressRes);
+        setHighlightedChapterId(progressRes?.chapterId || null);
         setIsFavorite(fetchedBook.isFavorite);
         setCurrentGroupIndex(0); // Reset group index when book changes
 
@@ -183,31 +191,98 @@ const BookDetailPage: React.FC = () => {
     fetchBookDetails();
   }, [id]);
 
+  const fetchChapterPage = React.useCallback(async (options?: {
+    tab?: 'main' | 'extra';
+    groupIndex?: number;
+    targetChapterId?: string | null;
+  }) => {
+    if (!id) return;
+
+    const requestedTab = options?.tab ?? activeTab;
+    const requestedGroupIndex = options?.groupIndex ?? currentGroupIndex;
+    const params: Record<string, unknown> = {
+      limit: chaptersPerGroup,
+      offset: requestedGroupIndex * chaptersPerGroup,
+      order: 'asc',
+    };
+    if (!(options?.targetChapterId && !options?.tab)) {
+      params.chapterType = requestedTab;
+    }
+    if (options?.targetChapterId) {
+      params.targetChapterId = options.targetChapterId;
+    }
+
+    setChapterPageLoading(true);
+    try {
+      const res = await apiClient.get(`/api/books/${id}/chapters`, { params });
+      const data = res.data;
+      setChapters(data.chapters || []);
+      setChapterTotals({
+        total: data.total ?? 0,
+        main: data.mainTotal ?? 0,
+        extra: data.extraTotal ?? 0,
+      });
+
+      const resolvedTab = data.chapterType === 'extra' ? 'extra' : 'main';
+      const resolvedGroupIndex = Math.floor((data.offset || 0) / chaptersPerGroup);
+      if (resolvedTab !== activeTab) {
+        setActiveTab(resolvedTab);
+      }
+      if (resolvedGroupIndex !== currentGroupIndex) {
+        setCurrentGroupIndex(resolvedGroupIndex);
+      }
+      return {
+        tab: resolvedTab,
+        groupIndex: resolvedGroupIndex,
+      };
+    } catch (err) {
+      console.error('获取章节分页失败', err);
+      setChapters([]);
+      return null;
+    } finally {
+      setChapterPageLoading(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, activeTab, currentGroupIndex]);
+
+  useEffect(() => {
+    if (!book) return;
+    const targetChapterId = !hasInitialScrolled.current ? bookProgress?.chapterId : null;
+    fetchChapterPage(
+      targetChapterId
+        ? { targetChapterId }
+        : { tab: activeTab, groupIndex: currentGroupIndex }
+    );
+    hasInitialScrolled.current = true;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [book?.id, activeTab, currentGroupIndex]);
+
   // Find the chapter to resume or highlight
   const resumeChapter = React.useMemo(() => {
-    if (!book || chapters.length === 0) return null;
+    if (!book) return null;
 
     // 1. Priority: Currently playing chapter if it belongs to this book
     if (currentChapter && currentChapter.bookId === book.id) {
       return currentChapter;
-    } 
-    
-    // 2. Fallback: Most recently played chapter from history
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const playedChapters = [...chapters].filter(c => (c as any).progressUpdatedAt);
-    if (playedChapters.length > 0) {
-      playedChapters.sort((a, b) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return new Date((b as any).progressUpdatedAt).getTime() - new Date((a as any).progressUpdatedAt).getTime();
-      });
-      return playedChapters[0];
     }
-    return null;
-  }, [book, chapters, currentChapter]);
+
+    if (bookProgress?.chapterId) {
+      const progressChapter = chapters.find(c => c.id === bookProgress.chapterId);
+      if (progressChapter) {
+        return {
+          ...progressChapter,
+          progressPosition: bookProgress.position,
+          progressUpdatedAt: bookProgress.updatedAt,
+        };
+      }
+    }
+
+    return chapters[0] || null;
+  }, [book, chapters, currentChapter, bookProgress]);
 
   // Auto-highlight current chapter logic (without scroll)
   useEffect(() => {
-    if (book?.id !== id) return; 
+    if (book?.id !== id) return;
 
     if (resumeChapter) {
       setHighlightedChapterId(resumeChapter.id);
@@ -219,14 +294,14 @@ const BookDetailPage: React.FC = () => {
       if (el) {
         el.scrollIntoView({ block: 'center', behavior: 'smooth' });
       }
-      
+
       const groupTab = document.getElementById(`group-tab-${groupIndex}`);
       const container = scrollRef.current;
       if (groupTab && container) {
         const containerWidth = container.offsetWidth;
         const tabWidth = groupTab.offsetWidth;
         const tabLeft = groupTab.offsetLeft;
-        
+
         container.scrollTo({
           left: tabLeft - containerWidth / 2 + tabWidth / 2,
           behavior: 'smooth'
@@ -234,59 +309,68 @@ const BookDetailPage: React.FC = () => {
       }
   };
 
-  const scrollToChapterElement = (chapterId: string, list: Chapter[]) => {
-      // Calculate group index
-      const index = list.findIndex(c => c.id === chapterId);
-      if (index !== -1) {
-        const groupIndex = Math.floor(index / chaptersPerGroup);
-        if (currentGroupIndex !== groupIndex) {
-          setCurrentGroupIndex(groupIndex);
-          // Wait for group switch
-          setTimeout(() => doScroll(chapterId, groupIndex), 100);
-          return;
-        }
-        doScroll(chapterId, groupIndex);
-      }
+  const scrollToChapterElement = (chapterId: string, groupIndex = currentGroupIndex) => {
+      doScroll(chapterId, groupIndex);
   };
 
-  const handlePlayClick = () => {
+  const fetchAllChaptersForPlayback = async () => {
+    if (allChaptersCacheRef.current) return allChaptersCacheRef.current;
+    if (book && storeChapters.length > 0 && storeChapters.some(c => c.bookId === book.id)) {
+      allChaptersCacheRef.current = storeChapters;
+      return storeChapters;
+    }
+    const res = await apiClient.get(`/api/books/${id}/chapters`);
+    const allChapters = (res.data || []) as Chapter[];
+    allChaptersCacheRef.current = allChapters;
+    return allChapters;
+  };
+
+  const playChapterWithFullQueue = async (chapter: Chapter) => {
+    if (!book) return;
+    const allChapters = await fetchAllChaptersForPlayback();
+    const resolvedChapter = allChapters.find(c => c.id === chapter.id) || chapter;
+    playChapter(book, allChapters, resolvedChapter);
+  };
+
+  const openChapterManager = async () => {
+    if (!id) return;
+    setChapterManagerLoading(true);
+    setIsChapterManagerOpen(true);
+    try {
+      const allChapters = await fetchAllChaptersForPlayback();
+      setChapterManagerChapters(allChapters);
+    } catch (err) {
+      console.error('获取章节管理列表失败', err);
+      setChapterManagerChapters([]);
+    } finally {
+      setChapterManagerLoading(false);
+    }
+  };
+
+  const handlePlayClick = async () => {
     if (resumeChapter) {
       // If we have a resume chapter, play it and scroll to it
-      playChapter(book!, currentChapters, resumeChapter);
-      
+      await playChapterWithFullQueue(resumeChapter);
+
       // Scroll logic
       const targetChapter = resumeChapter;
-      
+
       // Determine if target chapter is in main or extra
-      const inMain = mainChapters.find(c => c.id === targetChapter.id);
-      const inExtra = extraChapters.find(c => c.id === targetChapter.id);
-      
-      let targetList = currentChapters;
-      
+      const inMain = activeTab === 'main' && chapters.some(c => c.id === targetChapter.id);
+      const inExtra = activeTab === 'extra' && chapters.some(c => c.id === targetChapter.id);
+
       if (inMain) {
-        if (activeTab !== 'main') {
-          setActiveTab('main');
-          // Wait for tab switch then continue
-          setTimeout(() => scrollToChapterElement(targetChapter.id, mainChapters), 100);
-          return;
-        }
-        targetList = mainChapters;
+        scrollToChapterElement(targetChapter.id);
       } else if (inExtra) {
-        if (activeTab !== 'extra') {
-          setActiveTab('extra');
-          setTimeout(() => scrollToChapterElement(targetChapter.id, extraChapters), 100);
-          return;
-        }
-        targetList = extraChapters;
+        scrollToChapterElement(targetChapter.id);
+      } else {
+        const page = await fetchChapterPage({ targetChapterId: targetChapter.id });
+        setTimeout(() => doScroll(targetChapter.id, page?.groupIndex ?? currentGroupIndex), 120);
       }
-      
-      scrollToChapterElement(targetChapter.id, targetList);
     } else {
       // No play history - play first main chapter
-      if (mainChapters.length > 0) {
-        playChapter(book!, chapters, mainChapters[0]);
-      } else if (chapters.length > 0) {
-        playChapter(book!, chapters, chapters[0]);
+      if (chapters.length > 0) {
+        await playChapterWithFullQueue(chapters[0]);
       }
     }
   };
@@ -579,7 +663,7 @@ const BookDetailPage: React.FC = () => {
                 </div>
                 <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
                   <ListMusic size={16} className="text-primary-500" />
-                  <span className="font-bold">{chapters.length} 章节</span>
+                  <span className="font-bold">{chapterTotals.total} 章节</span>
                 </div>
               </div>
 
@@ -749,7 +833,7 @@ const BookDetailPage: React.FC = () => {
             章节列表
             {user?.role === 'admin' && (
               <button 
-                onClick={() => setIsChapterManagerOpen(true)}
+                onClick={openChapterManager}
                 className="ml-2 p-1.5 text-slate-400 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
                 title="管理章节"
               >
@@ -758,7 +842,7 @@ const BookDetailPage: React.FC = () => {
             )}
           </h2>
           
-          {extraChapters.length > 0 && (
+          {chapterTotals.extra > 0 && (
             <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl self-start">
               <button 
                 onClick={() => { setActiveTab('main'); setCurrentGroupIndex(0); }}
@@ -768,7 +852,7 @@ const BookDetailPage: React.FC = () => {
                     : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
                 }`}
               >
-                正文 ({mainChapters.length})
+                正文 ({chapterTotals.main})
               </button>
               <button 
                 onClick={() => { setActiveTab('extra'); setCurrentGroupIndex(0); }}
@@ -778,7 +862,7 @@ const BookDetailPage: React.FC = () => {
                     : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
                 }`}
               >
-                番外 ({extraChapters.length})
+                番外 ({chapterTotals.extra})
               </button>
             </div>
           )}
@@ -827,8 +911,15 @@ const BookDetailPage: React.FC = () => {
         )}
 
         <div className="space-y-3">
-          {(groups[currentGroupIndex]?.chapters || currentChapters).map((chapter, index) => {
-            const actualIndex = currentGroupIndex * chaptersPerGroup + index;
+          {chapterPageLoading && chapters.length === 0 ? (
+            <div className="flex items-center justify-center py-10 text-slate-400">
+              <Loader2 className="w-5 h-5 animate-spin mr-2" />
+              加载章节...
+            </div>
+          ) : chapters.length === 0 ? (
+            <div className="py-10 text-center text-slate-400">暂无章节</div>
+          ) : chapters.map((chapter, index) => {
+            const actualIndex = (groups[currentGroupIndex]?.offset || 0) + index;
             const isCurrent = currentChapter?.id === chapter.id;
             const isActive = isCurrent || highlightedChapterId === chapter.id;
 
@@ -836,7 +927,7 @@ const BookDetailPage: React.FC = () => {
               <div 
                 key={chapter.id}
                 id={`chapter-${chapter.id}`}
-                onClick={() => playChapter(book!, currentChapters, chapter)}
+                onClick={() => playChapterWithFullQueue(chapter)}
                 className={`group flex items-start sm:items-center justify-between gap-1 min-[361px]:gap-1.5 min-[431px]:gap-2 p-1.5 min-[361px]:p-2 min-[431px]:p-2.5 sm:p-4 rounded-md min-[361px]:rounded-lg min-[431px]:rounded-xl sm:rounded-2xl cursor-pointer transition-all border ${
                   isActive 
                     ? 'bg-opacity-10 border-opacity-20' 
@@ -900,7 +991,7 @@ const BookDetailPage: React.FC = () => {
                       className="w-6 h-6 min-[361px]:w-7 min-[361px]:h-7 min-[431px]:w-8 min-[431px]:h-8 sm:w-10 sm:h-10 rounded-full bg-slate-50 dark:bg-slate-800 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer hover:scale-105"
                       onClick={(e) => {
                         e.stopPropagation();
-                        playChapter(book!, currentChapters, chapter);
+                        playChapterWithFullQueue(chapter);
                       }}
                     >
                       <Play size={12} className="text-primary-600 ml-0.5 w-3 h-3 min-[431px]:w-3.5 min-[431px]:h-3.5 sm:ml-1 sm:w-4 sm:h-4" fill="currentColor" style={effectiveThemeColor ? { color: toSolidColor(effectiveThemeColor) } : {}} />
@@ -914,15 +1005,25 @@ const BookDetailPage: React.FC = () => {
       </div>
 
       {/* Chapter Manager Modal */}
-      {isChapterManagerOpen && book && (
+      {isChapterManagerOpen && book && chapterManagerLoading && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
+          <div className="relative bg-white dark:bg-slate-900 rounded-3xl shadow-2xl px-8 py-6 flex items-center gap-3 text-slate-600 dark:text-slate-300">
+            <Loader2 className="w-5 h-5 animate-spin text-primary-600" />
+            加载章节管理...
+          </div>
+        </div>
+      )}
+      {isChapterManagerOpen && book && !chapterManagerLoading && (
         <ChapterManagerModal
           book={book}
           bookId={book.id}
-          initialChapters={chapters}
+          initialChapters={chapterManagerChapters}
           onClose={() => setIsChapterManagerOpen(false)}
           onSave={() => {
-            // Reload chapters
-            apiClient.get(`/api/books/${id}/chapters`).then(res => setChapters(res.data));
+            allChaptersCacheRef.current = null;
+            setChapterManagerChapters([]);
+            fetchChapterPage();
           }}
         />
       )}
@@ -935,7 +1036,8 @@ const BookDetailPage: React.FC = () => {
           onSave={() => {
             // Reload book details
             apiClient.get(`/api/books/${id}`).then(res => setBook(res.data));
-            apiClient.get(`/api/books/${id}/chapters`).then(res => setChapters(res.data));
+            allChaptersCacheRef.current = null;
+            fetchChapterPage();
           }}
         />
       )}
