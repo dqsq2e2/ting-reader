@@ -71,7 +71,7 @@
   "book": null,
   "series": {
     "id": "string",
-    "libraryId": "string",
+    "library_id": "string",
     "title": "系列名称",
     "books": []
   }
@@ -83,7 +83,7 @@
 - `order` 从 1 开始，表示书单内手动排序。
 - `book` 和 `series` 二选一。
 - 系列条目会作为系列保存在书单中，不会拆成多个书籍条目。
-- `series` 内部结构为 `SeriesResponse`，结构见 [series.md](series.md)。当前 `SeriesResponse` 字段按既有实现返回。
+- `series` 内部结构为 `SeriesResponse`，结构见 [series.md](series.md)。
 
 ### CreatePlaylistRequest
 

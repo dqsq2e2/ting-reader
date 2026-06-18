@@ -49,7 +49,7 @@
 }
 ```
 
-登录成功会写入登录日志，并触发 `user.login` Webhook，`loginMethod` 为 `password`。
+登录成功会写入登录日志，并触发 `user.login` Webhook，`login_method` 为 `password`。
 
 ---
 
@@ -99,7 +99,7 @@
 }
 ```
 
-恢复成功可能触发 `user.login` Webhook，`loginMethod` 为 `session_restore`。服务端会按用户和会话 ID 做短期去重，避免刷新页面刷登录日志。
+恢复成功可能触发 `user.login` Webhook，`login_method` 为 `session_restore`。服务端会按用户和会话 ID 做短期去重，避免刷新页面刷登录日志。
 
 ---
 
@@ -133,7 +133,7 @@
 }
 ```
 
-登录成功会写入登录日志，并触发 `user.login` Webhook，`loginMethod` 为 `jwt_token`。
+登录成功会写入登录日志，并触发 `user.login` Webhook，`login_method` 为 `jwt_token`。
 
 ---
 

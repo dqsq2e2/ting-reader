@@ -39,13 +39,13 @@
   "title": "用户登录",
   "message": "用户 admin 登录成功",
   "data": {
-    "userId": "string",
+    "user_id": "string",
     "username": "admin",
     "role": "admin",
-    "realIp": "127.0.0.1",
-    "userAgent": "Mozilla/5.0 ...",
+    "real_ip": "127.0.0.1",
+    "user_agent": "Mozilla/5.0 ...",
     "device": "Windows / Chrome",
-    "loginMethod": "password | session_restore | jwt_token"
+    "login_method": "password | session_restore | jwt_token"
   },
   "occurred_at": "RFC3339"
 }

@@ -71,7 +71,6 @@ pub struct ScraperSearchRequest {
 
 /// Information about a scraper source
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ScraperSourceInfo {
     /// Plugin ID
     pub id: String,
@@ -140,7 +139,6 @@ pub struct UpdateBookRequest {
 
 /// Response for book operations
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct BookResponse {
     pub id: String,
     pub library_id: String,
@@ -204,7 +202,6 @@ pub struct BooksListResponse {
 
 /// Response for chapter operations
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ChapterResponse {
     pub id: String,
     pub book_id: String,
@@ -246,15 +243,12 @@ pub struct ChaptersListResponse {
 pub struct ChaptersQuery {
     pub offset: Option<usize>,
     pub limit: Option<usize>,
-    #[serde(alias = "chapterType")]
     pub chapter_type: Option<String>,
     pub order: Option<String>,
-    #[serde(alias = "targetChapterId")]
     pub target_chapter_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ChaptersPageResponse {
     pub chapters: Vec<ChapterResponse>,
     pub total: usize,
@@ -289,7 +283,6 @@ pub struct TagsResponse {
 
 /// Response for statistics
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct StatsResponse {
     pub total_books: usize,
     pub total_chapters: usize,
@@ -412,7 +405,6 @@ pub struct UpdateSeriesRequest {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SeriesResponse {
     pub id: String,
     pub library_id: String,

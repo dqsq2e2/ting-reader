@@ -130,8 +130,8 @@ HLS 流跳转（无需认证）。
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | path | string | 图片路径或 URL |
-| libraryId | string | 媒体库 ID（可选） |
-| bookId | string | 书籍 ID（可选） |
+| library_id | string | 媒体库 ID（可选） |
+| book_id | string | 书籍 ID（可选） |
 
 **特殊路径：**
 - `embedded://first-chapter`：从音频文件提取封面（暂未实现）
@@ -185,14 +185,14 @@ HLS 流跳转（无需认证）。
 {
   "success": true,
   "message": "Chapter xxx cached successfully",
-  "cacheInfo": {
-    "chapterId": "string",
-    "bookId": "string",
-    "bookTitle": "string",
-    "chapterTitle": "string",
-    "fileSize": 0,
-    "createdAt": "RFC3339",
-    "coverUrl": "string"
+  "cache_info": {
+    "chapter_id": "string",
+    "book_id": "string",
+    "book_title": "string",
+    "chapter_title": "string",
+    "file_size": 0,
+    "created_at": "RFC3339",
+    "cover_url": "string"
   }
 }
 ```

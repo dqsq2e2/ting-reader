@@ -223,8 +223,6 @@
 | order | string | 排序方向（可选）：`asc` 正序、`desc` 逆序 |
 | target_chapter_id | string | 目标章节 ID（可选）。传入后返回包含该章节的分页，并自动解析正文/番外类型 |
 
-> Web 端请求参数会统一从 camelCase 转为 snake_case；后端也兼容 `chapterType` 和 `targetChapterId`。
-
 **响应：** `200 OK`
 
 无分页参数时返回完整章节数组：
@@ -233,15 +231,15 @@
 [
   {
     "id": "string",
-    "bookId": "string",
+    "book_id": "string",
     "title": "string | null",
     "path": "string",
     "duration": 0,
-    "chapterIndex": 0,
-    "isExtra": 0,
-    "createdAt": "RFC3339",
-    "progressPosition": 0.0,
-    "progressUpdatedAt": "RFC3339 | null"
+    "chapter_index": 0,
+    "is_extra": 0,
+    "created_at": "RFC3339",
+    "progress_position": 0.0,
+    "progress_updated_at": "RFC3339 | null"
   }
 ]
 ```
@@ -253,23 +251,23 @@
   "chapters": [
     {
       "id": "string",
-      "bookId": "string",
+      "book_id": "string",
       "title": "string | null",
       "path": "string",
       "duration": 0,
-      "chapterIndex": 0,
-      "isExtra": 0,
-      "createdAt": "RFC3339",
-      "progressPosition": 0.0,
-      "progressUpdatedAt": "RFC3339 | null"
+      "chapter_index": 0,
+      "is_extra": 0,
+      "created_at": "RFC3339",
+      "progress_position": 0.0,
+      "progress_updated_at": "RFC3339 | null"
     }
   ],
   "total": 0,
-  "mainTotal": 0,
-  "extraTotal": 0,
+  "main_total": 0,
+  "extra_total": 0,
   "offset": 0,
   "limit": 100,
-  "chapterType": "main",
+  "chapter_type": "main",
   "order": "asc"
 }
 ```

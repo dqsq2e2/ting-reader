@@ -30,7 +30,7 @@ export const getCoverUrl = (url?: string, libraryId?: string, bookId?: string) =
     // 因为这里我们主要是在请求外部 URL 的代理
     let coverUrl = `${baseUrl}/api/proxy/cover?path=${encodeURIComponent(url)}`;
     if (libraryId) {
-      coverUrl += `&libraryId=${libraryId}`;
+      coverUrl += `&library_id=${libraryId}`;
     }
     if (token) {
       coverUrl += `&token=${token}`;
@@ -42,10 +42,10 @@ export const getCoverUrl = (url?: string, libraryId?: string, bookId?: string) =
   
   // If we have a libraryId, use the proxy endpoint
   if (libraryId) {
-    let coverUrl = `${baseUrl}/api/proxy/cover?path=${encodeURIComponent(url)}&libraryId=${libraryId}`;
+    let coverUrl = `${baseUrl}/api/proxy/cover?path=${encodeURIComponent(url)}&library_id=${libraryId}`;
     
     if (url === 'embedded://first-chapter' && bookId) {
-      coverUrl += `&bookId=${bookId}`;
+      coverUrl += `&book_id=${bookId}`;
     }
     
     if (token) {

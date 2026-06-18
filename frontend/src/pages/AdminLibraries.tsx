@@ -533,7 +533,7 @@ const AdminLibraries: React.FC = () => {
 
   const fetchFolders = async (subPath: string) => {
     try {
-      const response = await apiClient.get(`/api/storage/folders?subPath=${encodeURIComponent(subPath)}`);
+      const response = await apiClient.get('/api/storage/folders', { params: { sub_path: subPath } });
       setAvailableFolders(response.data);
     } catch (err) {
       console.error('获取文件夹失败', err);

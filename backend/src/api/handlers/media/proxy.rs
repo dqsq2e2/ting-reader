@@ -10,7 +10,6 @@ use axum::{
 
 /// Query parameters for cover image proxy
 #[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ProxyCoverQuery {
     pub path: String,
     pub library_id: Option<String>,

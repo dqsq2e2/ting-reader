@@ -136,13 +136,13 @@ pub async fn create_library(
             "新增媒体库",
             format!("管理员 {} 创建了媒体库 {}", user.username, library.name),
             serde_json::json!({
-                "actorId": user.id,
+                "actor_id": user.id,
                 "actor": user.username,
-                "libraryId": library.id,
-                "libraryName": library.name,
-                "libraryType": library.library_type,
+                "library_id": library.id,
+                "library_name": library.name,
+                "library_type": library.library_type,
                 "url": library.url,
-                "rootPath": library.root_path,
+                "root_path": library.root_path,
             }),
         ),
     );
@@ -373,13 +373,13 @@ pub async fn delete_library(
             "删除媒体库",
             format!("管理员 {} 删除了媒体库 {}", user.username, library.name),
             serde_json::json!({
-                "actorId": user.id,
+                "actor_id": user.id,
                 "actor": user.username,
-                "libraryId": library.id,
-                "libraryName": library.name,
-                "libraryType": library.library_type,
+                "library_id": library.id,
+                "library_name": library.name,
+                "library_type": library.library_type,
                 "url": library.url,
-                "rootPath": library.root_path,
+                "root_path": library.root_path,
             }),
         ),
     );
@@ -473,7 +473,7 @@ pub async fn get_storage_folders(
     drop(config);
 
     let sub_path = params
-        .get("subPath")
+        .get("sub_path")
         .or_else(|| params.get("path"))
         .map(|s| s.as_str())
         .unwrap_or("");

@@ -235,9 +235,9 @@ pub async fn get_system_logs(
                     module: module.to_string(),
                     message,
                     fields: Some(serde_json::json!({
-                        "taskId": task.id.clone(),
-                        "taskStatus": task.status.clone(),
-                        "taskType": task.task_type.clone(),
+                        "task_id": task.id.clone(),
+                        "task_status": task.status.clone(),
+                        "task_type": task.task_type.clone(),
                     })),
                     task_id: Some(task.id),
                     task_status: Some(task.status),

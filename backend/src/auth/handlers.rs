@@ -61,13 +61,13 @@ fn record_login_success(
             "用户登录",
             format!("用户 {} 登录成功", user.username),
             serde_json::json!({
-                "userId": user.id,
+                "user_id": user.id,
                 "username": user.username,
                 "role": user.role,
-                "realIp": request_info.real_ip,
-                "userAgent": request_info.user_agent,
+                "real_ip": request_info.real_ip,
+                "user_agent": request_info.user_agent,
                 "device": request_info.device,
-                "loginMethod": login_method,
+                "login_method": login_method,
             }),
         ),
     );

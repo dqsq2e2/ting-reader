@@ -11,13 +11,13 @@
   {
     "id": "string",
     "name": "string",
-    "libraryType": "local | webdav",
+    "library_type": "local | webdav",
     "url": "string",
     "username": "string | null",
-    "rootPath": "string",
-    "lastScannedAt": "RFC3339 | null",
-    "createdAt": "RFC3339",
-    "scraperConfig": {}
+    "root_path": "string",
+    "last_scanned_at": "RFC3339 | null",
+    "created_at": "RFC3339",
+    "scraper_config": {}
   }
 ]
 ```
@@ -45,7 +45,7 @@
 }
 ```
 
-**ScraperConfig 结构：**
+**scraper_config 结构：**
 
 ```json
 {
@@ -185,7 +185,7 @@
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| subPath | string | 子路径（可选） |
+| sub_path | string | 子路径（可选） |
 
 **响应：** `200 OK`
 
@@ -194,7 +194,7 @@
   {
     "name": "string",
     "path": "string",
-    "isDirectory": true
+    "is_directory": true
   }
 ]
 ```
