@@ -242,6 +242,30 @@ pub struct ChaptersListResponse {
     pub total: usize,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ChaptersQuery {
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
+    #[serde(alias = "chapterType")]
+    pub chapter_type: Option<String>,
+    pub order: Option<String>,
+    #[serde(alias = "targetChapterId")]
+    pub target_chapter_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChaptersPageResponse {
+    pub chapters: Vec<ChapterResponse>,
+    pub total: usize,
+    pub main_total: usize,
+    pub extra_total: usize,
+    pub offset: usize,
+    pub limit: usize,
+    pub chapter_type: String,
+    pub order: String,
+}
+
 /// Request body for updating a chapter
 #[derive(Debug, Deserialize)]
 pub struct UpdateChapterRequest {

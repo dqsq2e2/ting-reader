@@ -391,6 +391,13 @@ CREATE INDEX IF NOT EXISTS idx_playlist_items_playlist_id ON playlist_items(play
 CREATE INDEX IF NOT EXISTS idx_playlist_items_item ON playlist_items(item_type, item_id);
 "#;
 
+/// Twentieth schema migration (version 20)
+const MIGRATION_V20: &str = r#"
+-- Speed up large chapter list paging and progress joins.
+CREATE INDEX IF NOT EXISTS idx_chapters_book_extra_index ON chapters(book_id, is_extra, chapter_index);
+CREATE INDEX IF NOT EXISTS idx_progress_user_chapter ON progress(user_id, chapter_id);
+"#;
+
 /// Run all pending database migrations
 ///
 /// This function applies database schema migrations in order.
@@ -550,6 +557,11 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     if current_version < 19 {
         info!("Applying migration v19: Remove playlist accent column");
         migrate_playlist_without_accent(conn)?;
+    }
+
+    if current_version < 20 {
+        info!("Applying migration v20: Large chapter list indexes");
+        apply_migration(conn, 20, MIGRATION_V20)?;
     }
 
     info!("数据库迁移成功完成");
