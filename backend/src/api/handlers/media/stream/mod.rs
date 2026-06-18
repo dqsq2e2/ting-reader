@@ -7,8 +7,9 @@ mod strm;
 
 use crate::api::handlers::AppState;
 use crate::core::error::{Result, TingError};
+use crate::db::models::{Chapter, Library};
 use crate::db::repository::Repository;
-use crate::plugin::manager::FormatMethod;
+use crate::plugin::manager::{FormatMethod, PluginInfo};
 use axum::{
     body::Body,
     extract::{Path, Query, State},
@@ -25,7 +26,7 @@ use std::{
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio_util::io::ReaderStream;
 
@@ -35,6 +36,7 @@ pub struct StreamQuery {
     pub token: Option<String>,
     pub transcode: Option<String>,
     pub seek: Option<String>,
+    pub download: Option<String>,
 }
 
 fn stream_mime_type_from_path(path: &str) -> String {
@@ -57,6 +59,136 @@ fn stream_mime_type_from_path(path: &str) -> String {
             .first_or_octet_stream()
             .to_string(),
     }
+}
+
+fn is_download_query(params: &StreamQuery) -> bool {
+    let Some(value) = params.download.as_deref() else {
+        return false;
+    };
+    matches!(
+        value.to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+async fn transcode_plugin_stream(
+    state: &AppState,
+    chapter: &Chapter,
+    library: &Library,
+    plugin: &PluginInfo,
+    ffmpeg_path: &str,
+    format: &str,
+    content_type: &str,
+    seek: Option<&str>,
+) -> Result<axum::response::Response> {
+    let (plugin_stream, _, _, _, _, _, _) =
+        create_decrypted_stream(state, chapter, library, plugin, None).await?;
+
+    let mut cmd = Command::new(ffmpeg_path);
+    cmd.arg("-y").arg("-loglevel").arg("error");
+    if let Some(seek_time) = seek {
+        cmd.arg("-ss").arg(seek_time);
+    }
+    cmd.arg("-i").arg("pipe:0");
+
+    if format == "mp3" {
+        cmd.arg("-fflags")
+            .arg("+genpts+igndts")
+            .arg("-avoid_negative_ts")
+            .arg("make_zero")
+            .arg("-acodec")
+            .arg("libmp3lame")
+            .arg("-b:a")
+            .arg("128k")
+            .arg("-ac")
+            .arg("2")
+            .arg("-ar")
+            .arg("44100")
+            .arg("-vn")
+            .arg("-map")
+            .arg("0:a:0")
+            .arg("-f")
+            .arg("mp3");
+    } else if format == "wav" {
+        cmd.arg("-vn").arg("-map").arg("0:a:0").arg("-f").arg("wav");
+    } else {
+        cmd.arg("-f").arg(format);
+    }
+
+    cmd.arg("pipe:1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    tracing::info!(
+        chapter_id = %chapter.id,
+        plugin = %plugin.name,
+        format = %format,
+        "使用格式插件解码后转码输出"
+    );
+
+    let mut child = cmd.spawn().map_err(TingError::IoError)?;
+
+    let mut stdin = child.stdin.take().ok_or_else(|| {
+        TingError::IoError(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Failed to capture ffmpeg stdin",
+        ))
+    })?;
+
+    tokio::spawn(async move {
+        use futures::StreamExt;
+
+        let mut stream = plugin_stream;
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(bytes) => {
+                    if let Err(error) = stdin.write_all(&bytes).await {
+                        tracing::debug!("插件解码流写入 FFmpeg 中断: {}", error);
+                        break;
+                    }
+                }
+                Err(error) => {
+                    tracing::error!("插件解码流读取失败: {}", error);
+                    break;
+                }
+            }
+        }
+        let _ = stdin.shutdown().await;
+    });
+
+    if let Some(mut stderr) = child.stderr.take() {
+        tokio::spawn(async move {
+            let mut buffer = String::new();
+            if stderr.read_to_string(&mut buffer).await.is_ok() && !buffer.is_empty() {
+                tracing::warn!("FFmpeg stderr: {}", buffer);
+            }
+        });
+    }
+
+    let stdout = child.stdout.take().ok_or_else(|| {
+        TingError::IoError(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Failed to capture ffmpeg stdout",
+        ))
+    })?;
+
+    let stream = ReaderStream::new(stdout);
+    let body = Body::from_stream(stream);
+    use axum::http::header;
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, content_type.to_string()),
+            (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".to_string()),
+            (
+                "Cross-Origin-Resource-Policy".parse().unwrap(),
+                "cross-origin".to_string(),
+            ),
+        ],
+        body,
+    )
+        .into_response())
 }
 
 fn format_stream_time(seconds: f64) -> String {
@@ -143,7 +275,9 @@ pub async fn stream_chapter(
         .unwrap_or("")
         .to_lowercase();
 
-    if !is_head_request {
+    let is_download_request = is_download_query(&params);
+
+    if !is_head_request && !is_download_request {
         let user_id = user
             .as_ref()
             .map(|u| u.id.clone())
@@ -266,9 +400,15 @@ pub async fn stream_chapter(
                 ))
             })?;
         let cache_path = state.cache_manager.get_cache_path(&chapter_id);
+        let plugin_info = state
+            .plugin_manager
+            .find_plugin_for_format(std::path::Path::new(&chapter.path))
+            .await;
 
-        // Check if we can use direct URL transcoding (for WebDAV or cached files)
-        let can_use_direct_url = library.library_type != "local" && !cache_path.exists();
+        // Check if we can use direct URL transcoding (for WebDAV or cached files).
+        // Plugin-backed formats must be decoded/decrypted before FFmpeg sees them.
+        let can_use_direct_url =
+            library.library_type != "local" && !cache_path.exists() && plugin_info.is_none();
 
         if can_use_direct_url {
             // WebDAV files: Use direct URL transcoding (same as STRM)
@@ -506,10 +646,6 @@ pub async fn stream_chapter(
         // Fallback: Use plugin or pipe-based transcoding for local/cached files
         // 1. Try to get transcode command from plugin
         let mut plugin_command: Option<Vec<String>> = None;
-        let plugin_info = state
-            .plugin_manager
-            .find_plugin_for_format(std::path::Path::new(&chapter.path))
-            .await;
 
         if let Some(plugin) = &plugin_info {
             let res = state
@@ -520,7 +656,8 @@ pub async fn stream_chapter(
                     serde_json::json!({
                         "file_path": chapter.path,
                         "transcode": format,
-                        "seek": params.seek
+                        "seek": params.seek,
+                        "download": is_download_request
                     }),
                 )
                 .await;
@@ -605,116 +742,114 @@ pub async fn stream_chapter(
             )
                 .into_response());
         } else {
-            let mut goto_standard_stream = false;
             if let Some(plugin) = &plugin_info {
-                let has_ffmpeg_utils = plugin
-                    .dependencies
-                    .iter()
-                    .any(|d| d.plugin_name == "ffmpeg-utils");
-                if !has_ffmpeg_utils {
-                    // Skip FFmpeg transcoding for plugins that don't depend on it (e.g. xm-format)
-                    // We will fall through to the standard streaming logic which uses the plugin to decrypt/decode.
-                    tracing::info!("跳过插件 '{}' 的 FFmpeg 转码（原生支持）", plugin.name);
-                    goto_standard_stream = true;
-                }
-            }
-
-            if !goto_standard_stream {
-                // Fallback to hardcoded logic
-                let mut cmd = Command::new(&ffmpeg_path);
-                cmd.arg("-y").arg("-loglevel").arg("error");
-
-                if let Some(seek_time) = &params.seek {
-                    cmd.arg("-ss").arg(seek_time);
-                }
-
-                cmd.arg("-i");
-
-                // Input Source
-                if cache_path.exists() {
-                    cmd.arg(cache_path.to_string_lossy().as_ref());
-                } else if library.library_type == "local" {
-                    cmd.arg(&chapter.path);
-                } else {
-                    // Pipe input
-                    cmd.arg("-");
-                    cmd.stdin(Stdio::piped());
-                }
-
-                if format == "mp3" {
-                    cmd.arg("-fflags")
-                        .arg("+genpts+igndts")
-                        .arg("-avoid_negative_ts")
-                        .arg("make_zero")
-                        .arg("-acodec")
-                        .arg("libmp3lame")
-                        .arg("-b:a")
-                        .arg("128k")
-                        .arg("-ac")
-                        .arg("2")
-                        .arg("-ar")
-                        .arg("44100")
-                        .arg("-vn")
-                        .arg("-map")
-                        .arg("0:a:0");
-                }
-
-                cmd.arg("-f").arg(&format).arg("-");
-
-                cmd.stdout(Stdio::piped());
-
-                let mut child = cmd.spawn().map_err(|e| TingError::IoError(e))?;
-
-                // Handle input pipe if needed (Only if we are using the fallback pipe logic)
-                let use_pipe = !cache_path.exists() && library.library_type != "local";
-                if use_pipe && child.stdin.is_some() {
-                    if let Some(mut stdin) = child.stdin.take() {
-                        // Get reader
-                        let (mut reader, _) = state
-                            .storage_service
-                            .get_webdav_reader(
-                                &library,
-                                &chapter.path,
-                                None,
-                                state.encryption_key.as_ref(),
-                            )
-                            .await
-                            .map_err(|e| {
-                                TingError::NotFound(format!("WebDAV file not found: {}", e))
-                            })?;
-
-                        tokio::spawn(async move {
-                            if let Err(e) = tokio::io::copy(&mut reader, &mut stdin).await {
-                                tracing::error!("无法将输入通过管道传输到 ffmpeg: {}", e);
-                            }
-                        });
-                    }
-                }
-
-                let stdout = child.stdout.take().ok_or_else(|| {
-                    TingError::IoError(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "Failed to capture ffmpeg stdout",
-                    ))
-                })?;
-
-                let stream = ReaderStream::new(stdout);
-                let body = Body::from_stream(stream);
-
-                return Ok((
-                    StatusCode::OK,
-                    [
-                        (header::CONTENT_TYPE, content_type.to_string()),
-                        (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".to_string()),
-                        (
-                            "Cross-Origin-Resource-Policy".parse().unwrap(),
-                            "cross-origin".to_string(),
-                        ),
-                    ],
-                    body,
+                return transcode_plugin_stream(
+                    &state,
+                    &chapter,
+                    &library,
+                    plugin,
+                    &ffmpeg_path,
+                    format,
+                    content_type,
+                    params.seek.as_deref(),
                 )
-                    .into_response());
+                .await;
             }
+
+            // Fallback to hardcoded logic
+            let mut cmd = Command::new(&ffmpeg_path);
+            cmd.arg("-y").arg("-loglevel").arg("error");
+
+            if let Some(seek_time) = &params.seek {
+                cmd.arg("-ss").arg(seek_time);
+            }
+
+            cmd.arg("-i");
+
+            // Input Source
+            if cache_path.exists() {
+                cmd.arg(cache_path.to_string_lossy().as_ref());
+            } else if library.library_type == "local" {
+                cmd.arg(&chapter.path);
+            } else {
+                // Pipe input
+                cmd.arg("-");
+                cmd.stdin(Stdio::piped());
+            }
+
+            if format == "mp3" {
+                cmd.arg("-fflags")
+                    .arg("+genpts+igndts")
+                    .arg("-avoid_negative_ts")
+                    .arg("make_zero")
+                    .arg("-acodec")
+                    .arg("libmp3lame")
+                    .arg("-b:a")
+                    .arg("128k")
+                    .arg("-ac")
+                    .arg("2")
+                    .arg("-ar")
+                    .arg("44100")
+                    .arg("-vn")
+                    .arg("-map")
+                    .arg("0:a:0");
+            }
+
+            cmd.arg("-f").arg(&format).arg("-");
+
+            cmd.stdout(Stdio::piped());
+
+            let mut child = cmd.spawn().map_err(|e| TingError::IoError(e))?;
+
+            // Handle input pipe if needed (Only if we are using the fallback pipe logic)
+            let use_pipe = !cache_path.exists() && library.library_type != "local";
+            if use_pipe && child.stdin.is_some() {
+                if let Some(mut stdin) = child.stdin.take() {
+                    // Get reader
+                    let (mut reader, _) = state
+                        .storage_service
+                        .get_webdav_reader(
+                            &library,
+                            &chapter.path,
+                            None,
+                            state.encryption_key.as_ref(),
+                        )
+                        .await
+                        .map_err(|e| {
+                            TingError::NotFound(format!("WebDAV file not found: {}", e))
+                        })?;
+
+                    tokio::spawn(async move {
+                        if let Err(e) = tokio::io::copy(&mut reader, &mut stdin).await {
+                            tracing::error!("无法将输入通过管道传输到 ffmpeg: {}", e);
+                        }
+                    });
+                }
+            }
+
+            let stdout = child.stdout.take().ok_or_else(|| {
+                TingError::IoError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Failed to capture ffmpeg stdout",
+                ))
+            })?;
+
+            let stream = ReaderStream::new(stdout);
+            let body = Body::from_stream(stream);
+
+            return Ok((
+                StatusCode::OK,
+                [
+                    (header::CONTENT_TYPE, content_type.to_string()),
+                    (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".to_string()),
+                    (
+                        "Cross-Origin-Resource-Policy".parse().unwrap(),
+                        "cross-origin".to_string(),
+                    ),
+                ],
+                body,
+            )
+                .into_response());
         }
     }
 
@@ -895,14 +1030,28 @@ pub async fn stream_chapter(
         tracing::info!(chapter_id = %chapter_id, plugin = %plugin.name, "使用格式插件处理文件");
 
         let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
-        let (stream, mime_type, content_length, start, end, logic_size) = create_decrypted_stream(
-            &state,
-            &chapter,
-            &library,
-            &plugin,
-            range_header.map(|s| s.to_string()),
-        )
-        .await?;
+        let (stream, mime_type, output_extension, content_length, start, end, logic_size) =
+            create_decrypted_stream(
+                &state,
+                &chapter,
+                &library,
+                &plugin,
+                range_header.map(|s| s.to_string()),
+            )
+            .await?;
+        let download_extension = output_extension.unwrap_or_else(|| {
+            if mime_type.contains("mpeg") || mime_type.contains("mp3") {
+                "mp3".to_string()
+            } else if mime_type.contains("flac") {
+                "flac".to_string()
+            } else if mime_type.contains("ogg") {
+                "ogg".to_string()
+            } else if mime_type.contains("wav") {
+                "wav".to_string()
+            } else {
+                "m4a".to_string()
+            }
+        });
 
         let body = Body::from_stream(stream);
 
@@ -918,6 +1067,10 @@ pub async fn stream_chapter(
                         format!("bytes {}-{}/{}", start, end_inclusive, logic_size),
                     ),
                     (header::ACCEPT_RANGES, "bytes".to_string()),
+                    (
+                        "X-Download-Extension".parse().unwrap(),
+                        download_extension.clone(),
+                    ),
                     (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".to_string()),
                     (
                         "Cross-Origin-Resource-Policy".parse().unwrap(),
@@ -934,6 +1087,7 @@ pub async fn stream_chapter(
                     (header::CONTENT_TYPE, mime_type.to_string()),
                     (header::CONTENT_LENGTH, content_length.to_string()),
                     (header::ACCEPT_RANGES, "bytes".to_string()),
+                    ("X-Download-Extension".parse().unwrap(), download_extension),
                     (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".to_string()),
                     (
                         "Cross-Origin-Resource-Policy".parse().unwrap(),

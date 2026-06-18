@@ -18,6 +18,7 @@ pub(crate) async fn create_decrypted_stream(
 ) -> Result<(
     futures::stream::BoxStream<'static, std::io::Result<bytes::Bytes>>,
     String,
+    Option<String>,
     u64,
     u64,
     u64,
@@ -146,7 +147,14 @@ pub(crate) async fn create_decrypted_stream(
     let plan: DecryptionPlan = serde_json::from_value(plan_json)
         .map_err(|e| TingError::SerializationError(format!("Invalid decryption plan: {}", e)))?;
 
-    let mime_type = "audio/mp4".to_string();
+    let mime_type = plan
+        .mime_type
+        .clone()
+        .unwrap_or_else(|| "audio/mp4".to_string());
+    let output_extension = plan
+        .extension
+        .clone()
+        .or_else(|| extension_from_mime_type(&mime_type).map(str::to_string));
 
     // 5. Calculate Logic Size and Resolve Encrypted Segments
     let mut resolved_segments = Vec::new();
@@ -378,11 +386,24 @@ pub(crate) async fn create_decrypted_stream(
     Ok((
         Box::pin(padded_stream),
         mime_type,
+        output_extension,
         content_length,
         start,
         end,
         logic_size,
     ))
+}
+
+fn extension_from_mime_type(mime_type: &str) -> Option<&'static str> {
+    match mime_type.split(';').next().unwrap_or("").trim() {
+        "audio/mpeg" | "audio/mp3" => Some("mp3"),
+        "audio/mp4" | "audio/x-m4a" | "audio/aac" => Some("m4a"),
+        "audio/flac" | "audio/x-flac" => Some("flac"),
+        "audio/ogg" | "application/ogg" => Some("ogg"),
+        "audio/opus" => Some("opus"),
+        "audio/wav" | "audio/x-wav" => Some("wav"),
+        _ => None,
+    }
 }
 
 struct PaddedStream {

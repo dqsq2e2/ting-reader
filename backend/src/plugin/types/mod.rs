@@ -160,6 +160,10 @@ impl ScraperCapabilities {
 pub struct DecryptionPlan {
     pub segments: Vec<DecryptionSegment>,
     pub total_size: Option<u64>,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    #[serde(default)]
+    pub extension: Option<String>,
 }
 
 /// A segment of the decryption plan
