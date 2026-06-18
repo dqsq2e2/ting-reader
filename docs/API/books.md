@@ -205,7 +205,7 @@
 
 ### GET /api/v1/books/:id/chapters
 
-获取书籍的章节列表（含播放进度）。
+获取书籍的章节列表（含播放进度）。不传分页参数时返回完整章节数组；传入分页、分组或定位参数时返回分页对象，适合大型章节列表按需加载。
 
 **路径参数：**
 
@@ -213,23 +213,65 @@
 |------|------|------|
 | id | string | 书籍 ID |
 
+**查询参数：**
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| offset | number | 分页起始偏移（可选，默认 `0`） |
+| limit | number | 每页数量（可选，默认 `100`，范围 `1-500`） |
+| chapter_type | string | 章节类型（可选）：`main` 正文、`extra` 番外、`all` 全部 |
+| order | string | 排序方向（可选）：`asc` 正序、`desc` 逆序 |
+| target_chapter_id | string | 目标章节 ID（可选）。传入后返回包含该章节的分页，并自动解析正文/番外类型 |
+
+> Web 端请求参数会统一从 camelCase 转为 snake_case；后端也兼容 `chapterType` 和 `targetChapterId`。
+
 **响应：** `200 OK`
+
+无分页参数时返回完整章节数组：
 
 ```json
 [
   {
     "id": "string",
-    "book_id": "string",
+    "bookId": "string",
     "title": "string | null",
     "path": "string",
     "duration": 0,
-    "chapter_index": 0,
-    "is_extra": 0,
-    "created_at": "RFC3339",
-    "progress_position": 0.0,
-    "progress_updated_at": "RFC3339 | null"
+    "chapterIndex": 0,
+    "isExtra": 0,
+    "createdAt": "RFC3339",
+    "progressPosition": 0.0,
+    "progressUpdatedAt": "RFC3339 | null"
   }
 ]
+```
+
+传入分页参数时返回分页对象：
+
+```json
+{
+  "chapters": [
+    {
+      "id": "string",
+      "bookId": "string",
+      "title": "string | null",
+      "path": "string",
+      "duration": 0,
+      "chapterIndex": 0,
+      "isExtra": 0,
+      "createdAt": "RFC3339",
+      "progressPosition": 0.0,
+      "progressUpdatedAt": "RFC3339 | null"
+    }
+  ],
+  "total": 0,
+  "mainTotal": 0,
+  "extraTotal": 0,
+  "offset": 0,
+  "limit": 100,
+  "chapterType": "main",
+  "order": "asc"
+}
 ```
 
 ---
