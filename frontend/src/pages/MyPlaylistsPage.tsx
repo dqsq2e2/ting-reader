@@ -4,7 +4,6 @@ import apiClient from '../api/client';
 import type { Book, Playlist, PlaylistItem } from '../types';
 import { getCoverUrl } from '../utils/image';
 import { usePlayerStore } from '../store/playerStore';
-import BackButton from '../components/BackButton';
 import DisplaySettingsMenu from '../components/DisplaySettingsMenu';
 import { ListMusic, Plus, Search, X } from 'lucide-react';
 import { getCoverAspectClass, useBookshelfCoverShape, type CoverShape } from '../hooks/useBookshelfCoverShape';
@@ -237,8 +236,6 @@ const MyPlaylistsPage: React.FC = () => {
   return (
     <div className="flex-1 min-h-full flex flex-col p-4 sm:p-6 md:p-8 animate-in fade-in duration-500">
       <div className="flex-1 space-y-6">
-        <BackButton fallback="/mine" />
-
         <div className="flex flex-col min-[760px]:flex-row min-[760px]:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
