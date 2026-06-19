@@ -312,13 +312,13 @@ const HomePage: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="hidden md:flex items-center gap-2 text-sm text-slate-500 bg-white dark:bg-slate-900 px-4 py-2.5 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800">
+            <div className="hidden md:flex h-12 items-center gap-2 text-sm text-slate-500 bg-white dark:bg-slate-900 px-4 py-2.5 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800">
               <Calendar size={16} />
               <span>{new Date().toLocaleDateString('zh-CN', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
             </div>
             <Link
               to="/search"
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl text-sm font-bold shadow-lg shadow-slate-900/10 dark:shadow-white/5 hover:opacity-90 transition-opacity"
+              className="inline-flex h-12 items-center gap-2 px-4 py-2.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl text-sm font-bold shadow-lg shadow-slate-900/10 dark:shadow-white/5 hover:opacity-90 transition-opacity"
             >
               <Search size={18} />
               搜索内容

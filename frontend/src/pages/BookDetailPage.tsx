@@ -57,6 +57,7 @@ const BookDetailPage: React.FC = () => {
   const [isOverflowing, setIsOverflowing] = useState(false);
   const [activeTab, setActiveTab] = useState<'main' | 'extra'>('main');
   const [currentGroupIndex, setCurrentGroupIndex] = useState(0);
+  const [chapterAscending, setChapterAscending] = useState(true);
   const [themeColor, setThemeColor] = useState<string | null>(book?.theme_color || null);
   const [isTagsExpanded, setIsTagsExpanded] = useState(false);
   const tagsRef = useRef<HTMLDivElement>(null);
@@ -110,6 +111,7 @@ const BookDetailPage: React.FC = () => {
     setChapters([]);
     setChapterTotals({ total: 0, main: 0, extra: 0 });
     setBookProgress(null);
+    setChapterAscending(true);
   }, [id]);
 
   // Clear highlighted chapter when current chapter changes (user plays a new chapter)
@@ -145,6 +147,11 @@ const BookDetailPage: React.FC = () => {
     }
     return g;
   }, [activeTotal]);
+
+  const visibleChapters = React.useMemo(
+    () => (chapterAscending ? chapters : [...chapters].reverse()),
+    [chapterAscending, chapters]
+  );
 
   const isPlaying = usePlayerStore((state) => state.isPlaying);
   const playChapter = usePlayerStore((state) => state.playChapter);
@@ -841,31 +848,40 @@ const BookDetailPage: React.FC = () => {
               </button>
             )}
           </h2>
-          
-          {chapterTotals.extra > 0 && (
-            <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl self-start">
-              <button 
-                onClick={() => { setActiveTab('main'); setCurrentGroupIndex(0); }}
-                className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
-                  activeTab === 'main' 
-                    ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' 
-                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-              >
-                正文 ({chapterTotals.main})
-              </button>
-              <button 
-                onClick={() => { setActiveTab('extra'); setCurrentGroupIndex(0); }}
-                className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
-                  activeTab === 'extra' 
-                    ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' 
-                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-              >
-                番外 ({chapterTotals.extra})
-              </button>
-            </div>
-          )}
+
+          <div className="flex flex-wrap items-center gap-2 self-start sm:justify-end">
+            {chapterTotals.extra > 0 && (
+              <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                <button
+                  onClick={() => { setActiveTab('main'); setCurrentGroupIndex(0); }}
+                  className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
+                    activeTab === 'main'
+                      ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                  }`}
+                >
+                  正文 ({chapterTotals.main})
+                </button>
+                <button
+                  onClick={() => { setActiveTab('extra'); setCurrentGroupIndex(0); }}
+                  className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
+                    activeTab === 'extra'
+                      ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                  }`}
+                >
+                  番外 ({chapterTotals.extra})
+                </button>
+              </div>
+            )}
+            <button
+              onClick={() => setChapterAscending(prev => !prev)}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-slate-600 dark:text-slate-300 hover:border-primary-500 hover:text-primary-600 transition-all shadow-sm"
+            >
+              {chapterAscending ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+              {chapterAscending ? '正序' : '逆序'}
+            </button>
+          </div>
         </div>
 
         {/* Chapter Groups Selector */}
@@ -918,8 +934,9 @@ const BookDetailPage: React.FC = () => {
             </div>
           ) : chapters.length === 0 ? (
             <div className="py-10 text-center text-slate-400">暂无章节</div>
-          ) : chapters.map((chapter, index) => {
-            const actualIndex = (groups[currentGroupIndex]?.offset || 0) + index;
+          ) : visibleChapters.map((chapter, index) => {
+            const groupOffset = groups[currentGroupIndex]?.offset || 0;
+            const actualIndex = groupOffset + (chapterAscending ? index : visibleChapters.length - index - 1);
             const isCurrent = currentChapter?.id === chapter.id;
             const isActive = isCurrent || highlightedChapterId === chapter.id;
 
