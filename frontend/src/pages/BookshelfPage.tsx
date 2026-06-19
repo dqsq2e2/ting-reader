@@ -394,21 +394,21 @@ const BookshelfPage: React.FC = () => {
 
             {/* Library Selector */}
             {libraries.length > 0 && (
-              <div className={`relative order-2 w-[8.75rem] sm:w-[12rem] md:w-[14rem] ${isSelectionMode ? 'hidden sm:block' : ''}`}>
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+              <div className={`relative order-2 w-[10.5rem] sm:w-[12rem] md:w-[14rem] ${isSelectionMode ? 'hidden sm:block' : ''}`}>
+                <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
                   <LibraryIcon size={16} />
                 </div>
                 <select
                   value={selectedLibraryId}
                   onChange={(e) => handleLibraryChange(e.target.value)}
-                  className="w-full pl-9 pr-10 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 text-[13px] sm:text-sm font-medium text-slate-700 dark:text-slate-200 appearance-none cursor-pointer truncate"
+                  className="w-full pl-8 pr-8 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 text-[13px] sm:text-sm font-medium text-slate-700 dark:text-slate-200 appearance-none cursor-pointer truncate"
                 >
                   <option value="">所有媒体库</option>
                   {libraries.map(lib => (
                     <option key={lib.id} value={lib.id}>{lib.name}</option>
                   ))}
                 </select>
-                <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-400">
+                <div className="absolute inset-y-0 right-0 pr-2.5 flex items-center pointer-events-none text-slate-400">
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
