@@ -398,6 +398,13 @@ CREATE INDEX IF NOT EXISTS idx_chapters_book_extra_index ON chapters(book_id, is
 CREATE INDEX IF NOT EXISTS idx_progress_user_chapter ON progress(user_id, chapter_id);
 "#;
 
+/// Twenty-first schema migration (version 21)
+const MIGRATION_V21: &str = r#"
+-- Allow each webhook to define its own request headers and body template.
+ALTER TABLE notification_webhooks ADD COLUMN headers TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE notification_webhooks ADD COLUMN body_template TEXT NOT NULL DEFAULT '{{json:payload}}';
+"#;
+
 /// Run all pending database migrations
 ///
 /// This function applies database schema migrations in order.
@@ -562,6 +569,11 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     if current_version < 20 {
         info!("Applying migration v20: Large chapter list indexes");
         apply_migration(conn, 20, MIGRATION_V20)?;
+    }
+
+    if current_version < 21 {
+        info!("Applying migration v21: Configurable webhook requests");
+        apply_migration(conn, 21, MIGRATION_V21)?;
     }
 
     info!("数据库迁移成功完成");

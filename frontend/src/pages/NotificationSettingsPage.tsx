@@ -5,10 +5,11 @@ import { usePlayerStore } from '../store/playerStore';
 import type { NotificationEventOption, NotificationWebhook } from '../types';
 import {
   BellRing,
+  Braces,
   Check,
   CheckCircle2,
   Edit,
-  KeyRound,
+  FlaskConical,
   Link2,
   Loader2,
   Plus,
@@ -20,6 +21,12 @@ import {
   X,
 } from 'lucide-react';
 
+type WebhookHeader = {
+  id: string;
+  key: string;
+  value: string;
+};
+
 type WebhookDraft = {
   id?: string;
   name: string;
@@ -27,7 +34,98 @@ type WebhookDraft = {
   enabled: boolean;
   events: string[];
   secret?: string;
+  headers: WebhookHeader[];
+  bodyTemplate: string;
 };
+
+type WebhookPreset = {
+  id: string;
+  name: string;
+  urlPlaceholder: string;
+  headers: Record<string, string>;
+  bodyTemplate: string;
+};
+
+const createHeader = (key = '', value = ''): WebhookHeader => ({
+  id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  key,
+  value,
+});
+
+const WEBHOOK_PRESETS: WebhookPreset[] = [
+  {
+    id: 'ting-json',
+    name: '原始事件 JSON',
+    urlPlaceholder: 'https://example.com/webhook',
+    headers: { 'Content-Type': 'application/json' },
+    bodyTemplate: '{{json:payload}}',
+  },
+  {
+    id: 'wecom-markdown',
+    name: '企业微信 Markdown',
+    urlPlaceholder: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...',
+    headers: { 'Content-Type': 'application/json' },
+    bodyTemplate: `{
+  "msgtype": "markdown",
+  "markdown": {
+    "content": {{json:notification}}
+  }
+}`,
+  },
+  {
+    id: 'wecom-text',
+    name: '企业微信文本',
+    urlPlaceholder: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...',
+    headers: { 'Content-Type': 'application/json' },
+    bodyTemplate: `{
+  "msgtype": "text",
+  "text": {
+    "content": {{json:notification}}
+  }
+}`,
+  },
+  {
+    id: 'ntfy-json',
+    name: 'ntfy JSON',
+    urlPlaceholder: 'https://ntfy.example.com',
+    headers: { 'Content-Type': 'application/json' },
+    bodyTemplate: `{
+  "topic": "ting-reader",
+  "title": {{json:title}},
+  "message": {{json:message}},
+  "priority": 3,
+  "tags": ["headphones"]
+}`,
+  },
+  {
+    id: 'gotify-json',
+    name: 'Gotify JSON',
+    urlPlaceholder: 'https://gotify.example.com/message?token=...',
+    headers: { 'Content-Type': 'application/json' },
+    bodyTemplate: `{
+  "title": {{json:title}},
+  "message": {{json:message}},
+  "priority": 5
+}`,
+  },
+  {
+    id: 'plain-text',
+    name: '纯文本',
+    urlPlaceholder: 'https://example.com/webhook',
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    bodyTemplate: '{{notification}}',
+  },
+];
+
+const headersToDraft = (headers: Record<string, string> = {}): WebhookHeader[] =>
+  Object.entries(headers).map(([key, value]) => createHeader(key, value));
+
+const draftHeadersToRecord = (headers: WebhookHeader[]): Record<string, string> =>
+  Object.fromEntries(
+    headers
+      .map((header) => [header.key.trim(), header.value.trim()])
+      .filter(([key]) => Boolean(key))
+  );
 
 const fallbackEvents: NotificationEventOption[] = [
   { id: 'user.login', label: '用户登录', description: '用户成功登录系统' },
@@ -45,6 +143,8 @@ const createEmptyDraft = (defaultEvent = 'user.login'): WebhookDraft => ({
   enabled: true,
   events: [defaultEvent],
   secret: '',
+  headers: headersToDraft({ 'Content-Type': 'application/json' }),
+  bodyTemplate: '{{json:payload}}',
 });
 
 const NotificationSettingsPage: React.FC = () => {
@@ -111,6 +211,8 @@ const NotificationSettingsPage: React.FC = () => {
       enabled: webhook.enabled,
       events: webhook.events,
       secret: webhook.secret || '',
+      headers: headersToDraft(webhook.headers),
+      bodyTemplate: webhook.bodyTemplate || '{{json:payload}}',
     });
   };
 
@@ -141,6 +243,8 @@ const NotificationSettingsPage: React.FC = () => {
         enabled: nextEnabled,
         events: webhook.events,
         secret: webhook.secret || undefined,
+        headers: webhook.headers,
+        bodyTemplate: webhook.bodyTemplate,
       });
       setWebhooks((items) =>
         items.map((item) => (item.id === webhook.id ? { ...item, enabled: nextEnabled } : item))
@@ -178,6 +282,8 @@ const NotificationSettingsPage: React.FC = () => {
         enabled: draft.enabled,
         events: draft.events,
         secret: draft.secret?.trim() || undefined,
+        headers: draftHeadersToRecord(draft.headers),
+        bodyTemplate: draft.bodyTemplate,
       };
       if (draft.id) {
         await apiClient.put(`/api/system/notifications/${draft.id}`, payload);
@@ -444,10 +550,77 @@ const WebhookModal = ({
   onClose: () => void;
   onSave: (event: React.FormEvent) => void;
 }) => {
+  const [testing, setTesting] = useState(false);
+  const [selectedPresetId, setSelectedPresetId] = useState('');
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    status: number;
+    responseBody: string;
+    renderedBody: string;
+    error?: string;
+  } | null>(null);
+
   const selectCommonEvents = () => {
     const common = ['user.login', 'playback.play', 'library.scan_completed']
       .filter((eventId) => eventOptions.some((event) => event.id === eventId));
     onChangeDraft({ ...draft, events: common });
+  };
+
+  const applyPreset = (presetId: string) => {
+    const preset = WEBHOOK_PRESETS.find((item) => item.id === presetId);
+    if (!preset) return;
+    setSelectedPresetId(presetId);
+    onChangeDraft({
+      ...draft,
+      headers: headersToDraft(preset.headers),
+      bodyTemplate: preset.bodyTemplate,
+    });
+    setTestResult(null);
+  };
+
+  const selectedPreset = WEBHOOK_PRESETS.find((preset) => preset.id === selectedPresetId);
+
+  const updateHeader = (id: string, field: 'key' | 'value', value: string) => {
+    onChangeDraft({
+      ...draft,
+      headers: draft.headers.map((header) =>
+        header.id === id ? { ...header, [field]: value } : header
+      ),
+    });
+    setTestResult(null);
+  };
+
+  const testWebhook = async () => {
+    if (!draft.name.trim() || !draft.url.trim() || draft.events.length === 0 || testing) {
+      alert('请先填写名称、URL 并选择事件');
+      return;
+    }
+
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const response = await apiClient.post('/api/system/notifications/test', {
+        name: draft.name.trim(),
+        url: draft.url.trim(),
+        enabled: true,
+        events: draft.events,
+        secret: draft.secret?.trim() || undefined,
+        headers: draftHeadersToRecord(draft.headers),
+        bodyTemplate: draft.bodyTemplate,
+      });
+      setTestResult(response.data);
+    } catch (error) {
+      console.error('测试 Webhook 失败', error);
+      setTestResult({
+        success: false,
+        status: 0,
+        responseBody: '',
+        renderedBody: '',
+        error: '请求未完成，请检查 URL、请求头和模板',
+      });
+    } finally {
+      setTesting(false);
+    }
   };
 
   return (
@@ -469,31 +642,16 @@ const WebhookModal = ({
         </div>
 
         <form onSubmit={onSave} className="p-6 md:p-8 overflow-y-auto space-y-5">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <label className="space-y-2">
-              <span className="text-sm font-bold text-slate-600 dark:text-slate-400">名称</span>
-              <input
-                value={draft.name}
-                onChange={(event) => onChangeDraft({ ...draft, name: event.target.value })}
-                placeholder="企业微信通知"
-                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
-                autoFocus
-              />
-            </label>
-
-            <label className="space-y-2">
-              <span className="text-sm font-bold text-slate-600 dark:text-slate-400">密钥</span>
-              <div className="relative">
-                <KeyRound size={17} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  value={draft.secret || ''}
-                  onChange={(event) => onChangeDraft({ ...draft, secret: event.target.value })}
-                  placeholder="可选"
-                  className="w-full pl-11 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
-                />
-              </div>
-            </label>
-          </div>
+          <label className="space-y-2 block">
+            <span className="text-sm font-bold text-slate-600 dark:text-slate-400">名称</span>
+            <input
+              value={draft.name}
+              onChange={(event) => onChangeDraft({ ...draft, name: event.target.value })}
+              placeholder="企业微信通知"
+              className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+              autoFocus
+            />
+          </label>
 
           <label className="space-y-2 block">
             <span className="text-sm font-bold text-slate-600 dark:text-slate-400">Webhook URL</span>
@@ -502,11 +660,140 @@ const WebhookModal = ({
               <input
                 value={draft.url}
                 onChange={(event) => onChangeDraft({ ...draft, url: event.target.value })}
-                placeholder="https://example.com/webhook"
+                placeholder={selectedPreset?.urlPlaceholder || 'https://example.com/webhook'}
                 className="w-full pl-11 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
               />
             </div>
           </label>
+
+          <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-3 items-end">
+            <label className="space-y-2">
+              <span className="text-sm font-bold text-slate-600 dark:text-slate-400">常见模板</span>
+              <select
+                value={selectedPresetId}
+                onChange={(event) => applyPreset(event.target.value)}
+                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+              >
+                <option value="">选择模板</option>
+                {WEBHOOK_PRESETS.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={testWebhook}
+              disabled={testing}
+              className="h-12 px-4 inline-flex items-center justify-center gap-2 rounded-xl border border-primary-200 text-primary-700 dark:border-primary-900 dark:text-primary-300 font-bold hover:bg-primary-50 dark:hover:bg-primary-900/20 disabled:opacity-60"
+            >
+              {testing ? <Loader2 size={17} className="animate-spin" /> : <FlaskConical size={17} />}
+              测试发送
+            </button>
+          </div>
+
+          <div className="rounded-2xl border border-slate-100 dark:border-slate-800 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-bold text-slate-900 dark:text-white">请求头</p>
+              <button
+                type="button"
+                onClick={() => onChangeDraft({ ...draft, headers: [...draft.headers, createHeader()] })}
+                className="p-2 rounded-lg text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20"
+                title="添加请求头"
+              >
+                <Plus size={17} />
+              </button>
+            </div>
+            {draft.headers.length === 0 ? (
+              <p className="text-xs text-slate-400">未设置请求头</p>
+            ) : (
+              <div className="space-y-2">
+                {draft.headers.map((header) => (
+                  <div
+                    key={header.id}
+                    className="grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_auto] gap-2"
+                  >
+                    <input
+                      value={header.key}
+                      onChange={(event) => updateHeader(header.id, 'key', event.target.value)}
+                      placeholder="Header"
+                      className="col-start-1 row-start-1 sm:col-auto sm:row-auto min-w-0 px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:text-white"
+                    />
+                    <input
+                      value={header.value}
+                      onChange={(event) => updateHeader(header.id, 'value', event.target.value)}
+                      placeholder="Value"
+                      className="col-start-1 row-start-2 sm:col-auto sm:row-auto min-w-0 px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:text-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onChangeDraft({
+                          ...draft,
+                          headers: draft.headers.filter((item) => item.id !== header.id),
+                        })
+                      }
+                      className="col-start-2 row-start-1 row-span-2 sm:col-auto sm:row-auto sm:row-span-1 p-2.5 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                      title="删除请求头"
+                    >
+                      <Trash2 size={17} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <label className="space-y-2 block">
+            <span className="text-sm font-bold text-slate-600 dark:text-slate-400 flex items-center gap-2">
+              <Braces size={16} />
+              Body 模板
+            </span>
+            <textarea
+              value={draft.bodyTemplate}
+              onChange={(event) => {
+                onChangeDraft({ ...draft, bodyTemplate: event.target.value });
+                setTestResult(null);
+              }}
+              rows={9}
+              spellCheck={false}
+              className="w-full px-4 py-3 bg-slate-950 text-slate-100 border border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 font-mono text-sm resize-y"
+            />
+          </label>
+
+          {testResult && (
+            <div
+              className={`rounded-2xl border p-4 space-y-2 ${
+                testResult.success
+                  ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-900/20'
+                  : 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-900/20'
+              }`}
+            >
+              <p
+                className={`text-sm font-bold ${
+                  testResult.success ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'
+                }`}
+              >
+                {testResult.success
+                  ? `发送成功 · HTTP ${testResult.status}`
+                  : testResult.error || `发送失败 · HTTP ${testResult.status}`}
+              </p>
+              {testResult.responseBody && (
+                <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all text-xs text-slate-600 dark:text-slate-300">
+                  {testResult.responseBody}
+                </pre>
+              )}
+              {testResult.renderedBody && (
+                <details className="text-xs text-slate-500 dark:text-slate-400">
+                  <summary className="cursor-pointer font-bold">实际请求体</summary>
+                  <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all text-slate-600 dark:text-slate-300">
+                    {testResult.renderedBody}
+                  </pre>
+                </details>
+              )}
+            </div>
+          )}
 
           <div className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/70">
             <div>

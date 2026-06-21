@@ -1,75 +1,237 @@
 # Webhook 使用指南
 
-通知与事件用于把 Ting Reader 内部事件推送到外部系统。例如：用户登录、开始播放、作品入库、作品删除、媒体库扫描完成等。
+通知与事件用于把 Ting Reader 内部事件推送到企业微信、ntfy、Gotify、自动化平台或其他 HTTP 服务。
 
 入口：`我的` -> `设置与管理` -> `通知与事件`
 
-API 同时支持：
+所有配置接口仅管理员可访问，同时支持以下路径：
 
 - `/api/system/notifications...`
 - `/api/v1/system/notifications...`
 
-所有配置接口仅管理员可访问。
+## 功能概览
 
-## Webhook 是什么
+每个 Webhook 可以单独配置：
 
-Webhook 是一种“事件发生后主动通知外部服务”的机制。
+- Webhook URL
+- 要监听的事件
+- 任意 HTTP 请求头
+- Body 模板
+- 启用或停用状态
+- 兼容旧版本的 `X-Ting-Webhook-Secret`
 
-普通接口是外部系统主动来查询 Ting Reader；Webhook 则是 Ting Reader 在事件发生时，主动向你配置的 URL 发送一个 HTTP `POST` 请求。
+系统内置以下常见模板：
 
-典型用途：
+- 企业微信 Markdown
+- 企业微信文本
+- ntfy JSON
+- Gotify JSON
+- 原始事件 JSON
+- 纯文本
 
-- 用户登录后通知企业微信、钉钉、飞书或自建服务。
-- 媒体库扫描完成后通知管理员。
-- 有新作品入库或作品被删除时同步到外部系统。
-- 开始播放时触发自动化流程。
-
-## 密钥是干什么的
-
-Webhook 配置里的“密钥”是一个共享密钥，用来让接收端确认请求来自 Ting Reader。
-
-如果配置了密钥，Ting Reader 发送 Webhook 时会加上请求头：
-
-```http
-X-Ting-Webhook-Secret: <你配置的密钥>
-```
-
-接收端收到请求后，应当比较这个 Header 是否等于自己保存的密钥。
-
-重要说明：
-
-- 密钥不会加密请求体。
-- 密钥不是签名，目前不会生成 HMAC。
-- 密钥会原样放在 Header 中发送。
-- 密钥为空时，不会发送 `X-Ting-Webhook-Secret`。
-- 建议 Webhook URL 使用 `https://`，避免密钥和事件内容在网络中明文传输。
-- 建议使用随机长字符串作为密钥，例如 32 位以上随机值。
+配置完成后可以先点击“测试发送”，查看 HTTP 状态、服务响应和实际渲染的请求体，再决定是否保存。
 
 ## 配置步骤
 
 1. 进入 `我的` -> `设置与管理` -> `通知与事件`。
-2. 点击 `新增 Webhook`。
-3. 填写配置名称，例如 `企业微信通知`。
-4. 填写 Webhook URL，例如 `https://example.com/ting-reader/webhook`。
-5. 可选填写密钥。
-6. 选择要监听的事件。
-7. 保持“开启监听”为启用状态。
-8. 保存配置。
+2. 点击“添加 Webhook”。
+3. 填写名称和 Webhook URL。
+4. 选择一个常见模板，或自行编辑请求头和 Body 模板。
+5. 选择需要监听的事件。
+6. 点击“测试发送”确认目标服务可以正常接收。
+7. 保存配置。
 
-保存后，匹配事件触发时，Ting Reader 会向该 URL 发送通知。
+## 模板变量
 
-## 请求格式
+Body 和请求头的值都支持变量。
 
-事件触发后，Ting Reader 会向 Webhook URL 发送：
+### 原样输出
+
+```text
+{{title}}
+{{message}}
+{{event}}
+{{occurred_at}}
+{{notification}}
+{{data.username}}
+```
+
+`{{notification}}` 等于标题和正文的组合：
+
+```text
+标题
+正文
+```
+
+原样输出适合纯文本 Body 或普通请求头。如果把它直接放进 JSON 字符串，内容中的引号和换行可能破坏 JSON。
+
+### JSON 安全输出
+
+JSON 模板应使用 `json:` 前缀：
+
+```text
+{{json:title}}
+{{json:message}}
+{{json:notification}}
+{{json:data.username}}
+{{json:payload}}
+```
+
+它会输出完整的 JSON 值并自动处理引号、换行和反斜杠。例如：
+
+```json
+{
+  "title": {{json:title}},
+  "message": {{json:message}}
+}
+```
+
+`{{json:payload}}` 会输出完整的 Ting Reader 事件对象，适合需要原始事件数据的接收端。
+
+可用根变量：
+
+| 变量 | 说明 |
+| --- | --- |
+| `event` | 事件 ID |
+| `title` | 事件标题 |
+| `message` | 人类可读的通知正文 |
+| `occurred_at` | RFC3339 格式的事件时间 |
+| `notification` | 标题和正文的组合文本 |
+| `data` | 当前事件的详细数据 |
+| `payload` | 完整事件对象 |
+
+`data` 支持点路径，例如 `{{json:data.book_title}}`。
+
+## 默认请求行为
+
+系统始终发送 HTTP `POST` 请求，并默认加入：
 
 ```http
-POST /your-webhook-path HTTP/1.1
 Content-Type: application/json
 X-Ting-Event: user.login
+```
+
+如果配置了同名自定义请求头，自定义值会覆盖默认值。
+
+旧版本的 `secret` 字段仍被兼容。如果存在，会加入：
+
+```http
 X-Ting-Webhook-Secret: your-secret
 ```
 
-请求体统一格式：
+新配置建议直接使用自定义请求头，例如：
+
+```http
+Authorization: Bearer your-token
+```
+
+请求头的值也可以使用模板变量。
+
+## 常见模板
+
+### 企业微信 Markdown
+
+Webhook URL：
+
+```text
+https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=机器人密钥
+```
+
+请求头：
+
+```http
+Content-Type: application/json
+```
+
+Body：
+
+```json
+{
+  "msgtype": "markdown",
+  "markdown": {
+    "content": {{json:notification}}
+  }
+}
+```
+
+企业微信机器人即使业务失败也可能返回 HTTP 200。Ting Reader 会继续检查响应 JSON 中的 `errcode`，只有 `errcode` 为 `0` 才视为成功。
+
+### 企业微信文本
+
+```json
+{
+  "msgtype": "text",
+  "text": {
+    "content": {{json:notification}}
+  }
+}
+```
+
+### ntfy JSON
+
+JSON 发布模式应填写 ntfy 服务根地址，不要把 Topic 重复写进 URL：
+
+```text
+https://ntfy.example.com
+```
+
+Body：
+
+```json
+{
+  "topic": "ting-reader",
+  "title": {{json:title}},
+  "message": {{json:message}},
+  "priority": 3,
+  "tags": ["headphones"]
+}
+```
+
+需要认证时可添加：
+
+```http
+Authorization: Bearer your-token
+```
+
+或：
+
+```http
+Authorization: Basic base64(username:password)
+```
+
+### Gotify JSON
+
+Webhook URL：
+
+```text
+https://gotify.example.com/message?token=APPLICATION_TOKEN
+```
+
+Body：
+
+```json
+{
+  "title": {{json:title}},
+  "message": {{json:message}},
+  "priority": 5
+}
+```
+
+### 原始事件 JSON
+
+请求头：
+
+```http
+Content-Type: application/json
+```
+
+Body：
+
+```text
+{{json:payload}}
+```
+
+渲染结果示例：
 
 ```json
 {
@@ -77,78 +239,26 @@ X-Ting-Webhook-Secret: your-secret
   "title": "用户登录",
   "message": "用户 admin 登录成功",
   "data": {
-    "userId": "1959b6b7-0d97-4876-8505-c9825f209619",
+    "user_id": "string",
     "username": "admin",
-    "role": "admin",
-    "realIp": "127.0.0.1",
-    "userAgent": "Mozilla/5.0 ...",
-    "device": "Windows / Chrome"
+    "role": "admin"
   },
-  "occurred_at": "2026-06-11T09:34:10.381846100+00:00"
+  "occurred_at": "2026-06-21T08:00:00Z"
 }
 ```
 
-字段说明：
+### 纯文本
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `event` | string | 事件 ID |
-| `title` | string | 事件标题 |
-| `message` | string | 可直接展示的人类可读消息 |
-| `data` | object | 事件详情，不同事件结构不同 |
-| `occurred_at` | string | 事件发生时间，RFC3339 格式 |
+请求头：
 
-## 接收端校验示例
-
-### Node.js / Express
-
-```js
-import express from 'express';
-
-const app = express();
-app.use(express.json());
-
-const WEBHOOK_SECRET = process.env.TING_WEBHOOK_SECRET;
-
-app.post('/ting-reader/webhook', (req, res) => {
-  const secret = req.header('X-Ting-Webhook-Secret');
-
-  if (WEBHOOK_SECRET && secret !== WEBHOOK_SECRET) {
-    return res.status(401).json({ error: 'invalid webhook secret' });
-  }
-
-  const event = req.header('X-Ting-Event');
-  const payload = req.body;
-
-  console.log('Ting Reader event:', event, payload);
-
-  res.sendStatus(204);
-});
-
-app.listen(8787);
+```http
+Content-Type: text/plain; charset=utf-8
 ```
 
-### Python / FastAPI
+Body：
 
-```python
-import os
-from fastapi import FastAPI, Header, HTTPException, Request
-
-app = FastAPI()
-WEBHOOK_SECRET = os.getenv("TING_WEBHOOK_SECRET")
-
-@app.post("/ting-reader/webhook")
-async def ting_reader_webhook(
-    request: Request,
-    x_ting_event: str | None = Header(default=None),
-    x_ting_webhook_secret: str | None = Header(default=None),
-):
-    if WEBHOOK_SECRET and x_ting_webhook_secret != WEBHOOK_SECRET:
-        raise HTTPException(status_code=401, detail="invalid webhook secret")
-
-    payload = await request.json()
-    print("Ting Reader event:", x_ting_event, payload)
-    return {"ok": True}
+```text
+{{notification}}
 ```
 
 ## 支持的事件
@@ -156,40 +266,41 @@ async def ting_reader_webhook(
 | 事件 ID | 说明 | 触发时机 |
 | --- | --- | --- |
 | `user.login` | 用户登录 | 用户登录成功 |
-| `playback.play` | 播放开始 | 用户首次写入某作品/章节进度时触发，避免 WS/HTTP 定时进度保存刷屏 |
+| `playback.play` | 播放开始 | 用户首次写入某作品或章节进度 |
 | `library.created` | 新增媒体库 | 管理员创建媒体库 |
 | `library.deleted` | 删除媒体库 | 管理员删除媒体库 |
 | `book.created` | 作品入库 | 作品被创建或入库 |
 | `book.deleted` | 删除作品 | 作品被删除 |
 | `library.scan_completed` | 扫描完成 | 媒体库扫描任务完成 |
 
-## 常见事件 data 示例
+## 常见事件 data
 
 ### user.login
 
 ```json
 {
-  "userId": "string",
+  "user_id": "string",
   "username": "admin",
   "role": "admin",
-  "realIp": "127.0.0.1",
-  "userAgent": "Mozilla/5.0 ...",
-  "device": "Windows / Chrome"
+  "real_ip": "127.0.0.1",
+  "user_agent": "Mozilla/5.0 ...",
+  "device": "Windows / Chrome",
+  "login_method": "password"
 }
 ```
 
 ### playback.play
 
-`playback.play` 不是每 2 秒的播放进度更新。它只用于“开始播放”这类低频事件，避免 WebSocket/HTTP 进度同步造成大量重复通知。
+`playback.play` 不是定时进度上报，只表示开始播放等低频事件。
 
 ```json
 {
-  "userId": "string",
+  "user_id": "string",
   "username": "string",
-  "bookId": "string",
-  "bookTitle": "string",
-  "chapterId": "string | null",
-  "chapterTitle": "string | null",
+  "book_id": "string",
+  "book_title": "string",
+  "chapter_id": "string | null",
+  "chapter_title": "string | null",
   "position": 0.0,
   "duration": 0.0
 }
@@ -199,56 +310,42 @@ async def ting_reader_webhook(
 
 ```json
 {
-  "libraryId": "string",
-  "libraryName": "string",
-  "libraryType": "local | webdav",
+  "library_id": "string",
+  "library_name": "string",
+  "library_type": "local | webdav",
   "path": "string",
-  "taskId": "string",
-  "booksCreated": 0,
-  "booksUpdated": 0,
-  "booksDeleted": 0,
+  "task_id": "string",
+  "books_created": 0,
+  "books_updated": 0,
+  "books_deleted": 0,
   "errors": 0
 }
 ```
 
-### book.created / book.deleted
+## 测试发送
+
+测试发送使用固定的 `webhook.test` 示例事件，不需要先保存配置：
 
 ```json
 {
-  "actorId": "string",
-  "actor": "admin",
-  "bookId": "string",
-  "bookTitle": "string",
-  "author": "string | null",
-  "narrator": "string | null",
-  "libraryId": "string",
-  "libraryName": "string | null"
+  "event": "webhook.test",
+  "title": "听悦测试通知",
+  "message": "如果你看到这条消息，说明 Webhook 配置正常。",
+  "data": {
+    "username": "admin",
+    "book_title": "示例有声书",
+    "chapter_title": "第一章"
+  }
 }
 ```
 
-### library.created / library.deleted
+测试结果会展示：
 
-```json
-{
-  "actorId": "string",
-  "actor": "admin",
-  "libraryId": "string",
-  "libraryName": "string",
-  "libraryType": "local | webdav",
-  "url": "string",
-  "rootPath": "string"
-}
-```
-
-## 发送行为
-
-- Webhook 异步发送，不阻塞登录、播放、扫描等主流程。
-- 单次请求超时时间为 8 秒。
-- 返回 `2xx` 表示发送成功。
-- 返回非 `2xx` 或请求失败时，Ting Reader 会记录 `audit::notification` 日志。
-- 当前没有自动重试队列。
-- 同一个事件可以配置多个 Webhook，服务端会逐个发送。
-- 只有启用状态的 Webhook 会收到通知。
+- 是否成功
+- HTTP 状态码
+- 目标服务响应
+- 实际渲染的请求体
+- 网络错误或企业微信业务错误
 
 ## API 数据结构
 
@@ -257,170 +354,102 @@ async def ting_reader_webhook(
 ```json
 {
   "id": "string",
-  "name": "string",
-  "url": "https://example.com/webhook",
+  "name": "企业微信通知",
+  "url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...",
   "enabled": true,
-  "events": ["user.login", "playback.play"],
-  "secret": "string | null",
+  "events": ["user.login", "library.scan_completed"],
+  "secret": null,
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body_template": "{\"msgtype\":\"markdown\",\"markdown\":{\"content\":{{json:notification}}}}",
   "created_at": "RFC3339",
   "updated_at": "RFC3339"
-}
-```
-
-### NotificationWebhookRequest
-
-```json
-{
-  "name": "string",
-  "url": "https://example.com/webhook",
-  "enabled": true,
-  "events": ["user.login", "playback.play"],
-  "secret": "string | null"
 }
 ```
 
 校验规则：
 
 - `name` 不能为空。
-- `url` 必须是 `http://` 或 `https://`。
+- `url` 必须使用 `http://` 或 `https://`。
 - `events` 至少选择一个，且必须是支持的事件 ID。
-- `secret` 可选。
+- 请求头名称和值必须是合法 HTTP Header。
+- `body_template` 不能为空，且不能引用未知变量。
 
 ## API 接口
 
-### 获取可监听事件
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/system/notifications/events` | 获取可监听事件 |
+| `GET` | `/api/system/notifications` | 获取 Webhook 列表 |
+| `POST` | `/api/system/notifications` | 创建 Webhook |
+| `PUT` | `/api/system/notifications/:id` | 更新 Webhook |
+| `DELETE` | `/api/system/notifications/:id` | 删除 Webhook |
+| `POST` | `/api/system/notifications/test` | 测试发送 |
 
-```http
-GET /api/system/notifications/events
-Authorization: Bearer <token>
-```
-
-响应：
-
-```json
-[
-  {
-    "id": "user.login",
-    "label": "用户登录",
-    "description": "用户成功登录系统"
-  }
-]
-```
-
-### 获取 Webhook 列表
-
-```http
-GET /api/system/notifications
-Authorization: Bearer <token>
-```
-
-响应：
-
-```json
-[
-  {
-    "id": "string",
-    "name": "企业微信通知",
-    "url": "https://example.com/webhook",
-    "enabled": true,
-    "events": ["user.login", "library.scan_completed"],
-    "secret": "string | null",
-    "created_at": "RFC3339",
-    "updated_at": "RFC3339"
-  }
-]
-```
-
-### 创建 Webhook
-
-```http
-POST /api/system/notifications
-Authorization: Bearer <token>
-Content-Type: application/json
-```
-
-请求体：
+### 测试发送请求
 
 ```json
 {
   "name": "企业微信通知",
-  "url": "https://example.com/webhook",
+  "url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...",
   "enabled": true,
-  "events": ["user.login", "library.scan_completed"],
-  "secret": "your-random-secret"
+  "events": ["user.login"],
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body_template": "{\"msgtype\":\"markdown\",\"markdown\":{\"content\":{{json:notification}}}}"
 }
 ```
 
-响应：`201 Created`
+响应：
 
-### 更新 Webhook
-
-```http
-PUT /api/system/notifications/:id
-Authorization: Bearer <token>
-Content-Type: application/json
+```json
+{
+  "success": true,
+  "status": 200,
+  "response_body": "{\"errcode\":0,\"errmsg\":\"ok\"}",
+  "rendered_body": "{\"msgtype\":\"markdown\",\"markdown\":{\"content\":\"听悦测试通知\\n如果你看到这条消息，说明 Webhook 配置正常。\"}}",
+  "error": null
+}
 ```
 
-请求体同创建接口。响应返回更新后的 Webhook。
+## 发送行为
 
-### 删除 Webhook
-
-```http
-DELETE /api/system/notifications/:id
-Authorization: Bearer <token>
-```
-
-响应：`204 No Content`
-
-## curl 示例
-
-先登录获取 Token：
-
-```bash
-TOKEN=$(curl -s http://localhost:3000/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"admin123"}' | jq -r '.token')
-```
-
-创建 Webhook：
-
-```bash
-curl http://localhost:3000/api/system/notifications \
-  -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name": "本地测试",
-    "url": "http://127.0.0.1:8787/hook",
-    "enabled": true,
-    "events": ["user.login"],
-    "secret": "test-secret"
-  }'
-```
+- Webhook 异步发送，不阻塞登录、播放和扫描等主流程。
+- 单次请求超时时间为 8 秒。
+- HTTP 非 `2xx` 会视为失败。
+- 企业微信响应中的非零 `errcode` 会视为失败。
+- 同一个事件可以配置多个 Webhook。
+- 当前没有自动重试队列。
+- 发送结果记录在 `audit::notification` 日志中。
 
 ## 排错
 
 ### 没收到请求
 
-- 确认 Webhook 已启用。
-- 确认事件 ID 已被选中。
-- 确认 URL 能从 Ting Reader 服务端访问，而不是只能从浏览器访问。
-- 本机测试时推荐使用 `http://127.0.0.1:<port>/path`。
-- 查看系统日志里的 `audit::notification`。
+- 确认配置已启用并选择了正确事件。
+- 确认 URL 能从 Ting Reader 服务端访问，而不仅是浏览器可以访问。
+- Docker 部署时，`127.0.0.1` 指向容器本身。
+- 查看“系统日志”中的“通知记录”。
 
-### 收到请求但校验失败
+### 企业微信返回 HTTP 200 但测试失败
 
-- 确认接收端读取的是 `X-Ting-Webhook-Secret`。
-- 确认配置里的密钥没有多余空格。
-- 如果配置密钥为空，服务端不会发送该 Header。
+展开测试结果查看 `errcode` 和 `errmsg`。常见原因是机器人 URL 错误、机器人被删除或请求体不符合消息类型协议。
 
-### 收到重复通知
+### JSON 模板无效
 
-- 播放进度的 WS/HTTP 定时同步不会触发 Webhook。
-- `playback.play` 只在首次写入某作品/章节进度时触发。
-- 浏览器音频拉流可能产生多次请求，但 Webhook 不直接依赖拉流日志。
+- JSON 字符串值使用 `{{json:变量}}`，不要写成 `"{{变量}}"`。
+- 使用测试发送查看实际请求体。
+- 检查逗号、括号和固定文本中的引号。
 
-### 外部服务返回失败
+### ntfy 没有收到消息
 
-- Ting Reader 只认为 `2xx` 是成功。
-- 非 `2xx` 会记录日志，但不会让原业务失败。
-- 当前没有自动重试队列，需要接收端保持稳定可用。
+- JSON 模式 URL 应填写服务根地址。
+- `topic` 应放在 Body 中。
+- 私有服务检查 `Authorization` 请求头。
+
+### Gotify 返回 401
+
+- 确认 URL 使用 Application Token，而不是 Client Token。
+- URL 通常是 `/message?token=APPLICATION_TOKEN`。

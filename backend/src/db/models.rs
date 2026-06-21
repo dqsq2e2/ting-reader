@@ -290,6 +290,8 @@ pub struct NotificationWebhook {
     pub enabled: i32,
     pub events: String,
     pub secret: Option<String>,
+    pub headers: String,
+    pub body_template: String,
     pub created_at: String,
     pub updated_at: String,
 }

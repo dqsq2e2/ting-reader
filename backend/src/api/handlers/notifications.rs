@@ -9,6 +9,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 const SUPPORTED_EVENTS: &[(&str, &str, &str)] = &[
@@ -36,6 +37,8 @@ pub struct NotificationWebhookResponse {
     pub enabled: bool,
     pub events: Vec<String>,
     pub secret: Option<String>,
+    pub headers: HashMap<String, String>,
+    pub body_template: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -49,6 +52,8 @@ pub struct NotificationWebhookRequest {
     #[serde(default)]
     pub events: Vec<String>,
     pub secret: Option<String>,
+    pub headers: Option<HashMap<String, String>>,
+    pub body_template: Option<String>,
 }
 
 fn default_enabled() -> bool {
@@ -64,6 +69,9 @@ impl From<NotificationWebhook> for NotificationWebhookResponse {
             enabled: webhook.enabled == 1,
             events: serde_json::from_str(&webhook.events).unwrap_or_default(),
             secret: webhook.secret,
+            headers: crate::core::notifications::parse_headers(&webhook.headers)
+                .unwrap_or_default(),
+            body_template: webhook.body_template,
             created_at: webhook.created_at,
             updated_at: webhook.updated_at,
         }
@@ -120,6 +128,11 @@ pub async fn create_notification_webhook(
         enabled: req.enabled as i32,
         events: normalize_events(req.events)?,
         secret: normalize_secret(req.secret),
+        headers: normalize_headers(req.headers.unwrap_or_default())?,
+        body_template: normalize_body_template(
+            req.body_template
+                .unwrap_or_else(crate::core::notifications::default_body_template),
+        )?,
         created_at: now.clone(),
         updated_at: now,
     };
@@ -159,6 +172,12 @@ pub async fn update_notification_webhook(
     webhook.enabled = req.enabled as i32;
     webhook.events = normalize_events(req.events)?;
     webhook.secret = normalize_secret(req.secret);
+    if let Some(headers) = req.headers {
+        webhook.headers = normalize_headers(headers)?;
+    }
+    if let Some(body_template) = req.body_template {
+        webhook.body_template = normalize_body_template(body_template)?;
+    }
     webhook.updated_at = chrono::Utc::now().to_rfc3339();
 
     state.notification_repo.update(&webhook).await?;
@@ -202,6 +221,53 @@ pub async fn delete_notification_webhook(
     );
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn test_notification_webhook(
+    State(_state): State<AppState>,
+    user: crate::auth::middleware::AuthUser,
+    Json(req): Json<NotificationWebhookRequest>,
+) -> Result<impl IntoResponse> {
+    require_admin(&user)?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let webhook = NotificationWebhook {
+        id: "test".to_string(),
+        name: normalize_name(&req.name)?,
+        url: normalize_url(&req.url)?,
+        enabled: 1,
+        events: normalize_events(req.events)?,
+        secret: normalize_secret(req.secret),
+        headers: normalize_headers(req.headers.unwrap_or_default())?,
+        body_template: normalize_body_template(
+            req.body_template
+                .unwrap_or_else(crate::core::notifications::default_body_template),
+        )?,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+
+    let result = match crate::core::notifications::deliver_webhook(
+        &webhook,
+        &crate::core::notifications::NotificationEventPayload::test_payload(),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(error) => crate::core::notifications::WebhookDeliveryResult {
+            success: false,
+            status: 0,
+            response_body: String::new(),
+            rendered_body: crate::core::notifications::render_template(
+                &webhook.body_template,
+                &crate::core::notifications::NotificationEventPayload::test_payload(),
+            )
+            .unwrap_or_default(),
+            error: Some(error.to_string()),
+        },
+    };
+
+    Ok(Json(result))
 }
 
 fn normalize_name(name: &str) -> Result<String> {
@@ -264,4 +330,20 @@ fn normalize_secret(secret: Option<String>) -> Option<String> {
     secret
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn normalize_headers(headers: HashMap<String, String>) -> Result<String> {
+    let normalized = headers
+        .into_iter()
+        .map(|(name, value)| (name.trim().to_string(), value.trim().to_string()))
+        .filter(|(name, _)| !name.is_empty())
+        .collect::<HashMap<_, _>>();
+
+    crate::core::notifications::validate_headers(&normalized)?;
+    serde_json::to_string(&normalized)
+        .map_err(|error| TingError::SerializationError(error.to_string()))
+}
+
+fn normalize_body_template(template: String) -> Result<String> {
+    crate::core::notifications::validate_template(&template)
 }

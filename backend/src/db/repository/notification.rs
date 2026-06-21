@@ -12,8 +12,10 @@ fn map_notification_webhook_row(row: &Row<'_>) -> rusqlite::Result<NotificationW
         enabled: row.get(3)?,
         events: row.get(4)?,
         secret: row.get(5)?,
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
+        headers: row.get(6)?,
+        body_template: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
     })
 }
 
@@ -32,7 +34,7 @@ impl NotificationWebhookRepository {
             .execute(|conn| {
                 let mut stmt = conn
                     .prepare(
-                        "SELECT id, name, url, enabled, events, secret, created_at, updated_at \
+                        "SELECT id, name, url, enabled, events, secret, headers, body_template, created_at, updated_at \
                          FROM notification_webhooks \
                          ORDER BY created_at DESC",
                     )
@@ -54,7 +56,7 @@ impl NotificationWebhookRepository {
         self.db
             .execute(move |conn| {
                 conn.query_row(
-                    "SELECT id, name, url, enabled, events, secret, created_at, updated_at \
+                    "SELECT id, name, url, enabled, events, secret, headers, body_template, created_at, updated_at \
                      FROM notification_webhooks WHERE id = ?",
                     [&id],
                     map_notification_webhook_row,
@@ -71,7 +73,7 @@ impl NotificationWebhookRepository {
             .execute(move |conn| {
                 let mut stmt = conn
                     .prepare(
-                        "SELECT id, name, url, enabled, events, secret, created_at, updated_at \
+                        "SELECT id, name, url, enabled, events, secret, headers, body_template, created_at, updated_at \
                          FROM notification_webhooks WHERE enabled = 1",
                     )
                     .map_err(TingError::DatabaseError)?;
@@ -104,8 +106,8 @@ impl NotificationWebhookRepository {
             .execute(move |conn| {
                 conn.execute(
                     "INSERT INTO notification_webhooks \
-                     (id, name, url, enabled, events, secret, created_at, updated_at) \
-                     VALUES (?, ?, ?, ?, ?, ?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'), STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                     (id, name, url, enabled, events, secret, headers, body_template, created_at, updated_at) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'), STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))",
                     rusqlite::params![
                         &webhook.id,
                         &webhook.name,
@@ -113,6 +115,8 @@ impl NotificationWebhookRepository {
                         webhook.enabled,
                         &webhook.events,
                         &webhook.secret,
+                        &webhook.headers,
+                        &webhook.body_template,
                     ],
                 )
                 .map_err(TingError::DatabaseError)?;
@@ -127,7 +131,7 @@ impl NotificationWebhookRepository {
             .execute(move |conn| {
                 conn.execute(
                     "UPDATE notification_webhooks \
-                     SET name = ?, url = ?, enabled = ?, events = ?, secret = ?, updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') \
+                     SET name = ?, url = ?, enabled = ?, events = ?, secret = ?, headers = ?, body_template = ?, updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') \
                      WHERE id = ?",
                     rusqlite::params![
                         &webhook.name,
@@ -135,6 +139,8 @@ impl NotificationWebhookRepository {
                         webhook.enabled,
                         &webhook.events,
                         &webhook.secret,
+                        &webhook.headers,
+                        &webhook.body_template,
                         &webhook.id,
                     ],
                 )

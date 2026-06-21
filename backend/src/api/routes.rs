@@ -83,6 +83,7 @@ use crate::api::handlers::{
     search_books,
     // Audio streaming
     stream_chapter,
+    test_notification_webhook,
     test_webdav_connection,
     uninstall_plugin,
     update_book,
@@ -261,6 +262,10 @@ pub fn build_api_routes(state: AppState) -> Router {
             get(list_notification_events),
         )
         .route(
+            "/api/v1/system/notifications/test",
+            post(test_notification_webhook),
+        )
+        .route(
             "/api/v1/system/notifications/:id",
             put(update_notification_webhook).delete(delete_notification_webhook),
         )
@@ -336,6 +341,10 @@ pub fn build_api_routes(state: AppState) -> Router {
         .route(
             "/api/system/notifications/events",
             get(list_notification_events),
+        )
+        .route(
+            "/api/system/notifications/test",
+            post(test_notification_webhook),
         )
         .route(
             "/api/system/notifications/:id",

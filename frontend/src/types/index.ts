@@ -164,6 +164,8 @@ export interface NotificationWebhook {
   enabled: boolean;
   events: string[];
   secret?: string;
+  headers: Record<string, string>;
+  bodyTemplate: string;
   createdAt: string;
   updatedAt: string;
 }

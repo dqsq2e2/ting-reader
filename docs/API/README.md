@@ -20,7 +20,7 @@
 | 任务 | [tasks.md](tasks.md) | 异步任务管理 |
 | 媒体流 | [media.md](media.md) | 音频流、HLS、封面代理、缓存 |
 | 系统 | [system.md](system.md) | 健康检查、统计报表、指标、配置、日志 |
-| 通知与事件 | [notifications.md](notifications.md) | 管理员 Webhook 事件监听 |
+| 通知与事件 | [notifications.md](notifications.md) | Webhook 事件、自定义请求头、Body 模板与测试发送 |
 | 工具 | [tools.md](tools.md) | 正则生成等工具接口 |
 | WebSocket | [websocket.md](websocket.md) | 实时播放进度同步 |
 | 错误处理 | [errors.md](errors.md) | 错误格式与状态码 |
