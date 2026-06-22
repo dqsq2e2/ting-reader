@@ -291,7 +291,8 @@ Body：
 
 ### playback.play
 
-`playback.play` 不是定时进度上报，只表示开始播放等低频事件。
+`playback.play` 不是定时进度上报，只表示开始播放等低频事件。播放审计日志由
+进度上报中的 `playback_start` 触发，音频预加载与流探测不会生成播放开始日志。
 
 ```json
 {

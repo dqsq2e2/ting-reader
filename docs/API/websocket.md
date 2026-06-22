@@ -19,9 +19,13 @@
   "type": "progress_update",
   "book_id": "string",
   "chapter_id": "string | null",
-  "position": 0.0
+  "position": 0.0,
+  "playback_start": 0.0
 }
 ```
+
+`playback_start` 可选，仅在真正开始或恢复播放时发送。周期进度心跳只发送
+`position`，后端会对同一次 WS/HTTP 起播事件去重。
 
 ### ping
 

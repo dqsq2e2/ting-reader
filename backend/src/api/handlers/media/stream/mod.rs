@@ -20,12 +20,7 @@ pub(crate) use decrypt::create_decrypted_stream;
 pub use hls::handle_hls_request;
 pub use hls_serve::{get_hls_playlist, get_hls_segment, seek_hls_stream};
 pub use hls_session::HlsSessionManager;
-use std::{
-    collections::HashMap,
-    process::Stdio,
-    sync::{Mutex, OnceLock},
-    time::{Duration, Instant},
-};
+use std::process::Stdio;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio_util::io::ReaderStream;
@@ -191,49 +186,6 @@ async fn transcode_plugin_stream(
         .into_response())
 }
 
-fn format_stream_time(seconds: f64) -> String {
-    let total_seconds = seconds.max(0.0).round() as u64;
-    let hours = total_seconds / 3600;
-    let minutes = (total_seconds % 3600) / 60;
-    let seconds = total_seconds % 60;
-
-    if hours > 0 {
-        format!("{}:{:02}:{:02}", hours, minutes, seconds)
-    } else {
-        format!("{}:{:02}", minutes, seconds)
-    }
-}
-
-static STREAM_START_LOG_CACHE: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
-
-fn should_log_stream_start(
-    user_id: &str,
-    chapter_id: &str,
-    seek_seconds: f64,
-    stream_mode: &str,
-) -> bool {
-    let window = Duration::from_secs(30);
-    let seek_bucket = seek_seconds.max(0.0).round() as u64;
-    let key = format!("{}:{}:{}:{}", user_id, chapter_id, seek_bucket, stream_mode);
-    let now = Instant::now();
-    let cache = STREAM_START_LOG_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut cache = match cache.lock() {
-        Ok(cache) => cache,
-        Err(_) => return true,
-    };
-
-    cache.retain(|_, last_seen| now.duration_since(*last_seen) < window);
-
-    if let Some(last_seen) = cache.get(&key) {
-        if now.duration_since(*last_seen) < window {
-            return false;
-        }
-    }
-
-    cache.insert(key, now);
-    true
-}
-
 /// Handler for GET /api/stream/:chapterId - Stream chapter audio
 pub async fn stream_chapter(
     State(state): State<AppState>,
@@ -276,75 +228,6 @@ pub async fn stream_chapter(
         .to_lowercase();
 
     let is_download_request = is_download_query(&params);
-
-    if !is_head_request && !is_download_request {
-        let user_id = user
-            .as_ref()
-            .map(|u| u.id.clone())
-            .unwrap_or_else(|| "anonymous".to_string());
-        let username = user
-            .as_ref()
-            .map(|u| u.username.clone())
-            .unwrap_or_else(|| "匿名用户".to_string());
-        let book_title = book.title.clone().unwrap_or_default();
-        let book_author = book.author.clone().unwrap_or_default();
-        let book_narrator = book.narrator.clone().unwrap_or_default();
-        let chapter_title = chapter.title.clone().unwrap_or_default();
-        let seek_seconds = params
-            .seek
-            .as_deref()
-            .and_then(|seek| seek.parse::<f64>().ok())
-            .unwrap_or(0.0);
-        let seek_text = format_stream_time(seek_seconds);
-        let duration_seconds = chapter.duration.map(|duration| duration as f64);
-        let duration_text = duration_seconds
-            .map(format_stream_time)
-            .unwrap_or_else(|| "--:--".to_string());
-        let stream_mode = if ext == "strm" {
-            "strm"
-        } else if let Some(transcode) = params.transcode.as_deref() {
-            if transcode == "hls" {
-                "hls"
-            } else {
-                "transcode"
-            }
-        } else {
-            "direct"
-        };
-        let transcode = params.transcode.as_deref().unwrap_or("none");
-
-        if should_log_stream_start(&user_id, &chapter.id, seek_seconds, stream_mode) {
-            tracing::info!(
-                target: "audit::playback",
-                user_id = %user_id,
-                username = %username,
-                action = "stream_start",
-                book_id = %book.id,
-                book_title = %book_title,
-                book_author = %book_author,
-                book_narrator = %book_narrator,
-                chapter_id = %chapter.id,
-                chapter_title = %chapter_title,
-                chapter_index = chapter.chapter_index,
-                chapter_duration_seconds = duration_seconds,
-                chapter_duration_text = %duration_text,
-                seek_seconds = seek_seconds,
-                seek_text = %seek_text,
-                library_id = %library.id,
-                library_name = %library.name,
-                library_type = %library.library_type,
-                stream_mode = %stream_mode,
-                audio_ext = %ext,
-                transcode = %transcode,
-                "用户 '{}' 开始播放书籍 '{}' 的章节 '{}'，位置 {}/{}",
-                username,
-                book_title,
-                chapter_title,
-                seek_text,
-                duration_text
-            );
-        }
-    }
 
     // Handle .strm files (URL Redirect or Proxy)
     if ext == "strm" {

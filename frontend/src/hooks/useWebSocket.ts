@@ -131,7 +131,7 @@ export function useWebSocket() {
 
   /** Send a progress update via WebSocket */
   const sendProgress = useCallback(
-    (bookId: string, chapterId: string, position: number) => {
+    (bookId: string, chapterId: string, position: number, playbackStart?: number) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(
           JSON.stringify({
@@ -139,6 +139,9 @@ export function useWebSocket() {
             book_id: bookId,
             chapter_id: chapterId,
             position: Math.floor(position),
+            ...(playbackStart !== undefined
+              ? { playback_start: Math.floor(playbackStart) }
+              : {}),
           })
         );
       }

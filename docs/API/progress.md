@@ -88,9 +88,14 @@
   "book_id": "string",
   "chapter_id": "string | null",
   "position": 0.0,
-  "duration": 0.0
+  "duration": 0.0,
+  "playback_start": 0.0
 }
 ```
+
+- `playback_start` 为可选字段，只在真正开始或恢复播放时发送，值为本次起播位置。
+- 普通周期进度同步不应携带 `playback_start`。
+- 后端播放日志由该字段触发，不再把音频预加载或流探测请求误记为播放开始。
 
 响应：`200 OK`
 
@@ -118,6 +123,6 @@
 
 事件：
 
-- 当当前用户首次写入某本书/章节进度时，会记录 `audit::playback` 日志。
-- 如果配置了 Webhook 监听，会触发 `playback.play` 事件。
+- 携带 `playback_start` 时会记录 `audit::playback` 日志；同一次 WS/HTTP 起播上报会自动去重。
+- 当前用户首次写入某本书/章节进度时，如果配置了 Webhook 监听，会触发 `playback.play` 事件。
 - 不是每次定时进度上报都会触发 Webhook，避免通知刷屏。

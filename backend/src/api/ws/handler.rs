@@ -34,6 +34,7 @@ enum ClientMessage {
         book_id: String,
         chapter_id: Option<String>,
         position: f64,
+        playback_start: Option<f64>,
     },
     #[serde(rename = "ping")]
     Ping,
@@ -196,6 +197,7 @@ async fn handle_client_message(
             book_id,
             chapter_id,
             position,
+            playback_start,
         } => {
             // Save progress to database
             let progress = Progress {
@@ -219,6 +221,17 @@ async fn handle_client_message(
             if let Err(e) = state.progress_repo.upsert(&progress).await {
                 warn!("WS 进度保存失败: user={} err={}", &user_id, e);
                 return;
+            }
+
+            if let Some(playback_start) = playback_start {
+                crate::api::playback_audit::record_playback_start(
+                    state,
+                    user_id,
+                    &book_id,
+                    chapter_id.as_deref(),
+                    playback_start,
+                )
+                .await;
             }
 
             // Broadcast to all sessions of this user (including other devices)

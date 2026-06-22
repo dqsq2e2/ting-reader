@@ -540,6 +540,17 @@ pub async fn update_progress(
 
     state.progress_repo.upsert(&progress).await?;
 
+    if let Some(playback_start) = req.playback_start {
+        crate::api::playback_audit::record_playback_start(
+            &state,
+            &user.id,
+            &req.book_id,
+            req.chapter_id.as_deref(),
+            playback_start,
+        )
+        .await;
+    }
+
     let book_title = book.title.clone().unwrap_or_else(|| "Unknown".to_string());
     if is_first_progress {
         crate::core::notifications::dispatch_notification_event(

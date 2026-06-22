@@ -3,7 +3,7 @@
 use crate::auth::AuthUser;
 use crate::core::error::{Result, TingError};
 use axum::http::{header, HeaderMap};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 
 #[derive(Debug, Clone)]
 pub struct RequestInfo {
@@ -41,29 +41,47 @@ pub fn request_info_from_headers(
 fn extract_real_ip(headers: &HeaderMap, peer_addr: Option<SocketAddr>) -> Option<String> {
     header_value(headers, "x-forwarded-for")
         .and_then(|value| value.split(',').next())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(truncate_header)
-        .or_else(|| {
-            header_value(headers, "x-real-ip")
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(truncate_header)
-        })
+        .and_then(normalize_ip)
+        .or_else(|| header_value(headers, "x-real-ip").and_then(normalize_ip))
         .or_else(|| {
             header_value(headers, "forwarded")
                 .and_then(|value| {
                     value.split(';').find_map(|part| {
                         let trimmed = part.trim();
-                        trimmed
-                            .strip_prefix("for=")
-                            .map(|ip| ip.trim_matches('"').trim_matches('[').trim_matches(']'))
+                        trimmed.strip_prefix("for=").map(|ip| ip.trim_matches('"'))
                     })
                 })
-                .filter(|value| !value.is_empty())
-                .map(truncate_header)
+                .and_then(normalize_ip)
         })
-        .or_else(|| peer_addr.map(|addr| addr.ip().to_string()))
+        .or_else(|| peer_addr.map(|addr| normalize_ip_addr(addr.ip()).to_string()))
+}
+
+fn normalize_ip(value: &str) -> Option<String> {
+    let value = value.trim().trim_matches('"');
+    let value = value
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(value);
+    if value.is_empty() {
+        return None;
+    }
+    if let Ok(ip) = value.parse::<IpAddr>() {
+        return Some(normalize_ip_addr(ip).to_string());
+    }
+    if let Ok(addr) = value.parse::<SocketAddr>() {
+        return Some(normalize_ip_addr(addr.ip()).to_string());
+    }
+    Some(truncate_header(value))
+}
+
+fn normalize_ip_addr(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(ipv6) => ipv6
+            .to_ipv4_mapped()
+            .map(IpAddr::V4)
+            .unwrap_or(IpAddr::V6(ipv6)),
+        ip => ip,
+    }
 }
 
 fn header_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
@@ -112,4 +130,29 @@ fn summarize_device(user_agent: &str) -> String {
     };
 
     format!("{} / {}", os, browser)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_ipv4_mapped_ipv6_from_forwarded_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "::ffff:192.168.1.17".parse().unwrap());
+
+        assert_eq!(
+            extract_real_ip(&headers, None).as_deref(),
+            Some("192.168.1.17")
+        );
+    }
+
+    #[test]
+    fn normalizes_ipv4_mapped_ipv6_peer_address() {
+        let peer = "[::ffff:192.168.1.17]:3000".parse().unwrap();
+        assert_eq!(
+            extract_real_ip(&HeaderMap::new(), Some(peer)).as_deref(),
+            Some("192.168.1.17")
+        );
+    }
 }

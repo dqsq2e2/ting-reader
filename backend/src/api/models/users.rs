@@ -52,6 +52,7 @@ pub struct UpdateProgressRequest {
     pub chapter_id: Option<String>,
     pub position: f64,
     pub duration: Option<f64>,
+    pub playback_start: Option<f64>,
 }
 
 // Favorites Management API models

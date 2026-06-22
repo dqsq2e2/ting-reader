@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { usePlayerStore } from '../store/playerStore';
 import { useAuthStore } from '../store/authStore';
@@ -786,28 +786,35 @@ const Player: React.FC = () => {
   }, [volume, isMuted]);
 
   const currentTimeRef = useRef(0);
-  useEffect(() => {
+  useLayoutEffect(() => {
     currentTimeRef.current = currentTime;
   }, [currentTime]);
 
   // Sync progress to backend via WebSocket (primary) and HTTP (fallback)
   useEffect(() => {
     if (isPlaying && currentBook && currentChapter) {
-      const saveProgressWs = () => {
-        wsSendProgress(currentBook.id, currentChapter.id, Math.floor(currentTimeRef.current));
+      const saveProgressWs = (playbackStart?: number) => {
+        wsSendProgress(
+          currentBook.id,
+          currentChapter.id,
+          Math.floor(currentTimeRef.current),
+          playbackStart
+        );
       };
 
-      const saveProgressHttp = () => {
+      const saveProgressHttp = (playbackStart?: number) => {
         apiClient.post('/api/progress', {
           bookId: currentBook.id,
           chapterId: currentChapter.id,
-          position: Math.floor(currentTimeRef.current)
+          position: Math.floor(currentTimeRef.current),
+          ...(playbackStart !== undefined ? { playbackStart } : {})
         }).catch(err => console.error('HTTP进度同步失败', err));
       };
 
-      // Save immediately on start
-      saveProgressWs();
-      saveProgressHttp();
+      // Mark only the actual start/resume packet. Periodic packets are progress heartbeats.
+      const playbackStart = Math.floor(currentTimeRef.current);
+      saveProgressWs(playbackStart);
+      saveProgressHttp(playbackStart);
 
       // WS-based sync every 2 seconds for real-time progress tracking
       const wsTimer = setInterval(saveProgressWs, 2000);
