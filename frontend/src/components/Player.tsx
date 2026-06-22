@@ -27,6 +27,7 @@ import {
   Check
 } from 'lucide-react';
 import { getCoverUrl } from '../utils/image';
+import { sortChaptersForPlayback } from '../utils/chapter';
 import { setAlpha, toSolidColor, isLight, isTooLight } from '../utils/color';
 import { useBookshelfCoverShape } from '../hooks/useBookshelfCoverShape';
 
@@ -398,16 +399,11 @@ const Player: React.FC = () => {
     }).catch(err => console.error('获取设置失败', err));
   }, [setPlaybackSpeed, setVolume]);
 
-  // 对章节数据按 chapterIndex 排序的辅助函数
-  const sortChaptersByIndex = (chapters: Chapter[]) => {
-    return [...chapters].sort((a, b) => (a.chapterIndex || 0) - (b.chapterIndex || 0));
-  };
-
   // Fetch chapters for the current book
   useEffect(() => {
     if (currentBook?.id) {
       apiClient.get(`/api/books/${currentBook.id}/chapters`).then(res => {
-        const sortedChapters = sortChaptersByIndex(res.data);
+        const sortedChapters = sortChaptersForPlayback(res.data);
         setChapters(sortedChapters);
         setCurrentGroupIndex(0); // Reset group index when book changes
         // 更新 store 中的 chapters 数据，确保 nextChapter 函数能正确工作
@@ -421,7 +417,7 @@ const Player: React.FC = () => {
     const storeChapters = usePlayerStore.getState().chapters;
     if (currentBook?.id && storeChapters.length === 0) {
       apiClient.get(`/api/books/${currentBook.id}/chapters`).then(res => {
-        const sortedChapters = sortChaptersByIndex(res.data);
+        const sortedChapters = sortChaptersForPlayback(res.data);
         setChapters(sortedChapters);
         usePlayerStore.setState({ chapters: sortedChapters });
       }).catch(err => console.error('获取章节失败', err));
@@ -877,7 +873,7 @@ const Player: React.FC = () => {
           const fetchBookId = currentBook.id;
           const fetchChapterId = currentChapter.id;
           apiClient.get(`/api/books/${fetchBookId}/chapters`).then(res => {
-            const updatedChapters = sortChaptersByIndex(res.data);
+            const updatedChapters = sortChaptersForPlayback(res.data);
             const updatedChapter = updatedChapters.find((c: Chapter) => c.id === fetchChapterId);
             if (updatedChapter && updatedChapter.duration && updatedChapter.duration > 0) {
               setChapters(updatedChapters);

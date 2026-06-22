@@ -99,7 +99,7 @@ impl ChapterRepository {
                  FROM chapters c \
                  LEFT JOIN progress p ON c.id = p.chapter_id AND p.user_id = ? \
                  WHERE c.book_id = ? \
-                 ORDER BY c.chapter_index ASC"
+                 ORDER BY c.is_extra ASC, COALESCE(c.chapter_index, 0) ASC, c.created_at ASC, c.id ASC"
             ).map_err(TingError::DatabaseError)?;
 
             let chapters = stmt.query_map(rusqlite::params![&user_id, &book_id], |row| {
@@ -228,7 +228,7 @@ impl ChapterRepository {
                  FROM chapters c \
                  LEFT JOIN progress p ON c.id = p.chapter_id AND p.user_id = ?1 \
                  WHERE c.book_id = ?2 AND (?3 IS NULL OR c.is_extra = ?3) \
-                 ORDER BY COALESCE(c.chapter_index, 0) {direction}, c.created_at {direction}, c.id {direction} \
+                 ORDER BY c.is_extra ASC, COALESCE(c.chapter_index, 0) {direction}, c.created_at {direction}, c.id {direction} \
                  LIMIT ?4 OFFSET ?5"
             );
 
@@ -357,5 +357,63 @@ impl Repository<Chapter> for ChapterRepository {
                 Ok(())
             })
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn find_by_book_with_progress_groups_main_chapters_before_extras() {
+        let db = Arc::new(DatabaseManager::new_in_memory().unwrap());
+        db.execute(|conn| {
+            conn.execute_batch("PRAGMA foreign_keys = OFF;")
+                .map_err(TingError::DatabaseError)?;
+
+            for (id, chapter_index, is_extra) in [
+                ("main-1", 1, 0),
+                ("extra-1", 1, 1),
+                ("main-2", 2, 0),
+                ("extra-2", 2, 1),
+            ] {
+                conn.execute(
+                    "INSERT INTO chapters (id, book_id, title, path, chapter_index, is_extra) \
+                     VALUES (?1, 'book-1', ?1, ?1, ?2, ?3)",
+                    rusqlite::params![id, chapter_index, is_extra],
+                )
+                .map_err(TingError::DatabaseError)?;
+            }
+
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        let repository = ChapterRepository::new(db);
+        let chapters = repository
+            .find_by_book_with_progress("book-1", "user-1")
+            .await
+            .unwrap();
+        let chapter_ids: Vec<_> = chapters
+            .into_iter()
+            .map(|(chapter, _, _)| chapter.id)
+            .collect();
+
+        assert_eq!(chapter_ids, vec!["main-1", "main-2", "extra-1", "extra-2"]);
+
+        let paged_chapters = repository
+            .find_by_book_with_progress_page("book-1", "user-1", None, 0, 10, false)
+            .await
+            .unwrap();
+        let paged_chapter_ids: Vec<_> = paged_chapters
+            .into_iter()
+            .map(|(chapter, _, _)| chapter.id)
+            .collect();
+
+        assert_eq!(
+            paged_chapter_ids,
+            vec!["main-1", "main-2", "extra-1", "extra-2"]
+        );
     }
 }

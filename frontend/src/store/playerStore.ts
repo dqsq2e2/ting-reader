@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Book, Chapter } from '../types';
+import { sortChaptersForPlayback } from '../utils/chapter';
 import { isTooLight } from '../utils/color';
 
 interface PlayerState {
@@ -59,20 +60,21 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       setIsSeriesEditing: (isSeriesEditing) => set({ isSeriesEditing }),
 
       playBook: (book, chapters, startChapterId) => {
+        const orderedChapters = sortChaptersForPlayback(chapters);
         // If no startChapterId is provided, find the most recently played chapter
         let chapter;
         if (startChapterId) {
-          chapter = chapters.find(c => c.id === startChapterId) || chapters[0];
+          chapter = orderedChapters.find(c => c.id === startChapterId) || orderedChapters[0];
         } else {
           // Sort by progressUpdatedAt descending and take the first one that has progress
-          const playedChapters = [...chapters].filter(c => c.progressUpdatedAt);
+          const playedChapters = orderedChapters.filter(c => c.progressUpdatedAt);
           if (playedChapters.length > 0) {
             playedChapters.sort((a, b) => {
               return new Date(b.progressUpdatedAt!).getTime() - new Date(a.progressUpdatedAt!).getTime();
             });
             chapter = playedChapters[0];
           } else {
-            chapter = chapters[0];
+            chapter = orderedChapters[0];
           }
         }
 
@@ -81,7 +83,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
         const newState: Partial<PlayerState> = {
           currentBook: book,
-          chapters,
+          chapters: orderedChapters,
           currentChapter: chapter,
           isPlaying: true,
           currentTime: startPos
@@ -138,20 +140,22 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       },
 
       playChapter: (book, chapters, chapter, resumePosition) => {
+        const orderedChapters = sortChaptersForPlayback(chapters);
+        const orderedChapter = orderedChapters.find(c => c.id === chapter.id) || chapter;
         let startPos: number;
         if (resumePosition !== undefined) {
           startPos = resumePosition;
-        } else if (isChapterFinished(chapter)) {
+        } else if (isChapterFinished(orderedChapter)) {
           // Clicking a finished chapter clears its progress and restarts from beginning
           startPos = 0;
         } else {
-          startPos = chapter.progressPosition || 0;
+          startPos = orderedChapter.progressPosition || 0;
         }
 
         const newState: Partial<PlayerState> = {
           currentBook: book,
-          chapters,
-          currentChapter: chapter,
+          chapters: orderedChapters,
+          currentChapter: orderedChapter,
           isPlaying: true,
           currentTime: startPos
         };
