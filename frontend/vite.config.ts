@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import legacy from '@vitejs/plugin-legacy'
+import { cspSafeLegacyPlugin } from './build/cspSafeLegacyPlugin'
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
@@ -9,6 +11,7 @@ export default defineConfig({
     legacy({
       targets: ['defaults', 'not IE 11', 'chrome >= 49', 'safari >= 10'],
     }),
+    cspSafeLegacyPlugin(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'pwa-64.png', 'pwa-128.png', 'pwa-192.png', 'pwa-256.png', 'pwa-512.png', 'pwa-*-maskable.png'],
