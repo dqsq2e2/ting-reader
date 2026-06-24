@@ -154,6 +154,45 @@ impl ProgressRepository {
             .await
     }
 
+    /// Get progress for a specific book enriched with chapter details
+    pub async fn get_by_book_enriched(
+        &self,
+        user_id: &str,
+        book_id: &str,
+    ) -> Result<Option<(Progress, Option<String>, Option<i32>)>> {
+        let user_id = user_id.to_string();
+        let book_id = book_id.to_string();
+        self.db
+            .execute(move |conn| {
+                conn.query_row(
+                    "SELECT p.id, p.user_id, p.book_id, p.chapter_id, p.position, p.duration, p.updated_at, \
+                        c.title as chapter_title, c.duration as chapter_duration \
+                     FROM progress p \
+                     LEFT JOIN chapters c ON p.chapter_id = c.id \
+                     WHERE p.user_id = ? AND p.book_id = ? \
+                     ORDER BY p.updated_at DESC LIMIT 1",
+                    rusqlite::params![&user_id, &book_id],
+                    |row| {
+                        let progress = Progress {
+                            id: row.get(0)?,
+                            user_id: row.get(1)?,
+                            book_id: row.get(2)?,
+                            chapter_id: row.get(3)?,
+                            position: row.get(4)?,
+                            duration: row.get(5)?,
+                            updated_at: row.get(6)?,
+                        };
+                        let chapter_title: Option<String> = row.get(7)?;
+                        let chapter_duration: Option<i32> = row.get(8)?;
+                        Ok((progress, chapter_title, chapter_duration))
+                    },
+                )
+                .optional()
+                .map_err(TingError::DatabaseError)
+            })
+            .await
+    }
+
     pub async fn exists_for_chapter(
         &self,
         user_id: &str,

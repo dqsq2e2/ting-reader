@@ -499,8 +499,17 @@ pub async fn get_book_progress(
     Path(book_id): Path<String>,
     user: crate::auth::middleware::AuthUser,
 ) -> Result<impl IntoResponse> {
-    match state.progress_repo.get_by_book(&user.id, &book_id).await? {
-        Some(progress) => Ok(Json(ProgressResponse::from(progress))),
+    match state
+        .progress_repo
+        .get_by_book_enriched(&user.id, &book_id)
+        .await?
+    {
+        Some((progress, chapter_title, chapter_duration)) => {
+            let mut response = ProgressResponse::from(progress);
+            response.chapter_title = chapter_title;
+            response.chapter_duration = chapter_duration;
+            Ok(Json(response))
+        }
         None => Err(TingError::NotFound(format!(
             "Progress not found for book {}",
             book_id
