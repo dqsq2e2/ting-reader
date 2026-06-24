@@ -26,6 +26,7 @@ use crate::api::handlers::{
     delete_library,
     delete_notification_webhook,
     delete_playlist,
+    delete_progress_history,
     delete_series,
     delete_task,
     delete_user,
@@ -146,6 +147,7 @@ pub fn build_api_routes(state: AppState) -> Router {
             "/api/progress/recent",
             get(get_recent_progress).delete(clear_recent_progress),
         )
+        .route("/api/progress/recent/delete", post(delete_progress_history))
         .route("/api/progress/:bookId", get(get_book_progress))
         .route("/api/progress", post(update_progress))
         // Favorites management endpoints

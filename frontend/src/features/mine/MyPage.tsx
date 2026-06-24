@@ -77,6 +77,7 @@ const MyPage: React.FC = () => {
   const listenedMinutes = Math.round(
     recentPlays.reduce((total, progress) => total + Math.max(0, progress.position || 0), 0) / 60
   );
+  const recentBookCount = new Set(recentPlays.map(progress => progress.bookId).filter(Boolean)).size;
   const userInitial = user?.username?.charAt(0).toUpperCase() || 'U';
 
   const handleAccountUpdate = async (event: React.FormEvent) => {
@@ -196,7 +197,7 @@ const MyPage: React.FC = () => {
           </form>
 
           <div className="grid grid-cols-3 gap-3 mt-6">
-            <SummaryCard label="最近" value={recentPlays.length} unit="本" />
+            <SummaryCard label="最近" value={recentBookCount} unit="本" />
             <SummaryCard label="收藏" value={favorites.length} unit="本" />
             <SummaryCard label="书单" value={playlistCount} unit="个" />
           </div>
@@ -209,7 +210,7 @@ const MyPage: React.FC = () => {
               to="/history"
               icon={<History size={22} />}
               title="我的历史"
-              description={recentPlays.length > 0 ? `最近听过 ${recentPlays.length} 本，约 ${listenedMinutes || 0} 分钟` : '查看图文收听记录'}
+              description={recentPlays.length > 0 ? `最近听过 ${recentBookCount} 本 / ${recentPlays.length} 章，约 ${listenedMinutes || 0} 分钟` : '查看图文收听记录'}
               tone="text-primary-600 bg-primary-50 dark:bg-primary-900/20"
             />
             <EntryItem

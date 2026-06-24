@@ -1,8 +1,8 @@
 use super::AppState;
 use crate::api::models::{
-    CreateUserRequest, FavoriteActionResponse, ProgressResponse, UpdateProgressRequest,
-    UpdateUserRequest, UpdateUserSettingsRequest, UserActionResponse, UserInfoResponse,
-    UserSettingsResponse,
+    CreateUserRequest, DeleteProgressHistoryRequest, DeleteProgressHistoryResponse,
+    FavoriteActionResponse, ProgressResponse, UpdateProgressRequest, UpdateUserRequest,
+    UpdateUserSettingsRequest, UserActionResponse, UserInfoResponse, UserSettingsResponse,
 };
 use crate::api::require_admin;
 use crate::core::error::{Result, TingError};
@@ -453,7 +453,7 @@ pub async fn get_recent_progress(
 ) -> Result<impl IntoResponse> {
     let progress_list = state
         .progress_repo
-        .get_recent_enriched(&user.id, 100)
+        .get_recent_enriched(&user.id, None)
         .await?;
     let progress: Vec<ProgressResponse> = progress_list
         .into_iter()
@@ -478,6 +478,19 @@ pub async fn clear_recent_progress(
 ) -> Result<impl IntoResponse> {
     state.progress_repo.clear_by_user(&user.id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Handler for POST /api/progress/recent/delete - Hide selected playback history
+pub async fn delete_progress_history(
+    State(state): State<AppState>,
+    user: crate::auth::middleware::AuthUser,
+    Json(req): Json<DeleteProgressHistoryRequest>,
+) -> Result<impl IntoResponse> {
+    let deleted = state
+        .progress_repo
+        .hide_history(&user.id, &req.progress_ids, &req.chapter_ids)
+        .await?;
+    Ok(Json(DeleteProgressHistoryResponse { deleted }))
 }
 
 /// Handler for GET /api/progress/:bookId - Get book playback progress

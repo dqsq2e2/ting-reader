@@ -410,7 +410,7 @@ const HomePage: React.FC = () => {
             {recentPlays.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {recentPlays.slice(0, 4).map(progress => (
-                  <RecentListenTile key={progress.bookId} progress={progress} coverShape={coverShape} />
+                  <RecentListenTile key={progress.id || `${progress.bookId}-${progress.chapterId}`} progress={progress} coverShape={coverShape} />
                 ))}
               </div>
             ) : (

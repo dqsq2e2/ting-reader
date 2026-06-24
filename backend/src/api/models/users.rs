@@ -45,6 +45,21 @@ pub struct RecentProgressResponse {
     pub total: usize,
 }
 
+/// Request body for hiding selected visible history entries.
+#[derive(Debug, Deserialize)]
+pub struct DeleteProgressHistoryRequest {
+    #[serde(default)]
+    pub progress_ids: Vec<String>,
+    #[serde(default)]
+    pub chapter_ids: Vec<String>,
+}
+
+/// Response for hiding visible history entries.
+#[derive(Debug, Serialize)]
+pub struct DeleteProgressHistoryResponse {
+    pub deleted: usize,
+}
+
 /// Request body for updating progress
 #[derive(Debug, Deserialize)]
 pub struct UpdateProgressRequest {

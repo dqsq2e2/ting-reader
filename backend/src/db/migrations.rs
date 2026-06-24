@@ -405,6 +405,14 @@ ALTER TABLE notification_webhooks ADD COLUMN headers TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE notification_webhooks ADD COLUMN body_template TEXT NOT NULL DEFAULT '{{json:payload}}';
 "#;
 
+/// Twenty-second schema migration (version 22)
+const MIGRATION_V22: &str = r#"
+-- Keep chapter progress durable while allowing users to hide visible history.
+ALTER TABLE progress ADD COLUMN history_hidden_at DATETIME;
+CREATE INDEX IF NOT EXISTS idx_progress_user_visible_updated
+ON progress(user_id, history_hidden_at, updated_at);
+"#;
+
 /// Run all pending database migrations
 ///
 /// This function applies database schema migrations in order.
@@ -574,6 +582,11 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     if current_version < 21 {
         info!("Applying migration v21: Configurable webhook requests");
         apply_migration(conn, 21, MIGRATION_V21)?;
+    }
+
+    if current_version < 22 {
+        info!("Applying migration v22: Separated visible history from progress");
+        apply_migration(conn, 22, MIGRATION_V22)?;
     }
 
     info!("数据库迁移成功完成");

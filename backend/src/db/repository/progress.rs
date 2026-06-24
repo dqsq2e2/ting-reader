@@ -1,6 +1,6 @@
 use crate::core::error::{Result, TingError};
 use crate::db::{manager::DatabaseManager, models::Progress};
-use rusqlite::OptionalExtension;
+use rusqlite::{params_from_iter, OptionalExtension, ToSql};
 use std::sync::Arc;
 
 /// Repository for Progress entities
@@ -14,28 +14,33 @@ impl ProgressRepository {
         Self { db }
     }
 
-    /// Get recent progress for a user
-    pub async fn get_recent(&self, user_id: &str, limit: i32) -> Result<Vec<Progress>> {
+    /// Get recent visible progress for a user
+    pub async fn get_recent(&self, user_id: &str, limit: Option<i32>) -> Result<Vec<Progress>> {
         let user_id = user_id.to_string();
         self.db
             .execute(move |conn| {
+                let mut sql = "SELECT p.id, p.user_id, p.book_id, p.chapter_id, p.position, p.duration, p.updated_at \
+                  FROM progress p \
+                  WHERE p.user_id = ? \
+                  AND p.chapter_id IS NOT NULL \
+                  AND p.history_hidden_at IS NULL \
+                  ORDER BY p.updated_at DESC"
+                    .to_string();
+                if limit.is_some() {
+                    sql.push_str(" LIMIT ?");
+                }
+
                 let mut stmt = conn
-                    .prepare(
-                        "SELECT p.id, p.user_id, p.book_id, p.chapter_id, p.position, p.duration, p.updated_at \
-                 FROM progress p \
-                 WHERE p.user_id = ? \
-                 AND NOT EXISTS ( \
-                   SELECT 1 FROM progress newer \
-                   WHERE newer.user_id = p.user_id \
-                   AND newer.book_id = p.book_id \
-                   AND (newer.updated_at > p.updated_at OR (newer.updated_at = p.updated_at AND newer.id > p.id)) \
-                 ) \
-                 ORDER BY p.updated_at DESC LIMIT ?",
-                    )
+                    .prepare(&sql)
                     .map_err(TingError::DatabaseError)?;
 
+                let mut args: Vec<&dyn ToSql> = vec![&user_id];
+                if let Some(ref limit) = limit {
+                    args.push(limit);
+                }
+
                 let progress = stmt
-                    .query_map(rusqlite::params![&user_id, limit], |row| {
+                    .query_map(params_from_iter(args), |row| {
                         Ok(Progress {
                             id: row.get(0)?,
                             user_id: row.get(1)?,
@@ -55,11 +60,11 @@ impl ProgressRepository {
             .await
     }
 
-    /// Get recent progress enriched with book and chapter details
+    /// Get recent visible progress enriched with book and chapter details
     pub async fn get_recent_enriched(
         &self,
         user_id: &str,
-        limit: i32,
+        limit: Option<i32>,
     ) -> Result<
         Vec<(
             Progress,
@@ -72,24 +77,30 @@ impl ProgressRepository {
     > {
         let user_id = user_id.to_string();
         self.db.execute(move |conn| {
-            let mut stmt = conn.prepare(
-                "SELECT p.id, p.user_id, p.book_id, p.chapter_id, p.position, p.duration, p.updated_at, \
+            let mut sql = "SELECT p.id, p.user_id, p.book_id, p.chapter_id, p.position, p.duration, p.updated_at, \
                  b.title as book_title, b.cover_url, b.library_id, c.title as chapter_title, c.duration as chapter_duration \
-                 FROM progress p \
-                 JOIN books b ON p.book_id = b.id \
-                 LEFT JOIN chapters c ON p.chapter_id = c.id \
-                 WHERE p.user_id = ? \
-                 AND NOT EXISTS ( \
-                   SELECT 1 FROM progress newer \
-                   WHERE newer.user_id = p.user_id \
-                   AND newer.book_id = p.book_id \
-                   AND (newer.updated_at > p.updated_at OR (newer.updated_at = p.updated_at AND newer.id > p.id)) \
-                 ) \
-                 ORDER BY p.updated_at DESC \
-                 LIMIT ?"
-            ).map_err(TingError::DatabaseError)?;
+                  FROM progress p \
+                  JOIN books b ON p.book_id = b.id \
+                  LEFT JOIN chapters c ON p.chapter_id = c.id \
+                  WHERE p.user_id = ? \
+                  AND p.chapter_id IS NOT NULL \
+                  AND p.history_hidden_at IS NULL \
+                  ORDER BY p.updated_at DESC"
+                .to_string();
+            if limit.is_some() {
+                sql.push_str(" LIMIT ?");
+            }
 
-            let progress = stmt.query_map(rusqlite::params![&user_id, limit], |row| {
+            let mut stmt = conn
+                .prepare(&sql)
+                .map_err(TingError::DatabaseError)?;
+
+            let mut args: Vec<&dyn ToSql> = vec![&user_id];
+            if let Some(ref limit) = limit {
+                args.push(limit);
+            }
+
+            let progress = stmt.query_map(params_from_iter(args), |row| {
                 let progress = Progress {
                     id: row.get(0)?,
                     user_id: row.get(1)?,
@@ -174,13 +185,77 @@ impl ProgressRepository {
             .await
     }
 
-    /// Clear all playback progress for a user
+    /// Hide all visible playback history for a user without deleting chapter progress.
     pub async fn clear_by_user(&self, user_id: &str) -> Result<usize> {
         let user_id = user_id.to_string();
         self.db
             .execute(move |conn| {
-                conn.execute("DELETE FROM progress WHERE user_id = ?", [&user_id])
-                    .map_err(TingError::DatabaseError)
+                conn.execute(
+                    "UPDATE progress \
+                     SET history_hidden_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') \
+                     WHERE user_id = ? AND history_hidden_at IS NULL",
+                    [&user_id],
+                )
+                .map_err(TingError::DatabaseError)
+            })
+            .await
+    }
+
+    /// Hide selected playback history rows without deleting chapter progress.
+    pub async fn hide_history(
+        &self,
+        user_id: &str,
+        progress_ids: &[String],
+        chapter_ids: &[String],
+    ) -> Result<usize> {
+        let user_id = user_id.to_string();
+        let progress_ids = progress_ids.to_vec();
+        let chapter_ids = chapter_ids.to_vec();
+        self.db
+            .execute(move |conn| {
+                let mut affected = 0;
+
+                if !progress_ids.is_empty() {
+                    let placeholders = std::iter::repeat("?")
+                        .take(progress_ids.len())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let sql = format!(
+                        "UPDATE progress \
+                         SET history_hidden_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') \
+                         WHERE user_id = ? \
+                         AND history_hidden_at IS NULL \
+                         AND id IN ({})",
+                        placeholders
+                    );
+                    let params = std::iter::once(user_id.as_str())
+                        .chain(progress_ids.iter().map(String::as_str));
+                    affected += conn
+                        .execute(&sql, params_from_iter(params))
+                        .map_err(TingError::DatabaseError)?;
+                }
+
+                if !chapter_ids.is_empty() {
+                    let placeholders = std::iter::repeat("?")
+                        .take(chapter_ids.len())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let sql = format!(
+                        "UPDATE progress \
+                         SET history_hidden_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') \
+                         WHERE user_id = ? \
+                         AND history_hidden_at IS NULL \
+                         AND chapter_id IN ({})",
+                        placeholders
+                    );
+                    let params = std::iter::once(user_id.as_str())
+                        .chain(chapter_ids.iter().map(String::as_str));
+                    affected += conn
+                        .execute(&sql, params_from_iter(params))
+                        .map_err(TingError::DatabaseError)?;
+                }
+
+                Ok(affected)
             })
             .await
     }
@@ -253,13 +328,15 @@ impl ProgressRepository {
 
                 if let Some(id) = existing_id {
                     conn.execute(
-                        "UPDATE progress SET position = ?, duration = ?, updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+                        "UPDATE progress \
+                         SET position = ?, duration = ?, updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'), history_hidden_at = NULL \
+                         WHERE id = ?",
                         rusqlite::params![progress.position, progress.duration, id],
                     ).map_err(TingError::DatabaseError)?;
                 } else {
                     conn.execute(
-                        "INSERT INTO progress (id, user_id, book_id, chapter_id, position, duration, updated_at) \
-                         VALUES (?, ?, ?, ?, ?, ?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                        "INSERT INTO progress (id, user_id, book_id, chapter_id, position, duration, updated_at, history_hidden_at) \
+                         VALUES (?, ?, ?, ?, ?, ?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'), NULL)",
                         rusqlite::params![
                             &progress.id,
                             &progress.user_id,
@@ -272,12 +349,13 @@ impl ProgressRepository {
                 }
             } else {
                 conn.execute(
-                    "INSERT INTO progress (id, user_id, book_id, chapter_id, position, duration, updated_at) \
-                     VALUES (?, ?, ?, ?, ?, ?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')) \
+                    "INSERT INTO progress (id, user_id, book_id, chapter_id, position, duration, updated_at, history_hidden_at) \
+                     VALUES (?, ?, ?, ?, ?, ?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'), NULL) \
                      ON CONFLICT(user_id, book_id, chapter_id) DO UPDATE SET \
                      position = excluded.position, \
                      duration = excluded.duration, \
-                     updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                     updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'), \
+                     history_hidden_at = NULL",
                     rusqlite::params![
                         &progress.id,
                         &progress.user_id,

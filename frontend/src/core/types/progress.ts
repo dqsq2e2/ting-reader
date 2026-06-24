@@ -1,7 +1,9 @@
 export interface Progress {
+  id: string;
   bookId: string;
   chapterId: string;
   position: number;
+  duration?: number;
   updatedAt: string;
   bookTitle?: string;
   chapterTitle?: string;
