@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import apiClient from '../../core/api/client';
 import type { Book, Chapter, Progress } from '../../core/types';
 import { usePlayerStore } from '../../core/stores/playerStore';
@@ -21,6 +21,8 @@ import ChapterListSection from './bookDetail/ChapterListSection';
 const BookDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const entryChapterId = searchParams.get('chapterId') || searchParams.get('chapter_id');
   const { user } = useAuthStore();
   const [book, setBook] = useState<Book | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -96,17 +98,19 @@ const BookDetailPage: React.FC = () => {
     setChapters([]);
     setChapterTotals({ total: 0, main: 0, extra: 0 });
     setBookProgress(null);
+    setActiveTab('main');
+    setCurrentGroupIndex(0);
     setChapterAscending(true);
-  }, [id]);
+  }, [id, entryChapterId]);
 
   // Clear highlighted chapter when current chapter changes (user plays a new chapter)
   const currentChapter = usePlayerStore((state) => state.currentChapter);
   useEffect(() => {
-    if (currentChapter?.bookId === book?.id) {
+    if (currentChapter?.bookId === book?.id && !entryChapterId) {
       setHighlightedChapterId(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentChapter?.id, book?.id]);
+  }, [currentChapter?.id, book?.id, entryChapterId]);
 
   const scrollGroups = (direction: 'left' | 'right') => {
     if (scrollRef.current) {
@@ -163,10 +167,12 @@ const BookDetailPage: React.FC = () => {
           apiClient.get('/api/settings')
         ]);
         const fetchedBook = bookRes.data;
+        const initialChapterId = entryChapterId || progressRes?.chapterId || null;
         setBook(fetchedBook);
         setBookProgress(progressRes);
-        setHighlightedChapterId(progressRes?.chapterId || null);
+        setHighlightedChapterId(initialChapterId);
         setIsFavorite(fetchedBook.isFavorite);
+        setActiveTab('main');
         setCurrentGroupIndex(0); // Reset group index when book changes
 
         // Load user settings
@@ -181,7 +187,7 @@ const BookDetailPage: React.FC = () => {
       }
     };
     fetchBookDetails();
-  }, [id]);
+  }, [id, entryChapterId]);
 
   const fetchChapterPage = React.useCallback(async (options?: {
     tab?: 'main' | 'extra';
@@ -236,17 +242,43 @@ const BookDetailPage: React.FC = () => {
     }
   }, [id, activeTab, currentGroupIndex]);
 
+  const scrollToChapterNode = React.useCallback((chapterId: string, groupIndex: number) => {
+    const el = document.getElementById(`chapter-${chapterId}`);
+    if (el) {
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+
+    const groupTab = document.getElementById(`group-tab-${groupIndex}`);
+    const container = scrollRef.current;
+    if (groupTab && container) {
+      const containerWidth = container.offsetWidth;
+      const tabWidth = groupTab.offsetWidth;
+      const tabLeft = groupTab.offsetLeft;
+
+      container.scrollTo({
+        left: tabLeft - containerWidth / 2 + tabWidth / 2,
+        behavior: 'smooth'
+      });
+    }
+  }, []);
+
   useEffect(() => {
     if (!book) return;
-    const targetChapterId = !hasInitialScrolled.current ? bookProgress?.chapterId : null;
+    const targetChapterId = !hasInitialScrolled.current
+      ? entryChapterId
+      : null;
     fetchChapterPage(
       targetChapterId
         ? { targetChapterId }
         : { tab: activeTab, groupIndex: currentGroupIndex }
-    );
+    ).then((page) => {
+      if (targetChapterId) {
+        setTimeout(() => scrollToChapterNode(targetChapterId, page?.groupIndex ?? currentGroupIndex), 120);
+      }
+    });
     hasInitialScrolled.current = true;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [book?.id, activeTab, currentGroupIndex]);
+  }, [book?.id, activeTab, currentGroupIndex, entryChapterId]);
 
   // Find the chapter to resume or highlight
   const resumeChapter = React.useMemo(() => {
@@ -255,6 +287,13 @@ const BookDetailPage: React.FC = () => {
     // 1. Priority: Currently playing chapter if it belongs to this book
     if (currentChapter && currentChapter.bookId === book.id) {
       return currentChapter;
+    }
+
+    if (entryChapterId) {
+      const entryChapter = chapters.find(c => c.id === entryChapterId);
+      if (entryChapter) {
+        return entryChapter;
+      }
     }
 
     if (bookProgress?.chapterId) {
@@ -266,38 +305,41 @@ const BookDetailPage: React.FC = () => {
           progressUpdatedAt: bookProgress.updatedAt,
         };
       }
+
+      return {
+        id: bookProgress.chapterId,
+        bookId: book.id,
+        title: bookProgress.chapterTitle || '上次收听章节',
+        path: '',
+        duration: bookProgress.chapterDuration || bookProgress.duration || 0,
+        chapterIndex: 0,
+        progressPosition: bookProgress.position,
+        progressUpdatedAt: bookProgress.updatedAt,
+      };
     }
 
-    return chapters[0] || null;
-  }, [book, chapters, currentChapter, bookProgress]);
+    return null;
+  }, [book, chapters, currentChapter, bookProgress, entryChapterId]);
 
   // Auto-highlight current chapter logic (without scroll)
   useEffect(() => {
     if (book?.id !== id) return;
 
+    if (entryChapterId && chapters.some(chapter => chapter.id === entryChapterId)) {
+      setHighlightedChapterId(entryChapterId);
+      return;
+    }
+
     if (resumeChapter) {
       setHighlightedChapterId(resumeChapter.id);
+      return;
     }
-  }, [book?.id, id, resumeChapter]);
+
+    setHighlightedChapterId(null);
+  }, [book?.id, id, resumeChapter, entryChapterId, chapters]);
 
   const doScroll = (chapterId: string, groupIndex: number) => {
-      const el = document.getElementById(`chapter-${chapterId}`);
-      if (el) {
-        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      }
-
-      const groupTab = document.getElementById(`group-tab-${groupIndex}`);
-      const container = scrollRef.current;
-      if (groupTab && container) {
-        const containerWidth = container.offsetWidth;
-        const tabWidth = groupTab.offsetWidth;
-        const tabLeft = groupTab.offsetLeft;
-
-        container.scrollTo({
-          left: tabLeft - containerWidth / 2 + tabWidth / 2,
-          behavior: 'smooth'
-        });
-      }
+      scrollToChapterNode(chapterId, groupIndex);
   };
 
   const scrollToChapterElement = (chapterId: string, groupIndex = currentGroupIndex) => {

@@ -50,7 +50,7 @@ const HistoryPage: React.FC = () => {
       const res = await apiClient.get('/api/progress/recent');
       setRecentPlays(res.data || []);
     } catch (err) {
-      console.error('获取收听历史失败', err);
+      console.error('获取我的历史失败', err);
     } finally {
       setLoading(false);
     }
@@ -166,7 +166,7 @@ const HistoryPage: React.FC = () => {
       setRecentPlays((current) => current.filter((item) => !selectedIds.has(progressKey(item))));
       exitSelectionMode();
     } catch (err) {
-      console.error('删除收听历史失败', err);
+      console.error('删除我的历史失败', err);
       alert('删除历史失败，请稍后重试');
     } finally {
       setDeleting(false);
@@ -186,7 +186,7 @@ const HistoryPage: React.FC = () => {
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
               <History className="text-primary-600" />
-              收听历史
+              我的历史
             </h1>
             <p className="text-sm md:text-base text-slate-500 dark:text-slate-400 mt-1">
               按书籍整理，共 {groups.length} 本、{recentPlays.length} 个章节。
@@ -262,7 +262,7 @@ const HistoryPage: React.FC = () => {
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 mb-4">
               <Play size={30} />
             </div>
-            <p className="text-slate-500">暂无收听历史，去书架开始第一本吧。</p>
+            <p className="text-slate-500">暂无我的历史，去书架开始第一本吧。</p>
             <Link to="/bookshelf" className="mt-4 inline-flex px-5 py-2.5 rounded-xl bg-primary-600 text-white text-sm font-bold">
               去书架
             </Link>
@@ -433,7 +433,7 @@ const HistoryChapterRow = ({
 
   return (
     <Link
-      to={`/book/${progress.bookId}`}
+      to={`/book/${progress.bookId}?chapterId=${encodeURIComponent(progress.chapterId)}`}
       className="flex items-center gap-3 px-4 md:px-5 py-3 border-t border-slate-100 dark:border-slate-800 first:border-t-0 hover:bg-white dark:hover:bg-slate-900 transition-colors"
     >
       {body}
