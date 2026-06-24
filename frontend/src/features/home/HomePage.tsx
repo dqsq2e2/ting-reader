@@ -51,6 +51,11 @@ const getSeriesCover = (series: Series): PlaylistCoverItem[] => {
   }];
 };
 
+const progressUpdatedTime = (progress: Progress) => {
+  const time = new Date(progress.updatedAt).getTime();
+  return Number.isFinite(time) ? time : 0;
+};
+
 const HomePage: React.FC = () => {
   const currentChapter = usePlayerStore((state) => state.currentChapter);
   const coverShape = useBookshelfCoverShape();
@@ -112,6 +117,22 @@ const HomePage: React.FC = () => {
     return map;
   }, [books]);
 
+  const recentBookPlays = useMemo(() => {
+    const map = new Map<string, Progress>();
+
+    recentPlays.forEach(progress => {
+      if (!progress.bookId) return;
+      const existing = map.get(progress.bookId);
+      if (!existing || progressUpdatedTime(progress) > progressUpdatedTime(existing)) {
+        map.set(progress.bookId, progress);
+      }
+    });
+
+    return Array.from(map.values()).sort(
+      (a, b) => progressUpdatedTime(b) - progressUpdatedTime(a)
+    );
+  }, [recentPlays]);
+
   const recentlyAddedBooks = useMemo(() => {
     return [...books]
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -122,7 +143,7 @@ const HomePage: React.FC = () => {
     const seen = new Set<string>();
     const items: HeroItem[] = [];
 
-    recentPlays.forEach(progress => {
+    recentBookPlays.forEach(progress => {
       const book = bookMap.get(progress.bookId);
       const id = book?.id || progress.bookId;
       if (!id || seen.has(id)) return;
@@ -154,7 +175,7 @@ const HomePage: React.FC = () => {
     });
 
     return items.slice(0, 10);
-  }, [bookMap, favorites, recentPlays, recentlyAddedBooks]);
+  }, [bookMap, favorites, recentBookPlays, recentlyAddedBooks]);
 
   const activeHeroItem = useMemo(() => (
     heroItems.find(item => item.id === activeHeroBookId) || heroItems[0]
@@ -179,7 +200,7 @@ const HomePage: React.FC = () => {
     const source = [
       activeHeroItem?.book,
       ...favorites,
-      ...recentPlays.map(progress => bookMap.get(progress.bookId)),
+      ...recentBookPlays.map(progress => bookMap.get(progress.bookId)),
       ...recentlyAddedBooks,
     ].filter(Boolean) as Book[];
 
@@ -188,7 +209,7 @@ const HomePage: React.FC = () => {
       seen.add(book.id);
       return true;
     }).slice(0, 8);
-  }, [activeHeroItem?.book, bookMap, favorites, recentPlays, recentlyAddedBooks]);
+  }, [activeHeroItem?.book, bookMap, favorites, recentBookPlays, recentlyAddedBooks]);
 
   const listenMinutes = useMemo(() => {
     const seconds = recentPlays.reduce((sum, progress) => sum + Math.max(0, progress.position || 0), 0);
@@ -407,9 +428,9 @@ const HomePage: React.FC = () => {
           {homeLayout.showRecent && (
           <div className="space-y-4">
             <SectionTitle icon={<History size={22} className="text-primary-600" />} title="最近收听" to="/history" action="查看历史" />
-            {recentPlays.length > 0 ? (
+            {recentBookPlays.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {recentPlays.slice(0, 4).map(progress => (
+                {recentBookPlays.slice(0, 4).map(progress => (
                   <RecentListenTile key={progress.id || `${progress.bookId}-${progress.chapterId}`} progress={progress} coverShape={coverShape} />
                 ))}
               </div>
