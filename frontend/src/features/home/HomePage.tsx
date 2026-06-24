@@ -208,7 +208,7 @@ const HomePage: React.FC = () => {
       if (seen.has(book.id)) return false;
       seen.add(book.id);
       return true;
-    }).slice(0, 8);
+    }).slice(0, 6);
   }, [activeHeroItem?.book, bookMap, favorites, recentBookPlays, recentlyAddedBooks]);
 
   const listenMinutes = useMemo(() => {

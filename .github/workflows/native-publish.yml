@@ -2,6 +2,9 @@ name: Native FPK Build and Release
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
 
 jobs:
   native:
@@ -23,36 +26,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Get version from package.json
-        id: get_version
+      - name: Resolve release context
+        id: release_context
         run: |
-          VERSION=$(jq -r '.version' package.json)
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-
-      - name: Check Release Status
-        id: check_release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${{ env.VERSION }}"
-          ARTIFACT_NAME="ting-reader-native-${{ matrix.fpk_suffix }}-${VERSION}.fpk"
-          
-          echo "Checking for release v$VERSION and artifact $ARTIFACT_NAME..."
-          
-          if gh release view "v$VERSION" >/dev/null 2>&1; then
-            echo "Release v$VERSION exists."
-            # Check if artifact exists in the release assets
-            if gh release view "v$VERSION" --json assets -q ".assets[].name" | grep -q "^$ARTIFACT_NAME$"; then
-               echo "Artifact $ARTIFACT_NAME already exists in release."
-               echo "target=beta" >> $GITHUB_OUTPUT
-            else
-               echo "Artifact $ARTIFACT_NAME missing from release."
-               echo "target=formal" >> $GITHUB_OUTPUT
-            fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TARGET="beta"
+            VERSION="beta"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            TARGET="formal"
+            VERSION="${GITHUB_REF_NAME#v}"
           else
-            echo "Release v$VERSION does not exist."
-            echo "target=formal" >> $GITHUB_OUTPUT
+            echo "Unsupported release trigger: ${{ github.event_name }} / ${{ github.ref_type }}"
+            exit 1
           fi
+
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "target=$TARGET" >> $GITHUB_OUTPUT
+          echo "Resolved $TARGET build for version $VERSION"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -141,7 +131,7 @@ jobs:
       - name: Build FPK
         run: |
           VERSION="${{ env.VERSION }}"
-          TARGET="${{ steps.check_release.outputs.target }}"
+          TARGET="${{ steps.release_context.outputs.target }}"
           
           if [ "$TARGET" = "beta" ]; then
             echo "Building for Beta release..."
@@ -169,7 +159,7 @@ jobs:
           mv ting-reader.fpk "$OUTPUT_NAME"
 
       - name: Update Beta Tag
-        if: steps.check_release.outputs.target == 'beta'
+        if: steps.release_context.outputs.target == 'beta'
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
@@ -178,23 +168,25 @@ jobs:
 
       - name: Release Beta FPK
         uses: softprops/action-gh-release@v1
-        if: steps.check_release.outputs.target == 'beta'
+        if: steps.release_context.outputs.target == 'beta'
         with:
           tag_name: beta
           name: Beta Release
           body: "Latest beta build of ting-reader native FPK."
           prerelease: true
           make_latest: false
+          overwrite_files: true
           files: ting-reader-native-${{ matrix.fpk_suffix }}-beta.fpk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Release Formal FPK
         uses: softprops/action-gh-release@v1
-        if: steps.check_release.outputs.target == 'formal'
+        if: steps.release_context.outputs.target == 'formal'
         with:
           tag_name: v${{ env.VERSION }}
           files: ting-reader-native-${{ matrix.fpk_suffix }}-${{ env.VERSION }}.fpk
           fail_on_unmatched_files: false
+          overwrite_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

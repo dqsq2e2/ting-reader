@@ -3,64 +3,40 @@ name: Docker Build, Push and FPK Release
 on:
   workflow_dispatch:
   push:
-    branches: [main]
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - 'Dockerfile'
-      - 'package.json'
-      - '.github/ting-reader-fpk/**'
-      - '.github/workflows/docker-publish.yml'
+    tags:
+      - 'v*'
 
 jobs:
   prepare:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get_version.outputs.version }}
-      release_exists: ${{ steps.check_release.outputs.exists }}
-      should_build: ${{ steps.filter.outputs.docker }}
+      target: ${{ steps.get_version.outputs.target }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Check paths
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            docker:
-              - 'backend/**'
-              - 'frontend/**'
-              - 'Dockerfile'
-              - 'docker-compose.yml'
-            fpk:
-              - '.github/ting-reader-fpk/**'
-              - '.github/workflows/fnpack'
-
-      - name: Get version from package.json
+      - name: Resolve release context
         id: get_version
         run: |
-          VERSION=$(jq -r '.version' package.json)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TARGET="beta"
+            VERSION="beta"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            TARGET="formal"
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            echo "Unsupported release trigger: ${{ github.event_name }} / ${{ github.ref_type }}"
+            exit 1
+          fi
+
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Check if release exists
-        id: check_release
-        run: |
-          if gh release view "v${{ env.VERSION }}" >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Release v${{ env.VERSION }} already exists. Skipping release steps."
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "Release v${{ env.VERSION }} does not exist. Proceeding with build and release."
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "target=$TARGET" >> $GITHUB_OUTPUT
+          echo "Resolved $TARGET build for version $VERSION"
 
   docker:
     needs: prepare
-    # 只在需要构建时运行：workflow_dispatch 或者 release 不存在
-    if: github.event_name == 'workflow_dispatch' || needs.prepare.outputs.release_exists != 'true'
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -141,14 +117,12 @@ jobs:
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
           
-          # 如果是手动触发且 release 已存在，构建 beta
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ needs.prepare.outputs.release_exists }}" = "true" ]; then
+          if [ "${{ needs.prepare.outputs.target }}" = "beta" ]; then
             echo "Building beta image..."
             docker buildx imagetools create \
               --tag dqsq2e2/ting-reader:beta \
               $(printf 'dqsq2e2/ting-reader@sha256:%s ' *)
           else
-            # 否则构建正式版本
             echo "Building release images for version $VERSION..."
             docker buildx imagetools create \
               --tag dqsq2e2/ting-reader:latest \
@@ -158,7 +132,7 @@ jobs:
 
       - name: Inspect image
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ needs.prepare.outputs.release_exists }}" = "true" ]; then
+          if [ "${{ needs.prepare.outputs.target }}" = "beta" ]; then
             docker buildx imagetools inspect dqsq2e2/ting-reader:beta
           else
             docker buildx imagetools inspect dqsq2e2/ting-reader:${{ needs.prepare.outputs.version }}
@@ -173,23 +147,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Check paths
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            fpk:
-              - '.github/ting-reader-fpk/**'
-              - '.github/workflows/fnpack'
-
       - name: Prepare fnpack
-        if: needs.prepare.outputs.release_exists != 'true' || steps.filter.outputs.fpk == 'true'
         run: |
           chmod +x .github/workflows/fnpack
           sudo mv .github/workflows/fnpack /usr/local/bin/fnpack
 
       - name: Build FPK (Formal)
-        if: needs.prepare.outputs.release_exists != 'true'
+        if: needs.prepare.outputs.target == 'formal'
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
           cp .github/ting-reader-fpk/manifest .github/ting-reader-fpk/manifest.bak
@@ -199,14 +163,14 @@ jobs:
           mv .github/ting-reader-fpk/manifest.bak .github/ting-reader-fpk/manifest
 
       - name: Build FPK (Beta)
-        if: steps.filter.outputs.fpk == 'true'
+        if: needs.prepare.outputs.target == 'beta'
         run: |
           sed -i "s/^version[[:space:]]*=.*/version = beta/" .github/ting-reader-fpk/manifest
           fnpack build --directory .github/ting-reader-fpk
           mv ting-reader.fpk ting-reader-beta.fpk
 
       - name: Update Beta Tag
-        if: steps.filter.outputs.fpk == 'true'
+        if: needs.prepare.outputs.target == 'beta'
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
@@ -215,20 +179,21 @@ jobs:
 
       - name: Release Beta FPK
         uses: softprops/action-gh-release@v1
-        if: steps.filter.outputs.fpk == 'true'
+        if: needs.prepare.outputs.target == 'beta'
         with:
           tag_name: beta
           name: Beta Release
           body: "Latest beta build of ting-reader FPK."
           prerelease: true
           make_latest: false
+          overwrite_files: true
           files: ting-reader-beta.fpk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract Release Notes
         id: extract_notes
-        if: github.ref == 'refs/heads/main' && needs.prepare.outputs.release_exists != 'true'
+        if: needs.prepare.outputs.target == 'formal'
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
           START_LINE=$(grep -n "## \[$VERSION\]" CHANGELOG.md | cut -d: -f1)
@@ -239,23 +204,15 @@ jobs:
             echo "Full changelog available in CHANGELOG.md" > RELEASE_NOTES.md
           fi
 
-      - name: Update Git Tag
-        if: github.ref == 'refs/heads/main' && needs.prepare.outputs.release_exists != 'true'
-        run: |
-          VERSION="${{ needs.prepare.outputs.version }}"
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git tag -f v$VERSION
-          git push origin v$VERSION --force
-
       - name: Create Release
         uses: softprops/action-gh-release@v1
-        if: github.ref == 'refs/heads/main' && needs.prepare.outputs.release_exists != 'true'
+        if: needs.prepare.outputs.target == 'formal'
         with:
           tag_name: v${{ needs.prepare.outputs.version }}
           name: Release v${{ needs.prepare.outputs.version }}
           body_path: RELEASE_NOTES.md
           fail_on_unmatched_files: false
+          overwrite_files: true
           files: |
             ting-reader-${{ needs.prepare.outputs.version }}.fpk
         env:
