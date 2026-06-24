@@ -209,7 +209,16 @@ const HistoryPage: React.FC = () => {
                 className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-red-50 dark:bg-red-900/20 text-red-600 text-sm font-bold hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Trash2 size={18} />
-                {deleting ? '删除中...' : `删除所选 ${selectedIds.size || ''}`.trim()}
+                {deleting ? (
+                  '删除中...'
+                ) : (
+                  <>
+                    <span className="sm:hidden">删除</span>
+                    <span className="hidden sm:inline">
+                      {`删除所选 ${selectedIds.size || ''}`.trim()}
+                    </span>
+                  </>
+                )}
               </button>
               <button
                 onClick={exitSelectionMode}
