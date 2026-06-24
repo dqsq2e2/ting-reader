@@ -105,7 +105,7 @@
 
 ## POST /api/auth/token-login
 
-使用已有 JWT Token 显式登录。该接口保留给 API/工具客户端使用，Web 登录页不再展示完整 JWT Token 登录入口。
+使用已有 JWT Token 显式登录。该接口保留给 API/工具客户端使用。
 
 支持路径：
 

@@ -75,11 +75,10 @@
 说明：
 
 - `deleted` 表示本次被隐藏的可见历史记录数。
-- 后端原始 API 字段为 `snake_case`；Web 前端内部会由 `apiClient` 自动转换为 `camelCase`。
 
 ## GET /api/progress/:bookId
 
-获取指定书籍的最近播放进度。
+获取指定书籍的最近播放进度。响应会补充最近章节的 `chapter_title` 和 `chapter_duration`。
 
 路径参数：
 
@@ -101,8 +100,8 @@
   "book_title": null,
   "cover_url": null,
   "library_id": null,
-  "chapter_title": null,
-  "chapter_duration": null
+  "chapter_title": "string | null",
+  "chapter_duration": 0
 }
 ```
 

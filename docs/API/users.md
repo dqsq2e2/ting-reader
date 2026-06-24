@@ -78,7 +78,7 @@
 说明：
 
 - 普通用户响应中会隐藏 `widget_css`，并强制 `auto_cache = false`。
-- `settings_json` 为扩展配置容器，前端当前会把首页展示配置写入 `homeLayout`。
+- `settings_json` 为扩展配置容器，可保存客户端展示与播放偏好等设置。
 
 ### POST /api/settings
 
