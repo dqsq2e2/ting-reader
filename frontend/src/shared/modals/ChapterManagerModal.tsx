@@ -1,11 +1,14 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import type { Chapter, Book, Library } from '../../core/types';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Loader2, Save } from 'lucide-react';
+import type { Book, Chapter, Library } from '../../core/types';
 import apiClient from '../../core/api/client';
-import { X, Save, Loader2, Search, ArrowRight, Folder, CheckSquare, Square, ListOrdered, ListTodo } from 'lucide-react';
-import FixedSizeList from '../widgets/VirtualList';
-const List = FixedSizeList;
-import AutoSizer from '../widgets/AutoSizer';
 import BookSelector from './BookSelector';
+import ChapterEditDialog from './chapterManager/ChapterEditDialog';
+import ChapterManagerHeader from './chapterManager/ChapterManagerHeader';
+import ChapterManagerList from './chapterManager/ChapterManagerList';
+import ChapterManagerToolbar from './chapterManager/ChapterManagerToolbar';
+import { formatChapterLocation } from './chapterManager/pathUtils';
+import type { ChapterEditDraft, ChapterGroup, ChapterTab, EditableChapter } from './chapterManager/types';
 
 interface Props {
   book: Book;
@@ -15,9 +18,13 @@ interface Props {
   onSave: () => void;
 }
 
+const groupSize = 100;
+
 const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, onClose, onSave }) => {
-  const [chapters, setChapters] = useState<Chapter[]>(initialChapters);
+  const [chapters, setChapters] = useState<EditableChapter[]>(() => sortChapters(initialChapters));
   const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState<ChapterTab>('main');
+  const [groupIndex, setGroupIndex] = useState(0);
   const [saving, setSaving] = useState(false);
   const [changedIds, setChangedIds] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
@@ -25,13 +32,16 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
   const [showBookSelector, setShowBookSelector] = useState(false);
   const [moving, setMoving] = useState(false);
   const [pathLibrary, setPathLibrary] = useState<Library | null>(null);
+  const [editingChapter, setEditingChapter] = useState<EditableChapter | null>(null);
 
-  // Filter chapters
-  const filteredChapters = useMemo(() => {
-    if (!search) return chapters;
-    const lower = search.toLowerCase();
-    return chapters.filter(c => c.title.toLowerCase().includes(lower));
-  }, [chapters, search]);
+  useEffect(() => {
+    setChapters(sortChapters(initialChapters));
+    setChangedIds(new Set());
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+    setGroupIndex(0);
+    setSearch('');
+  }, [initialChapters]);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,11 +49,10 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
     const loadPathContext = async () => {
       try {
         const librariesRes = await apiClient.get('/api/libraries');
-
         if (cancelled) return;
 
         const libraries = librariesRes.data as Library[];
-        setPathLibrary(libraries.find(library => library.id === book.libraryId) || null);
+        setPathLibrary(libraries.find((library) => library.id === book.libraryId) || null);
       } catch (err) {
         console.error('Failed to load chapter path context', err);
       }
@@ -56,55 +65,160 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
     };
   }, [book.libraryId]);
 
-  const handleTitleChange = (id: string, newTitle: string) => {
-    setChapters(prev => prev.map(c => 
-      c.id === id ? { ...c, title: newTitle } : c
-    ));
-    setChangedIds(prev => new Set(prev).add(id));
+  const mainCount = useMemo(() => chapters.filter((chapter) => !chapter.isExtra).length, [chapters]);
+  const extraCount = useMemo(() => chapters.filter((chapter) => Boolean(chapter.isExtra)).length, [chapters]);
+
+  useEffect(() => {
+    if (activeTab === 'extra' && extraCount === 0) {
+      setActiveTab('main');
+      setGroupIndex(0);
+    } else if (activeTab === 'main' && mainCount === 0 && extraCount > 0) {
+      setActiveTab('extra');
+      setGroupIndex(0);
+    }
+  }, [activeTab, extraCount, mainCount]);
+
+  const tabChapters = useMemo(
+    () => chapters.filter((chapter) => (activeTab === 'extra' ? Boolean(chapter.isExtra) : !chapter.isExtra)),
+    [activeTab, chapters],
+  );
+
+  const filteredChapters = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return tabChapters;
+
+    return tabChapters.filter((chapter) => {
+      const location = formatChapterLocation(chapter, book, pathLibrary).toLowerCase();
+      return (
+        chapter.title.toLowerCase().includes(query) ||
+        String(chapter.chapterIndex).includes(query) ||
+        location.includes(query)
+      );
+    });
+  }, [book, pathLibrary, search, tabChapters]);
+
+  const groups = useMemo<ChapterGroup[]>(() => {
+    const count = Math.ceil(filteredChapters.length / groupSize);
+    return Array.from({ length: count }, (_, index) => ({
+      index,
+      start: index * groupSize + 1,
+      end: Math.min((index + 1) * groupSize, filteredChapters.length),
+    }));
+  }, [filteredChapters.length]);
+
+  useEffect(() => {
+    setGroupIndex((current) => Math.min(current, Math.max(groups.length - 1, 0)));
+  }, [groups.length]);
+
+  const visibleChapters = useMemo(() => {
+    if (groups.length <= 1) return filteredChapters;
+    const start = groupIndex * groupSize;
+    return filteredChapters.slice(start, start + groupSize);
+  }, [filteredChapters, groupIndex, groups.length]);
+
+  const allFilteredSelected =
+    filteredChapters.length > 0 && filteredChapters.every((chapter) => selectedIds.has(chapter.id));
+
+  const requestClose = useCallback(() => {
+    if (saving || moving) return;
+    if (changedIds.size > 0 && !window.confirm('有未保存更改，确定关闭吗？')) return;
+    onClose();
+  }, [changedIds.size, moving, onClose, saving]);
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    setGroupIndex(0);
   };
 
-  const handleIndexChange = (id: string, newIndex: string) => {
-    const num = parseInt(newIndex);
-    if (isNaN(num)) return;
-    setChapters(prev => prev.map(c => 
-      c.id === id ? { ...c, chapterIndex: num } : c
-    ));
-    setChangedIds(prev => new Set(prev).add(id));
+  const handleTabChange = (tab: ChapterTab) => {
+    setActiveTab(tab);
+    setSearch('');
+    setGroupIndex(0);
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+  };
+
+  const toggleSelectionMode = () => {
+    setSelectionMode((current) => {
+      if (current) setSelectedIds(new Set());
+      return !current;
+    });
   };
 
   const toggleSelection = (id: string) => {
     if (!selectionMode) return;
-    const newSet = new Set(selectedIds);
-    if (newSet.has(id)) newSet.delete(id);
-    else newSet.add(id);
-    setSelectedIds(newSet);
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   const toggleAll = () => {
     if (!selectionMode) return;
-    if (selectedIds.size === filteredChapters.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(filteredChapters.map(c => c.id)));
-    }
+    setSelectedIds((current) => {
+      if (filteredChapters.length > 0 && filteredChapters.every((chapter) => current.has(chapter.id))) {
+        const next = new Set(current);
+        filteredChapters.forEach((chapter) => next.delete(chapter.id));
+        return next;
+      }
+      const next = new Set(current);
+      filteredChapters.forEach((chapter) => next.add(chapter.id));
+      return next;
+    });
+  };
+
+  const applyChapterEdit = (chapterId: string, draft: ChapterEditDraft) => {
+    setChapters((current) =>
+      current.map((chapter) =>
+        chapter.id === chapterId
+          ? {
+              ...chapter,
+              title: draft.title,
+              chapterIndex: draft.chapterIndex,
+              isExtra: draft.isExtra ? 1 : 0,
+            }
+          : chapter,
+      ),
+    );
+    setChangedIds((current) => new Set(current).add(chapterId));
+    setEditingChapter(null);
+  };
+
+  const handleRenumber = () => {
+    if (!window.confirm('确定要按当前列表顺序重新生成章节序号（从 1 开始）吗？')) return;
+    setChapters((current) => current.map((chapter, index) => ({ ...chapter, chapterIndex: index + 1 })));
+    setChangedIds(new Set(chapters.map((chapter) => chapter.id)));
+  };
+
+  const handleJump = () => {
+    const value = window.prompt('输入章节序号');
+    const target = Number.parseInt((value || '').trim(), 10);
+    if (!Number.isFinite(target) || tabChapters.length === 0) return;
+
+    let targetIndex = tabChapters.findIndex((chapter) => chapter.chapterIndex >= target);
+    if (targetIndex < 0) targetIndex = tabChapters.length - 1;
+    setSearch('');
+    setGroupIndex(Math.floor(targetIndex / groupSize));
   };
 
   const handleSave = async () => {
     try {
       setSaving(true);
       const updates = chapters
-        .filter(c => changedIds.has(c.id))
-        .map(c => ({
-          id: c.id,
-          title: c.title,
-          chapter_index: c.chapterIndex,
-          is_extra: c.isExtra ? 1 : 0
+        .filter((chapter) => changedIds.has(chapter.id))
+        .map((chapter) => ({
+          id: chapter.id,
+          title: chapter.title,
+          chapter_index: chapter.chapterIndex,
+          is_extra: chapter.isExtra ? 1 : 0,
         }));
 
       if (updates.length > 0) {
         await apiClient.put(`/api/books/${bookId}/chapters/batch`, { updates });
       }
-      
+
       onSave();
       onClose();
     } catch (err) {
@@ -115,29 +229,16 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
     }
   };
 
-  const handleRenumber = () => {
-    if (confirm('确定要按当前列表顺序重新生成章节序号（从1开始）吗？')) {
-      const newChapters = chapters.map((c, idx) => ({
-        ...c,
-        chapterIndex: idx + 1
-      }));
-      setChapters(newChapters);
-      // Mark all as changed
-      const allIds = new Set(chapters.map(c => c.id));
-      setChangedIds(allIds);
-    }
-  };
-
   const handleMoveChapters = async (targetBook: Book) => {
     try {
       setMoving(true);
       await apiClient.post('/api/books/chapters/move', {
         target_book_id: targetBook.id,
-        chapter_ids: Array.from(selectedIds)
+        chapter_ids: Array.from(selectedIds),
       });
       setShowBookSelector(false);
-      onSave(); // Reload parent
-      onClose(); // Close modal
+      onSave();
+      onClose();
     } catch (err) {
       console.error('移动章节失败', err);
       alert('移动章节失败');
@@ -146,315 +247,96 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
     }
   };
 
-  const safeDecode = (str: string) => {
-    try {
-      return decodeURIComponent(str);
-    } catch {
-      return str;
-    }
-  };
-
-  const normalizePath = (path: string) => {
-    return safeDecode(path)
-      .replace(/\\/g, '/')
-      .replace(/([^:])\/{2,}/g, '$1/')
-      .replace(/\/+$/g, '');
-  };
-
-  const stripOuterSlashes = (path: string) => {
-    return path.replace(/^\/+|\/+$/g, '');
-  };
-
-  const joinDisplayPath = (...parts: Array<string | undefined | null>) => {
-    return parts
-      .map(part => stripOuterSlashes(part || ''))
-      .filter(Boolean)
-      .join('/');
-  };
-
-  const getPathName = (path: string) => {
-    const parts = stripOuterSlashes(normalizePath(path)).split('/').filter(Boolean);
-    return parts[parts.length - 1] || path;
-  };
-
-  const relativeFromRoot = (path: string, root: string) => {
-    const normalizedPath = normalizePath(path);
-    const normalizedRoot = normalizePath(root);
-    if (!normalizedRoot || normalizedRoot === '/') return null;
-
-    const lowerPath = normalizedPath.toLowerCase();
-    const lowerRoot = normalizedRoot.toLowerCase();
-    if (lowerPath === lowerRoot) return '';
-    if (lowerPath.startsWith(`${lowerRoot}/`)) {
-      return stripOuterSlashes(normalizedPath.slice(normalizedRoot.length + 1));
-    }
-    return null;
-  };
-
-  const relativeFromPathSegment = (path: string, segment: string) => {
-    const pathParts = stripOuterSlashes(normalizePath(path)).split('/').filter(Boolean);
-    const segmentParts = stripOuterSlashes(normalizePath(segment)).split('/').filter(Boolean);
-    if (segmentParts.length === 0 || segmentParts.length > pathParts.length) return null;
-
-    const lowerPathParts = pathParts.map(part => part.toLowerCase());
-    const lowerSegmentParts = segmentParts.map(part => part.toLowerCase());
-
-    for (let i = 0; i <= pathParts.length - segmentParts.length; i += 1) {
-      const matched = lowerSegmentParts.every((part, offset) => lowerPathParts[i + offset] === part);
-      if (matched) {
-        return pathParts.slice(i + segmentParts.length).join('/');
-      }
-    }
-
-    return null;
-  };
-
-  const getRelativeChapterPath = (chapterPath: string) => {
-    const roots: string[] = [];
-
-    if (pathLibrary) {
-      if (pathLibrary.libraryType === 'webdav') {
-        roots.push(joinDisplayPath(pathLibrary.url, pathLibrary.rootPath));
-      }
-      roots.push(pathLibrary.url);
-      roots.push(pathLibrary.rootPath);
-    }
-
-    for (const root of roots.filter(Boolean).sort((a, b) => b.length - a.length)) {
-      const relativePath = relativeFromRoot(chapterPath, root);
-      if (relativePath !== null) return relativePath;
-    }
-
-    if (pathLibrary?.libraryType === 'local') {
-      for (const segment of [pathLibrary.url, pathLibrary.rootPath].filter(Boolean)) {
-        const relativePath = relativeFromPathSegment(chapterPath, segment);
-        if (relativePath !== null) return relativePath;
-      }
-    }
-
-    if (book.path) {
-      const relativeToBook = relativeFromRoot(chapterPath, book.path);
-      if (relativeToBook !== null) {
-        return joinDisplayPath(getPathName(book.path), relativeToBook);
-      }
-    }
-
-    const normalizedPath = normalizePath(chapterPath);
-    if (!normalizedPath.includes(':') && !normalizedPath.startsWith('/')) {
-      return stripOuterSlashes(normalizedPath);
-    }
-    return getPathName(chapterPath);
-  };
-
-  const formatChapterLocation = (chapter: Chapter) => {
-    const libraryName = pathLibrary?.name || '未知存储库';
-    const relativePath = getRelativeChapterPath(chapter.path);
-    return relativePath ? `${libraryName} / ${relativePath}` : libraryName;
-  };
-
-  const Row = ({ index, style }: { index: number, style: React.CSSProperties }) => {
-    const chapter = filteredChapters[index];
-    const isSelected = selectedIds.has(chapter.id);
-    const isChanged = changedIds.has(chapter.id);
-    const audioLocation = formatChapterLocation(chapter);
-
-    return (
-      <div style={style} className="px-6 py-1">
-        <div className={`flex items-center gap-3 p-2 rounded-lg border transition-colors ${
-            isSelected 
-              ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-200 dark:border-primary-800' 
-              : isChanged
-                ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800'
-                : 'bg-white dark:bg-slate-800/50 border-slate-100 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-600'
-        }`}>
-          {/* Checkbox */}
-          {selectionMode && (
-            <button onClick={() => toggleSelection(chapter.id)} className="shrink-0 text-slate-400 hover:text-primary-600">
-              {isSelected ? <CheckSquare size={20} className="text-primary-600" /> : <Square size={20} />}
-            </button>
-          )}
-
-          {/* Index */}
-          <input
-            type="number"
-            value={chapter.chapterIndex}
-            onChange={(e) => handleIndexChange(chapter.id, e.target.value)}
-            className="w-16 bg-transparent text-center font-mono text-sm text-slate-500 border-b border-transparent focus:border-primary-500 focus:outline-none focus:bg-white dark:focus:bg-slate-800 rounded px-1"
-          />
-
-          {/* Title */}
-          <div className="flex-1 min-w-0">
-            <input
-              type="text"
-              value={chapter.title}
-              onChange={(e) => handleTitleChange(chapter.id, e.target.value)}
-              className="w-full bg-transparent border-none p-0 text-slate-900 dark:text-white font-medium focus:ring-0"
-              placeholder="章节标题"
-            />
-          </div>
-
-          {/* Extra Toggle */}
-          <button
-            onClick={() => {
-              setChapters(prev => prev.map(c =>
-                c.id === chapter.id ? { ...c, isExtra: Number(!c.isExtra) } : c
-              ));
-              setChangedIds(prev => new Set(prev).add(chapter.id));
-            }}
-            className={`px-2 py-0.5 text-xs font-medium rounded-md border transition-colors ${
-              chapter.isExtra 
-                ? 'bg-purple-50 text-purple-600 border-purple-200 dark:bg-purple-900/20 dark:text-purple-300 dark:border-purple-800' 
-                : 'text-slate-400 border-transparent hover:bg-slate-100 dark:hover:bg-slate-800'
-            }`}
-          >
-            番外
-          </button>
-
-          {/* Path (Tooltip on hover) */}
-          <div className="hidden md:flex items-center gap-2 max-w-[260px] text-xs text-slate-400 shrink-0" title={audioLocation}>
-            <Folder size={14} />
-            <span className="truncate">{audioLocation}</span>
-          </div>
-
-        </div>
-      </div>
-    );
-  };
+  const editingLocation = editingChapter ? formatChapterLocation(editingChapter, book, pathLibrary) : '';
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose}></div>
-      <div className="relative w-full max-w-5xl h-[90vh] bg-white dark:bg-slate-900 rounded-3xl shadow-2xl flex flex-col animate-in zoom-in-95 duration-200">
-        
-        {/* Header */}
-        <div className="flex items-start sm:items-center justify-between p-4 sm:p-6 border-b border-slate-100 dark:border-slate-800 shrink-0 gap-3">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 flex-1 min-w-0">
-            <h2 className="text-xl sm:text-2xl font-bold dark:text-white shrink-0">章节管理</h2>
-            <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl w-full sm:w-auto">
-              <Search size={16} className="text-slate-400 shrink-0" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="搜索章节..."
-                className="bg-transparent border-none p-0 text-sm w-full sm:w-40 focus:ring-0 text-slate-900 dark:text-white"
-              />
-            </div>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors shrink-0">
-            <X size={22} className="text-slate-500" />
-          </button>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-0 sm:p-4">
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={requestClose} />
+      <div
+        className="absolute inset-x-2 bottom-2 top-2 flex min-w-0 animate-in flex-col overflow-hidden rounded-3xl bg-white shadow-2xl duration-200 zoom-in-95 dark:bg-slate-900 sm:relative sm:inset-auto sm:h-[90vh] sm:w-full sm:max-w-5xl"
+      >
+        <ChapterManagerHeader
+          search={search}
+          activeTab={activeTab}
+          mainCount={mainCount}
+          extraCount={extraCount}
+          groups={groups}
+          currentGroupIndex={groupIndex}
+          onSearchChange={handleSearchChange}
+          onTabChange={handleTabChange}
+          onGroupChange={setGroupIndex}
+          onClose={requestClose}
+        />
+
+        <ChapterManagerToolbar
+          selectionMode={selectionMode}
+          allSelected={allFilteredSelected}
+          totalCount={filteredChapters.length}
+          selectedCount={selectedIds.size}
+          moving={moving}
+          onToggleSelectionMode={toggleSelectionMode}
+          onToggleAll={toggleAll}
+          onRenumber={handleRenumber}
+          onJump={handleJump}
+          onMove={() => setShowBookSelector(true)}
+        />
+
+        <div className="min-h-0 flex-1 bg-slate-50/50 py-2 dark:bg-slate-950/20">
+          <ChapterManagerList
+            book={book}
+            chapters={visibleChapters}
+            selectedIds={selectedIds}
+            changedIds={changedIds}
+            selectionMode={selectionMode}
+            pathLibrary={pathLibrary}
+            onToggleSelection={toggleSelection}
+            onEdit={setEditingChapter}
+          />
         </div>
 
-        {/* Toolbar */}
-        <div className="px-4 sm:px-6 py-2 sm:py-3 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between bg-slate-50/50 dark:bg-slate-900/50 shrink-0 gap-2">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => {
-                setSelectionMode(prev => {
-                  const next = !prev;
-                  if (!next) setSelectedIds(new Set());
-                  return next;
-                });
-              }}
-              className={`flex items-center gap-2 px-3 py-2 rounded-xl border font-bold text-sm transition-all shadow-sm ${
-                selectionMode
-                  ? 'bg-primary-600 text-white border-primary-600'
-                  : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
-              }`}
-            >
-              {selectionMode ? <CheckSquare size={18} /> : <ListTodo size={18} />}
-              {selectionMode ? '完成' : '选择'}
-            </button>
-
-            {selectionMode && (
-              <>
-                <button 
-                  onClick={toggleAll}
-                  className="flex items-center gap-2 text-sm font-bold text-slate-600 dark:text-slate-400 hover:text-primary-600 transition-colors"
-                >
-                  {selectedIds.size > 0 && selectedIds.size === filteredChapters.length ? <CheckSquare size={18} /> : <Square size={18} />}
-                  <span>全选</span>
-                  <span className="text-slate-400">({filteredChapters.length})</span>
-                </button>
-                
-                {selectedIds.size > 0 && (
-                  <span className="text-sm text-slate-500">
-                    已选 {selectedIds.size}
-                  </span>
-                )}
-              </>
-            )}
-          </div>
-
-          <div className="flex gap-2">
-            <button
-              onClick={handleRenumber}
-              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-600 dark:text-slate-300 font-bold text-sm hover:border-primary-500 hover:text-primary-600 transition-all shadow-sm"
-              title="按列表顺序重排（从1开始）"
-            >
-              <ListOrdered size={18} />
-              <span className="sm:hidden">重排</span>
-              <span className="hidden sm:inline">重排序号</span>
-            </button>
-
-            <button
-              onClick={() => setShowBookSelector(true)}
-              disabled={!selectionMode || selectedIds.size === 0 || moving}
-              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-600 dark:text-slate-300 font-bold text-sm hover:border-primary-500 hover:text-primary-600 disabled:opacity-50 disabled:hover:border-slate-200 transition-all shadow-sm"
-            >
-              {moving ? <Loader2 size={18} className="animate-spin" /> : <ArrowRight size={18} />}
-              <span className="sm:hidden">移动</span>
-              <span className="hidden sm:inline">移动到...</span>
-            </button>
-          </div>
-        </div>
-
-        {/* List Content */}
-        <div className="flex-1 min-h-0 w-full">
-            <AutoSizer>
-                {({ height, width }: { height: number, width: number }) => (
-                    <List
-                        height={height}
-                        width={width}
-                        itemCount={filteredChapters.length}
-                        itemSize={60} // Row height
-                    >
-                        {Row}
-                    </List>
-                )}
-            </AutoSizer>
-        </div>
-
-        {/* Footer */}
-        <div className="p-4 sm:p-6 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2 sm:gap-3 shrink-0">
-          <button 
-            onClick={onClose}
-            className="px-4 sm:px-6 py-2.5 sm:py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all text-sm sm:text-base"
+        <div className="flex min-w-0 shrink-0 items-center gap-3 border-t border-slate-100 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900 sm:px-6 sm:py-4">
+          <button
+            type="button"
+            onClick={requestClose}
+            className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-500 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
           >
             取消
           </button>
-          <button 
+          <button
+            type="button"
             onClick={handleSave}
             disabled={saving || changedIds.size === 0}
-            className="px-5 sm:px-8 py-2.5 sm:py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 flex items-center gap-2 transition-all disabled:opacity-50 disabled:shadow-none text-sm sm:text-base"
+            className="ml-auto inline-flex min-h-10 min-w-0 flex-1 items-center justify-center gap-2 truncate rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 dark:disabled:bg-slate-800 sm:flex-none sm:px-5 sm:min-w-[210px]"
           >
-            {saving ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
+            {saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
             保存更改 ({changedIds.size})
           </button>
         </div>
 
-        {/* Book Selector Modal */}
         {showBookSelector && (
-            <BookSelector
-                excludeIds={[bookId]}
-                onClose={() => setShowBookSelector(false)}
-                onSelect={handleMoveChapters}
-            />
+          <BookSelector
+            excludeIds={[bookId]}
+            onClose={() => setShowBookSelector(false)}
+            onSelect={handleMoveChapters}
+          />
+        )}
+
+        {editingChapter && (
+          <ChapterEditDialog
+            key={editingChapter.id}
+            chapter={editingChapter}
+            location={editingLocation}
+            onClose={() => setEditingChapter(null)}
+            onSave={applyChapterEdit}
+          />
         )}
       </div>
     </div>
   );
+};
+
+const sortChapters = (chapters: Chapter[]): EditableChapter[] => {
+  return [...chapters].sort((a, b) => a.chapterIndex - b.chapterIndex);
 };
 
 export default ChapterManagerModal;

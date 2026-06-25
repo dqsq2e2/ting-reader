@@ -1,5 +1,5 @@
 # Ting Reader Backend Configuration
-version = "1.4.6"
+version = "1.4.7"
 
 [server]
 host = "0.0.0.0"
