@@ -132,6 +132,140 @@ fn test_sensitive_field_encryption() {
 }
 
 #[test]
+fn test_sensitive_field_encryption_aliases() {
+    let (manager, _temp_dir) = test_config_manager();
+    let schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "api_key": {"type": "string", "encrypted": true},
+            "password": {"type": "string", "format": "password"},
+            "secret": {"type": "string", "format": "secret"},
+            "public_setting": {"type": "string"}
+        }
+    });
+    let plugin_id = "test-plugin@1.0.0".to_string();
+    let config = serde_json::json!({
+        "api_key": "api-key",
+        "password": "password-value",
+        "secret": "secret-value",
+        "public_setting": "public-value"
+    });
+
+    manager
+        .initialize_config(
+            plugin_id.clone(),
+            "Test Plugin".to_string(),
+            Some(schema),
+            config.clone(),
+        )
+        .unwrap();
+
+    assert_eq!(manager.get_config(&plugin_id).unwrap(), config);
+
+    let configs = manager.configs.read().unwrap();
+    let entry = configs.get(&plugin_id).unwrap();
+    for field in ["api_key", "password", "secret"] {
+        let stored = entry.config.get(field).unwrap().as_str().unwrap();
+        assert!(
+            stored.starts_with("encrypted:"),
+            "{} was not encrypted",
+            field
+        );
+        assert_ne!(stored, config[field].as_str().unwrap());
+    }
+    assert_eq!(entry.config["public_setting"], "public-value");
+}
+
+#[test]
+fn test_ensure_config_syncs_schema_and_encrypts_existing_sensitive_values() {
+    let (manager, _temp_dir) = test_config_manager();
+    let plugin_id = "test-plugin@1.0.0".to_string();
+
+    manager
+        .initialize_config(
+            plugin_id.clone(),
+            "Test Plugin".to_string(),
+            None,
+            serde_json::json!({"api_key": "plain-existing-value"}),
+        )
+        .unwrap();
+
+    let schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "api_key": {"type": "string", "format": "password"},
+            "region": {"type": "string", "default": "cn"}
+        }
+    });
+
+    manager
+        .ensure_config(
+            plugin_id.clone(),
+            "Test Plugin".to_string(),
+            Some(schema),
+            serde_json::json!({"region": "cn"}),
+        )
+        .unwrap();
+
+    assert_eq!(
+        manager.get_config(&plugin_id).unwrap(),
+        serde_json::json!({"api_key": "plain-existing-value", "region": "cn"})
+    );
+
+    let configs = manager.configs.read().unwrap();
+    let entry = configs.get(&plugin_id).unwrap();
+    assert_eq!(entry.encrypted_fields, vec!["api_key".to_string()]);
+    assert!(entry.config["api_key"]
+        .as_str()
+        .unwrap()
+        .starts_with("encrypted:"));
+}
+
+#[test]
+fn test_preserves_sensitive_field_when_placeholder_is_saved() {
+    let (manager, _temp_dir) = test_config_manager();
+    let schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "api_key": {"type": "string", "x-encrypted": true},
+            "public_setting": {"type": "string"}
+        }
+    });
+    let plugin_id = "test-plugin@1.0.0".to_string();
+
+    manager
+        .initialize_config(
+            plugin_id.clone(),
+            "Test Plugin".to_string(),
+            Some(schema),
+            serde_json::json!({
+                "api_key": "secret-key",
+                "public_setting": "before"
+            }),
+        )
+        .unwrap();
+
+    let merged = manager
+        .merge_preserved_sensitive_fields(
+            &plugin_id,
+            serde_json::json!({
+                "api_key": SECRET_UNCHANGED_PLACEHOLDER,
+                "public_setting": "after"
+            }),
+        )
+        .unwrap();
+    manager.update_config(&plugin_id, merged).unwrap();
+
+    assert_eq!(
+        manager.get_config(&plugin_id).unwrap(),
+        serde_json::json!({
+            "api_key": "secret-key",
+            "public_setting": "after"
+        })
+    );
+}
+
+#[test]
 fn test_config_hot_reload_notification() {
     let (manager, _temp_dir) = test_config_manager();
     let plugin_id = "test-plugin@1.0.0".to_string();

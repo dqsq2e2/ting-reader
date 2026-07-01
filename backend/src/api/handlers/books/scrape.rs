@@ -74,7 +74,10 @@ pub async fn scrape_book_diff(
     }
 
     if primary_source_id.is_none() {
-        primary_source_id = sources.iter().find(|s| s.enabled).map(|s| s.id.clone());
+        primary_source_id = sources
+            .iter()
+            .find(|s| s.enabled && !s.aggregate_auto_scrape)
+            .map(|s| s.id.clone());
     }
 
     let primary_source_id = match primary_source_id {
@@ -128,6 +131,8 @@ pub async fn scrape_book_diff(
         explicit: best_match.explicit.unwrap_or(false),
         abridged: best_match.abridged.unwrap_or(false),
         genre: best_match.genre.clone(),
+        chapter_title_template: best_match.chapter_title_template.clone(),
+        chapter_titles: best_match.chapter_titles.clone(),
     };
 
     // 4. Handle Specific Field Sources (Merge Strategy)
@@ -396,7 +401,7 @@ pub async fn apply_scrape_result(
                         book.genre = Some(value);
                     }
                 }
-                "year" | "published_year" | "publishedYear" => {
+                "year" | "published_year" => {
                     if let Some(value) = scrape_value_to_string(&selection.value) {
                         if let Ok(year) = value.parse::<i32>() {
                             book.year = Some(year);
@@ -415,7 +420,7 @@ pub async fn apply_scrape_result(
                         has_extended = true;
                     }
                 }
-                "published_date" | "publishedDate" => {
+                "published_date" => {
                     if let Some(value) = scrape_value_to_string(&selection.value) {
                         extended.published_date = Some(value);
                         has_extended = true;
@@ -514,7 +519,7 @@ pub async fn apply_scrape_result(
             // Recalculate theme color for new cover
             match crate::core::color::calculate_theme_color(&url).await {
                 Ok(Some(color)) => {
-                    tracing::info!("更新了书籍 {} 的主题颜色: {}", book.id, color);
+                    tracing::info!("Updated theme color for book {}: {}", book.id, color);
                     book.theme_color = Some(color);
                 }
                 Ok(None) => {
@@ -551,7 +556,12 @@ pub async fn apply_scrape_result(
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("计算主题颜色失败: {}", e);
+                    tracing::warn!(
+                        error = %e,
+                        message_key = "book.theme_color.calculate_failed",
+                        message_params = %serde_json::json!({ "error": e.to_string() }),
+                        "Book theme color calculation failed"
+                    );
                 }
             }
         }
@@ -612,9 +622,14 @@ pub async fn apply_scrape_result(
                     .write_book_nfo_to_dir(&target_dir, &metadata)
                 {
                     tracing::warn!(
-                        "为书籍 {} 写入 NFO 失败: {}",
-                        book.title.as_deref().unwrap_or("?"),
-                        e
+                        message_key = "metadata.nfo.write_failed",
+                        message_params = %serde_json::json!({
+                            "book_title": book.title.as_deref().unwrap_or("?"),
+                            "error": e.to_string(),
+                        }),
+                        book_title = %book.title.as_deref().unwrap_or("?"),
+                        error = %e,
+                        "Failed to write NFO"
                     );
                 }
             }
@@ -728,7 +743,17 @@ pub async fn apply_scrape_result(
                 if let Err(e) =
                     crate::core::metadata_writer::write_metadata_json(&target_dir, &metadata_json)
                 {
-                    tracing::error!(target: "audit::metadata", "为书籍 {} 写入 metadata.json 失败: {}", book.title.as_deref().unwrap_or("?"), e);
+                    tracing::error!(
+                        target: "audit::metadata",
+                        book_title = %book.title.as_deref().unwrap_or("?"),
+                        error = %e,
+                        message_key = "metadata.json.write_failed",
+                        message_params = %serde_json::json!({
+                            "book_title": book.title.as_deref().unwrap_or("?"),
+                            "error": e.to_string(),
+                        }),
+                        "Failed to write metadata.json"
+                    );
                 }
             }
         }
@@ -841,7 +866,12 @@ async fn recalculate_cover_theme_color(
             }
         }
         Err(e) => {
-            tracing::warn!("璁＄畻涓婚棰滆壊澶辫触: {}", e);
+            tracing::warn!(
+                error = %e,
+                message_key = "book.theme_color.calculate_failed",
+                message_params = %serde_json::json!({ "error": e.to_string() }),
+                "Book theme color calculation failed"
+            );
         }
     }
 }
@@ -926,9 +956,14 @@ async fn sync_basic_scrape_outputs(state: &AppState, book: &crate::db::models::B
             .write_book_nfo_to_dir(&target_dir, &metadata)
         {
             tracing::warn!(
-                "涓轰功绫?{} 鍐欏叆 NFO 澶辫触: {}",
-                book.title.as_deref().unwrap_or("?"),
-                e
+                book_title = %book.title.as_deref().unwrap_or("?"),
+                error = %e,
+                message_key = "metadata.nfo.write_failed",
+                message_params = %serde_json::json!({
+                    "book_title": book.title.as_deref().unwrap_or("?"),
+                    "error": e.to_string(),
+                }),
+                "Failed to write NFO"
             );
         }
     }
@@ -1016,7 +1051,17 @@ async fn sync_basic_scrape_outputs(state: &AppState, book: &crate::db::models::B
         if let Err(e) =
             crate::core::metadata_writer::write_metadata_json(&target_dir, &metadata_json)
         {
-            tracing::error!(target: "audit::metadata", "涓轰功绫?{} 鍐欏叆 metadata.json 澶辫触: {}", book.title.as_deref().unwrap_or("?"), e);
+            tracing::error!(
+                target: "audit::metadata",
+                book_title = %book.title.as_deref().unwrap_or("?"),
+                error = %e,
+                message_key = "metadata.json.write_failed",
+                message_params = %serde_json::json!({
+                    "book_title": book.title.as_deref().unwrap_or("?"),
+                    "error": e.to_string(),
+                }),
+                "Failed to write metadata.json"
+            );
         }
     }
 
@@ -1093,9 +1138,14 @@ async fn sync_scrape_extended_metadata(
             .write_book_nfo_to_dir(&target_dir, &metadata)
         {
             tracing::warn!(
-                "为书籍 {} 写入扩展 NFO 失败: {}",
-                book.title.as_deref().unwrap_or("?"),
-                e
+                book_title = %book.title.as_deref().unwrap_or("?"),
+                error = %e,
+                message_key = "metadata.nfo.write_failed",
+                message_params = %serde_json::json!({
+                    "book_title": book.title.as_deref().unwrap_or("?"),
+                    "error": e.to_string(),
+                }),
+                "Failed to write NFO"
             );
         }
     }
@@ -1136,7 +1186,17 @@ async fn sync_scrape_extended_metadata(
         if let Err(e) =
             crate::core::metadata_writer::write_metadata_json(&target_dir, &metadata_json)
         {
-            tracing::error!(target: "audit::metadata", "为书籍 {} 写入扩展 metadata.json 失败: {}", book.title.as_deref().unwrap_or("?"), e);
+            tracing::error!(
+                target: "audit::metadata",
+                book_title = %book.title.as_deref().unwrap_or("?"),
+                error = %e,
+                message_key = "metadata.json.write_failed",
+                message_params = %serde_json::json!({
+                    "book_title": book.title.as_deref().unwrap_or("?"),
+                    "error": e.to_string(),
+                }),
+                "Failed to write metadata.json"
+            );
         }
     }
 

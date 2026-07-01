@@ -126,18 +126,31 @@ impl BookService {
                 book.cover_url = Some(cover_url.clone());
                 if request.theme_color.is_none() {
                     use crate::core::color::calculate_theme_color;
-                    tracing::info!("从封面 {} 重新计算书籍 {} 的主题颜色", book.id, cover_url);
+                    tracing::info!(
+                        "Recalculating theme color for book {} from cover {}",
+                        book.id,
+                        cover_url
+                    );
                     match calculate_theme_color(&cover_url).await {
                         Ok(Some(color)) => {
-                            tracing::info!("更新了书籍 {} 的主题颜色: {}", book.id, color);
+                            tracing::info!("Updated theme color for book {}: {}", book.id, color);
                             book.theme_color = Some(color);
                         }
                         Ok(None) => {
-                            tracing::warn!("无法从封面 {} 提取主题颜色", cover_url);
+                            tracing::warn!(
+                                cover_url = %cover_url,
+                                message_key = "book.theme_color.extract_failed",
+                                "Could not extract theme color from cover"
+                            );
                             book.theme_color = None;
                         }
                         Err(e) => {
-                            tracing::error!("计算主题颜色失败: {}", e);
+                            tracing::error!(
+                                error = %e,
+                                message_key = "book.theme_color.calculate_failed",
+                                message_params = %serde_json::json!({ "error": e.to_string() }),
+                                "Book theme color calculation failed"
+                            );
                             book.theme_color = None;
                         }
                     }

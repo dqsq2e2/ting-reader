@@ -43,7 +43,8 @@ pub struct LibrariesListResponse {
 
 /// Request body for creating a library
 ///
-/// Accepts frontend format: path (for local), webdav_url, webdav_username, webdav_password
+/// Accepts frontend format: path (for local), webdav_url, webdav_username, webdav_password,
+/// rss_feed_url (for RSS libraries)
 #[derive(Debug, Deserialize)]
 pub struct CreateLibraryRequest {
     pub name: String,
@@ -52,6 +53,8 @@ pub struct CreateLibraryRequest {
     pub path: Option<String>,
     /// WebDAV URL (for WebDAV libraries) - frontend sends this as "webdav_url"
     pub webdav_url: Option<String>,
+    /// RSS feed URL (for RSS libraries)
+    pub rss_feed_url: Option<String>,
     /// WebDAV username - frontend sends this as "webdav_username"
     pub webdav_username: Option<String>,
     /// WebDAV password - frontend sends this as "webdav_password"
@@ -66,7 +69,7 @@ pub struct CreateLibraryRequest {
 
 /// Request body for updating a library
 ///
-/// Accepts frontend format: path, webdav_url, webdav_username, webdav_password
+/// Accepts frontend format: path, webdav_url, webdav_username, webdav_password, rss_feed_url
 #[derive(Debug, Deserialize)]
 pub struct UpdateLibraryRequest {
     pub name: Option<String>,
@@ -75,6 +78,8 @@ pub struct UpdateLibraryRequest {
     pub path: Option<String>,
     /// WebDAV URL (for WebDAV libraries)
     pub webdav_url: Option<String>,
+    /// RSS feed URL (for RSS libraries)
+    pub rss_feed_url: Option<String>,
     /// WebDAV username
     pub webdav_username: Option<String>,
     /// WebDAV password

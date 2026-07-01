@@ -3,12 +3,17 @@ import apiClient from '../api/client';
 
 export type Theme = 'light' | 'dark' | 'system';
 
+export const normalizeTheme = (value: unknown): Theme => (
+  value === 'light' || value === 'dark' || value === 'system' ? value : 'system'
+);
+
 export const useTheme = () => {
   const [theme, setTheme] = useState<Theme>(() => {
-    return (localStorage.getItem('theme') as Theme) || 'system';
+    return normalizeTheme(localStorage.getItem('theme'));
   });
 
-  const syncThemeToDom = (t: Theme) => {
+  const syncThemeToDom = (value: unknown) => {
+    const t = normalizeTheme(value);
     const root = window.document.documentElement;
     root.classList.remove('light', 'dark');
 
@@ -21,9 +26,10 @@ export const useTheme = () => {
     localStorage.setItem('theme', t);
   };
 
-  const applyTheme = (t: Theme) => {
-    syncThemeToDom(t);
-    setTheme(t);
+  const applyTheme = (value: unknown) => {
+    const nextTheme = normalizeTheme(value);
+    syncThemeToDom(nextTheme);
+    setTheme(nextTheme);
   };
 
   useEffect(() => {

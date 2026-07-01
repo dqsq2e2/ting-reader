@@ -112,7 +112,7 @@
 
 - `auto_cache` 和 `widget_css` 仅管理员可更新，普通用户提交会被忽略。
 - 除系统字段外，额外字段会合并进 `settings_json`。
-- 为避免递归，`settings_json` / `settingsJson` / `user_id` / `updated_at` 不会写入扩展配置。
+- 为避免递归，`settings_json` / `user_id` / `updated_at` 不会写入扩展配置。
 
 响应：`200 OK`
 

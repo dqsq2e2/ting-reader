@@ -3,9 +3,9 @@ import type { Playlist, PlaylistItem } from '../types';
 export interface PlaylistCoverItem {
   id: string;
   title?: string;
-  coverUrl?: string;
-  libraryId?: string;
-  bookId?: string;
+  cover_url?: string;
+  library_id?: string;
+  book_id?: string;
 }
 
 /**
@@ -15,8 +15,8 @@ export const getPlaylistBookCount = (playlist?: Playlist | null): number => {
   if (!playlist) return 0;
   return (
     playlist.items?.reduce((total, item) => (
-      total + (item.itemType === 'series' ? (item.series?.books?.length || 0) : 1)
-    ), 0) ?? playlist.bookIds.length
+      total + (item.item_type === 'series' ? (item.series?.books?.length || 0) : 1)
+    ), 0) ?? playlist.book_ids.length
   );
 };
 
@@ -40,9 +40,9 @@ const pushCover = (covers: PlaylistCoverItem[], item: PlaylistItem) => {
       covers.push({
         id: `${item.series!.id}-${book.id || index}`,
         title: book.title || item.series!.title,
-        coverUrl: book.coverUrl || item.series!.coverUrl,
-        libraryId: book.libraryId || item.series!.libraryId,
-        bookId: book.id,
+        cover_url: book.cover_url || item.series!.cover_url,
+        library_id: book.library_id || item.series!.library_id,
+        book_id: book.id,
       });
     });
     return;
@@ -50,8 +50,8 @@ const pushCover = (covers: PlaylistCoverItem[], item: PlaylistItem) => {
   covers.push({
     id: item.series.id,
     title: item.series.title,
-    coverUrl: item.series.coverUrl,
-    libraryId: item.series.libraryId,
+    cover_url: item.series.cover_url,
+    library_id: item.series.library_id,
   });
 };
 
@@ -62,15 +62,15 @@ export const collectPlaylistCoverCandidates = (playlist: Playlist): PlaylistCove
   const covers: PlaylistCoverItem[] = [];
   if (playlist.items && playlist.items.length > 0) {
     playlist.items.forEach(item => {
-      if (item.itemType === 'series') {
+      if (item.item_type === 'series') {
         pushCover(covers, item);
       } else if (item.book) {
         covers.push({
           id: item.book.id,
           title: item.book.title,
-          coverUrl: item.book.coverUrl,
-          libraryId: item.book.libraryId,
-          bookId: item.book.id,
+          cover_url: item.book.cover_url,
+          library_id: item.book.library_id,
+          book_id: item.book.id,
         });
       }
     });
@@ -79,9 +79,9 @@ export const collectPlaylistCoverCandidates = (playlist: Playlist): PlaylistCove
       covers.push({
         id: book.id,
         title: book.title,
-        coverUrl: book.coverUrl,
-        libraryId: book.libraryId,
-        bookId: book.id,
+        cover_url: book.cover_url,
+        library_id: book.library_id,
+        book_id: book.id,
       });
     });
   }

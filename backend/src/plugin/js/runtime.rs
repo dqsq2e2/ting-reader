@@ -14,7 +14,8 @@ use tracing::{debug, info};
 
 use super::super::types::PluginMetadata;
 use super::super::wasm::sandbox::{ResourceLimits, Sandbox};
-use super::bindings::create_js_runtime_with_bindings;
+use super::bindings::{create_js_runtime_with_bindings, JsHostInvocationContext};
+use crate::plugin::{plugin_host_user_from_invocation_args, PluginHostGatewayHandle};
 
 /// JavaScript Runtime wrapper for executing JavaScript plugins
 pub struct JsRuntimeWrapper {
@@ -45,6 +46,15 @@ impl JsRuntimeWrapper {
         metadata: PluginMetadata,
         config: Option<Value>,
     ) -> Result<Self> {
+        Self::new_with_host_gateway(plugin_path, metadata, config, None)
+    }
+
+    pub fn new_with_host_gateway(
+        plugin_path: PathBuf,
+        metadata: PluginMetadata,
+        config: Option<Value>,
+        host_gateway: Option<PluginHostGatewayHandle>,
+    ) -> Result<Self> {
         debug!("Creating JavaScript runtime for plugin: {}", metadata.name);
 
         // Create sandbox from plugin permissions
@@ -57,8 +67,18 @@ impl JsRuntimeWrapper {
 
         // Create runtime with plugin bindings and sandbox
         let config = config.unwrap_or(Value::Object(serde_json::Map::new()));
-        let runtime =
-            create_js_runtime_with_bindings(metadata.name.clone(), config, sandbox.as_ref())?;
+        let runtime = create_js_runtime_with_bindings(
+            metadata.name.clone(),
+            metadata.instance_id(),
+            config,
+            sandbox.as_ref(),
+            host_gateway,
+            plugin_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf(),
+            metadata.npm_dependencies.clone(),
+        )?;
 
         Ok(Self {
             runtime,
@@ -129,46 +149,70 @@ impl JsRuntimeWrapper {
         // Start tracking execution time
         self.start_execution();
 
-        // Serialize arguments to JSON
+        // Serialize arguments to JSON and derive trusted host context from the
+        // original Rust-side payload, not from mutable JavaScript globals.
+        let args_value = serde_json::to_value(&args).context("Failed to serialize arguments")?;
+        let host_context = JsHostInvocationContext {
+            user: plugin_host_user_from_invocation_args(&args_value),
+        };
         let args_json =
-            serde_json::to_string(&args).context("Failed to serialize function arguments")?;
+            serde_json::to_string(&args_value).context("Failed to serialize function arguments")?;
+        self.set_host_invocation_context(host_context);
 
         // Call _ting_invoke using V8 API to avoid compiling new scripts for arguments
-        {
+        let call_result = (|| -> Result<()> {
             let scope = &mut self.runtime.handle_scope();
             let context = scope.get_current_context();
             let global = context.global(scope);
 
             // Get _ting_invoke function
             let invoke_name = v8::String::new(scope, "_ting_invoke").unwrap();
-            let invoke_val = global
-                .get(scope, invoke_name.into())
-                .ok_or_else(|| anyhow::anyhow!("_ting_invoke not found"))?;
-            let invoke_func = v8::Local::<v8::Function>::try_from(invoke_val)
-                .map_err(|_| anyhow::anyhow!("_ting_invoke is not a function"))?;
+            let invoke_val = match global.get(scope, invoke_name.into()) {
+                Some(value) => value,
+                None => return Err(anyhow::anyhow!("_ting_invoke not found")),
+            };
+            let invoke_func = match v8::Local::<v8::Function>::try_from(invoke_val) {
+                Ok(value) => value,
+                Err(_) => return Err(anyhow::anyhow!("_ting_invoke is not a function")),
+            };
 
             // Prepare arguments: [function_name, args_value]
             let func_name_v8 = v8::String::new(scope, function_name).unwrap();
 
             // Parse args JSON to V8 value
             let args_json_v8 = v8::String::new(scope, &args_json).unwrap();
-            let args_val = v8::json::parse(scope, args_json_v8)
-                .ok_or_else(|| anyhow::anyhow!("Failed to parse arguments JSON in V8"))?;
+            let args_val = match v8::json::parse(scope, args_json_v8) {
+                Some(value) => value,
+                None => return Err(anyhow::anyhow!("Failed to parse arguments JSON in V8")),
+            };
 
             let recv = v8::undefined(scope).into();
             let args = [func_name_v8.into(), args_val];
 
             // Call _ting_invoke
             if invoke_func.call(scope, recv, &args).is_none() {
-                return Err(anyhow::anyhow!("Failed to call _ting_invoke"));
+                Err(anyhow::anyhow!("Failed to call _ting_invoke"))
+            } else {
+                Ok(())
             }
+        })();
+        if let Err(error) = call_result {
+            self.clear_host_invocation_context();
+            self.stop_execution();
+            return Err(error);
         }
 
         // Drive the event loop until completion
-        self.runtime
+        if let Err(error) = self
+            .runtime
             .run_event_loop(Default::default())
             .await
-            .context("Failed to run event loop")?;
+            .context("Failed to run event loop")
+        {
+            self.clear_host_invocation_context();
+            self.stop_execution();
+            return Err(error);
+        }
 
         let (status, result_or_error) = {
             let scope = &mut self.runtime.handle_scope();
@@ -221,6 +265,7 @@ impl JsRuntimeWrapper {
         );
 
         // Stop tracking execution time
+        self.clear_host_invocation_context();
         self.stop_execution();
 
         match result_or_error {
@@ -261,6 +306,17 @@ impl JsRuntimeWrapper {
 
         debug!("JavaScript code executed successfully");
         Ok(())
+    }
+
+    fn set_host_invocation_context(&mut self, context: JsHostInvocationContext) {
+        self.runtime.op_state().borrow_mut().put(context);
+    }
+
+    fn clear_host_invocation_context(&mut self) {
+        self.runtime
+            .op_state()
+            .borrow_mut()
+            .put(JsHostInvocationContext::default());
     }
 
     /// Get the plugin metadata
@@ -363,6 +419,57 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn plugin_host_user_from_invocation_args_reads_capability_context() {
+        let user = plugin_host_user_from_invocation_args(&serde_json::json!({
+            "_context": {
+                "route": {
+                    "authenticated": true,
+                    "user": {
+                        "id": "user-1",
+                        "username": "alice",
+                        "role": "admin"
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(user.id, "user-1");
+        assert_eq!(user.username, "alice");
+        assert_eq!(user.role, "admin");
+    }
+
+    #[test]
+    fn plugin_host_user_from_invocation_args_reads_plugin_route_context() {
+        let user = plugin_host_user_from_invocation_args(&serde_json::json!({
+            "context": {
+                "authenticated": true,
+                "user": {
+                    "id": "user-2",
+                    "username": "bob",
+                    "role": "user"
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(user.id, "user-2");
+        assert_eq!(user.username, "bob");
+        assert_eq!(user.role, "user");
+    }
+
+    #[test]
+    fn plugin_host_user_from_invocation_args_rejects_public_context() {
+        assert!(plugin_host_user_from_invocation_args(&serde_json::json!({
+            "context": {
+                "authenticated": false,
+                "user": null
+            }
+        }))
+        .is_none());
+    }
 
     #[tokio::test]
     async fn test_js_runtime_creation() {

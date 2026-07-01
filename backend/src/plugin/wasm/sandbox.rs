@@ -222,7 +222,9 @@ impl Sandbox {
 
     /// Check if domain matches pattern (supports wildcards)
     fn domain_matches(domain: &str, pattern: &str) -> bool {
-        if pattern.starts_with("*.") {
+        if pattern == "*" {
+            true
+        } else if pattern.starts_with("*.") {
             // Wildcard subdomain match
             let base = &pattern[2..];
             domain.ends_with(base) || domain == base
@@ -261,6 +263,42 @@ pub enum Permission {
     #[serde(rename = "database_write")]
     DatabaseWrite,
 
+    /// Read book metadata through HostGateway
+    #[serde(rename = "books_read")]
+    BooksRead,
+
+    /// Read chapter metadata through HostGateway
+    #[serde(rename = "chapters_read")]
+    ChaptersRead,
+
+    /// Read playback progress through HostGateway
+    #[serde(rename = "progress_read")]
+    ProgressRead,
+
+    /// Read media bytes through HostGateway
+    #[serde(rename = "media_read")]
+    MediaRead,
+
+    /// Get controlled media URLs through HostGateway
+    #[serde(rename = "media_read_url")]
+    MediaReadUrl,
+
+    /// Write metadata through HostGateway
+    #[serde(rename = "metadata_write")]
+    MetadataWrite,
+
+    /// Create background tasks through HostGateway
+    #[serde(rename = "task_create")]
+    TaskCreate,
+
+    /// Read plugin cache through HostGateway
+    #[serde(rename = "cache_read")]
+    CacheRead,
+
+    /// Write plugin cache through HostGateway
+    #[serde(rename = "cache_write")]
+    CacheWrite,
+
     /// Permission to publish events
     #[serde(rename = "event_publish")]
     EventPublish,
@@ -278,6 +316,15 @@ impl std::fmt::Display for Permission {
             Permission::NetworkAccess(domain) => write!(f, "NetworkAccess({})", domain),
             Permission::DatabaseRead => write!(f, "DatabaseRead"),
             Permission::DatabaseWrite => write!(f, "DatabaseWrite"),
+            Permission::BooksRead => write!(f, "BooksRead"),
+            Permission::ChaptersRead => write!(f, "ChaptersRead"),
+            Permission::ProgressRead => write!(f, "ProgressRead"),
+            Permission::MediaRead => write!(f, "MediaRead"),
+            Permission::MediaReadUrl => write!(f, "MediaReadUrl"),
+            Permission::MetadataWrite => write!(f, "MetadataWrite"),
+            Permission::TaskCreate => write!(f, "TaskCreate"),
+            Permission::CacheRead => write!(f, "CacheRead"),
+            Permission::CacheWrite => write!(f, "CacheWrite"),
             Permission::EventPublish => write!(f, "EventPublish"),
             Permission::EventSubscribe(event_type) => write!(f, "EventSubscribe({})", event_type),
         }
@@ -393,6 +440,7 @@ mod tests {
         assert!(Sandbox::domain_matches("sub.example.com", "*.example.com"));
         assert!(Sandbox::domain_matches("example.com", "*.example.com"));
         assert!(!Sandbox::domain_matches("example.org", "*.example.com"));
+        assert!(Sandbox::domain_matches("plugins.example.org", "*"));
     }
 
     #[test]

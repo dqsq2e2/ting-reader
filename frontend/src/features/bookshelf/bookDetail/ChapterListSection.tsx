@@ -9,6 +9,7 @@ import {
   Settings,
   Loader2,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import type { Chapter } from '../../../core/types';
 import { setAlpha, toSolidColor, isLight } from '../../../core/utils/color';
 
@@ -16,6 +17,7 @@ interface ChapterGroup {
   start: number;
   end: number;
   offset: number;
+  index: number;
 }
 
 interface Props {
@@ -27,6 +29,7 @@ interface Props {
   currentGroupIndex: number;
   activeTab: 'main' | 'extra';
   chapterAscending: boolean;
+  chapterGroupsDescending: boolean;
   chapterPageLoading: boolean;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   currentChapterId?: string | null;
@@ -52,6 +55,7 @@ const ChapterListSection: React.FC<Props> = ({
   currentGroupIndex,
   activeTab,
   chapterAscending,
+  chapterGroupsDescending,
   chapterPageLoading,
   scrollRef,
   currentChapterId,
@@ -66,55 +70,65 @@ const ChapterListSection: React.FC<Props> = ({
   onOpenChapterManager,
   formatDuration,
   getChapterProgressText,
-}) => (
+}) => {
+  const { t } = useTranslation();
+  const displayGroups = chapterGroupsDescending ? [...groups].reverse() : groups;
+  const sortButton = (className = '') => (
+    <button
+      onClick={onToggleAscending}
+      className={`${className} items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-slate-600 dark:text-slate-300 hover:border-primary-500 hover:text-primary-600 transition-all shadow-sm`}
+    >
+      {chapterAscending ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+      {t(chapterAscending ? 'bookshelf.ascending' : 'bookshelf.descending')}
+    </button>
+  );
+
+  return (
   <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 md:p-6 shadow-sm border border-slate-100 dark:border-slate-800">
     <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
-      <h2 className="text-xl md:text-2xl font-bold dark:text-white flex items-center gap-2">
-        <ListMusic size={24} className="text-primary-600" />
-        章节列表
-        {isAdmin && (
-          <button
-            onClick={onOpenChapterManager}
-            className="ml-2 p-1.5 text-slate-400 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-            title="管理章节"
-          >
-            <Settings size={20} />
-          </button>
-        )}
-      </h2>
+      <div className="flex items-center gap-2 min-w-0">
+        <h2 className="text-xl md:text-2xl font-bold dark:text-white flex items-center gap-2 min-w-0">
+          <ListMusic size={24} className="text-primary-600 shrink-0" />
+          <span className="whitespace-nowrap">{t('bookshelf.chapterList')}</span>
+          {isAdmin && (
+            <button
+              onClick={onOpenChapterManager}
+              className="ml-2 p-1.5 text-slate-400 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors shrink-0"
+              title={t('bookshelf.manageChapters')}
+            >
+              <Settings size={20} />
+            </button>
+          )}
+        </h2>
+        {sortButton('inline-flex sm:hidden shrink-0')}
+      </div>
 
       <div className="flex flex-wrap items-center gap-2 self-start sm:justify-end">
         {chapterTotals.extra > 0 && (
           <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
             <button
-              onClick={() => { onSetActiveTab('main'); onSetCurrentGroupIndex(0); }}
+              onClick={() => onSetActiveTab('main')}
               className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
                 activeTab === 'main'
                   ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm'
                   : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
               }`}
             >
-              正文 ({chapterTotals.main})
+              {t('bookshelf.mainChaptersWithCount', { count: chapterTotals.main })}
             </button>
             <button
-              onClick={() => { onSetActiveTab('extra'); onSetCurrentGroupIndex(0); }}
+              onClick={() => onSetActiveTab('extra')}
               className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
                 activeTab === 'extra'
                   ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm'
                   : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
               }`}
             >
-              番外 ({chapterTotals.extra})
+              {t('bookshelf.extraChaptersWithCount', { count: chapterTotals.extra })}
             </button>
           </div>
         )}
-        <button
-          onClick={onToggleAscending}
-          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-slate-600 dark:text-slate-300 hover:border-primary-500 hover:text-primary-600 transition-all shadow-sm"
-        >
-          {chapterAscending ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-          {chapterAscending ? '正序' : '逆序'}
-        </button>
+        {sortButton('hidden sm:inline-flex')}
       </div>
     </div>
 
@@ -130,23 +144,23 @@ const ChapterListSection: React.FC<Props> = ({
           ref={scrollRef}
           className="flex gap-2 overflow-x-auto no-scrollbar scroll-smooth snap-x pb-2 px-1 mx-1 w-full"
         >
-          {groups.map((group, index) => (
+          {displayGroups.map((group) => (
             <button
-              key={index}
-              id={`group-tab-${index}`}
-              onClick={() => onSetCurrentGroupIndex(index)}
+              key={group.index}
+              id={`group-tab-${group.index}`}
+              onClick={() => onSetCurrentGroupIndex(group.index)}
               className={`px-4 py-2 rounded-xl text-sm font-bold transition-all border shrink-0 snap-start ${
-                currentGroupIndex === index
+                currentGroupIndex === group.index
                   ? `text-white shadow-lg shadow-black/10 ${!effectiveThemeColor ? 'bg-primary-600 border-primary-600' : ''}`
                   : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-50'
               }`}
-              style={currentGroupIndex === index && effectiveThemeColor ? {
+              style={currentGroupIndex === group.index && effectiveThemeColor ? {
                 backgroundColor: toSolidColor(effectiveThemeColor),
                 borderColor: toSolidColor(effectiveThemeColor),
                 color: isLight(effectiveThemeColor) ? '#475569' : '#ffffff'
               } : {}}
             >
-              第 {group.start}-{group.end} 章
+              {t('bookshelf.chapterRange', { start: group.start, end: group.end })}
             </button>
           ))}
         </div>
@@ -163,10 +177,10 @@ const ChapterListSection: React.FC<Props> = ({
       {chapterPageLoading && chapters.length === 0 ? (
         <div className="flex items-center justify-center py-10 text-slate-400">
           <Loader2 className="w-5 h-5 animate-spin mr-2" />
-          加载章节...
+          {t('bookshelf.loadingChapters')}
         </div>
       ) : chapters.length === 0 ? (
-        <div className="py-10 text-center text-slate-400">暂无章节</div>
+        <div className="py-10 text-center text-slate-400">{t('bookshelf.noChapters')}</div>
       ) : visibleChapters.map((chapter, index) => {
         const groupOffset = groups[currentGroupIndex]?.offset || 0;
         const actualIndex = groupOffset + (chapterAscending ? index : visibleChapters.length - index - 1);
@@ -199,7 +213,7 @@ const ChapterListSection: React.FC<Props> = ({
                   color: isLight(effectiveThemeColor) ? '#475569' : '#ffffff'
                 } : {}}
               >
-                {chapter.chapterIndex || (actualIndex + 1)}
+                {chapter.chapter_index || (actualIndex + 1)}
               </div>
               <div className="min-w-0 flex-1">
                 <p
@@ -216,7 +230,7 @@ const ChapterListSection: React.FC<Props> = ({
                   {progressText && (
                     <div
                       className={`text-[8px] min-[361px]:text-[9px] min-[431px]:text-[10px] font-medium px-0.5 min-[361px]:px-1 min-[431px]:px-1.5 py-0.5 rounded whitespace-nowrap ${
-                        progressText === '已播完'
+                        progressText === t('bookshelf.progressComplete')
                           ? 'bg-green-50 text-green-500 dark:bg-green-900/20'
                           : 'bg-primary-50 text-primary-600 dark:bg-primary-900/20'
                       }`}
@@ -252,6 +266,7 @@ const ChapterListSection: React.FC<Props> = ({
       })}
     </div>
   </div>
-);
+  );
+};
 
 export default ChapterListSection;

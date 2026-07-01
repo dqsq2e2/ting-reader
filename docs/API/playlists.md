@@ -29,9 +29,9 @@
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `book_ids` | string[] | 兼容字段。按书单顺序展开后的书籍 ID；系列会展开为系列内书籍。 |
-| `books` | BookResponse[] | 兼容字段。按书单顺序展开后的书籍列表；系列会展开为系列内书籍。结构见 [books.md](books.md)。 |
-| `items` | PlaylistItemResponse[] | 书单真实条目，保留 `book` / `series` 类型与手动排序。新前端应优先使用该字段。 |
+| `book_ids` | string[] | 按书单顺序展开后的书籍 ID；系列会展开为系列内书籍。 |
+| `books` | BookResponse[] | 按书单顺序展开后的书籍列表；系列会展开为系列内书籍。结构见 [books.md](books.md)。 |
+| `items` | PlaylistItemResponse[] | 书单条目，保留 `book` / `series` 类型与手动排序。 |
 
 ### PlaylistItemRequest
 
@@ -98,8 +98,6 @@
 }
 ```
 
-兼容旧字段：
-
 ```json
 {
   "title": "string",
@@ -110,8 +108,7 @@
 说明：
 
 - 推荐使用 `items`，可以同时保存书籍和系列。
-- 仅传 `book_ids` 时，后端会按旧逻辑转换为 `book` 条目。
-- 不支持 `bookIds`、`itemType`、`itemId` 等 camelCase 请求字段；直接调用后端 API 请使用 snake_case。
+- 传入 `book_ids` 时，会保存为 `book` 条目。
 
 ### UpdatePlaylistRequest
 
@@ -130,7 +127,7 @@
 
 - 所有字段均可选。
 - 传入 `items` 时，会整体替换书单内条目及顺序。
-- 传入 `book_ids` 时，会整体替换为纯书籍条目，用于兼容旧调用方。
+- 传入 `book_ids` 时，会整体替换为纯书籍条目。
 - `items` 优先级高于 `book_ids`。
 - 不传 `items` 和 `book_ids` 时，仅更新标题、描述等元信息。
 

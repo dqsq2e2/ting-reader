@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { 
   Home, 
   Library, 
@@ -18,6 +19,8 @@ import {
 import { useAuthStore } from '../../core/stores/authStore';
 import { useTheme } from '../../core/hooks/useTheme';
 import { usePlayerStore } from '../../core/stores/playerStore';
+import { normalizeLanguage } from '../../core/i18n/locales';
+import { useAppLanguage } from '../../core/i18n/useAppLanguage';
 import {
   getBrowserSessionId,
   hasSessionRestoreLogged,
@@ -26,6 +29,7 @@ import {
 import apiClient from '../../core/api/client';
 
 import Player from '../../features/player/Player';
+import PluginExtensionHost from '../pluginExtensions/PluginExtensionHost';
 
 type NavItem = {
   icon: React.ReactNode;
@@ -35,6 +39,8 @@ type NavItem = {
 };
 
 const Layout: React.FC = () => {
+  const { t } = useTranslation();
+  const { setLanguage } = useAppLanguage();
   const { refreshTheme } = useTheme(); // Initialize theme application
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
@@ -63,7 +69,7 @@ const Layout: React.FC = () => {
           const sessionId = getBrowserSessionId();
           const response = await apiClient.post(
             '/api/auth/session-restore',
-            { sessionId },
+            { session_id: sessionId },
             { headers: { 'X-Ting-Session-Id': sessionId } },
           );
           setUser(response.data.user);
@@ -71,9 +77,9 @@ const Layout: React.FC = () => {
         }
         setIsConnecting(false);
       } catch (err: unknown) {
-        console.error('连接验证失败', err);
+        console.error('Connection validation failed', err);
         // Don't auto-logout immediately, give user a chance to see error or retry
-        setConnectionError('连接服务器失败或登录已过期');
+        setConnectionError('connection.failedMessage');
         setIsConnecting(false);
       }
     };
@@ -90,14 +96,17 @@ const Layout: React.FC = () => {
     if (user && !isConnecting && !connectionError) {
       apiClient.get('/api/settings').then(res => {
         const settings = res.data;
-        // API returns camelCase
-        const speed = settings.playbackSpeed || settings.playback_speed;
+        const speed = settings.playback_speed;
         if (speed) {
           setPlaybackSpeed(speed);
         }
-      }).catch(err => console.error('同步用户设置失败', err));
+        const language = settings.language || settings.settings_json?.language;
+        if (language) {
+          void setLanguage(normalizeLanguage(language), false);
+        }
+      }).catch(err => console.error('Failed to sync user settings', err));
     }
-  }, [user, setPlaybackSpeed, isConnecting, connectionError]);
+  }, [user, setPlaybackSpeed, isConnecting, connectionError, setLanguage]);
 
   React.useEffect(() => {
     refreshTheme();
@@ -105,18 +114,18 @@ const Layout: React.FC = () => {
   }, []);
 
   const menuItems = [
-    { icon: <Home size={20} />, label: '首页', path: '/' },
-    { icon: <Library size={20} />, label: '书架', path: '/bookshelf', matches: ['/bookshelf', '/book/', '/series/', '/search'] },
-    { icon: <ListMusic size={20} />, label: '书单', path: '/playlists', matches: ['/playlists'] },
-    { icon: <User size={20} />, label: '我的', path: '/mine', matches: ['/mine', '/history', '/favorites', '/personalization', '/notifications', '/statistics', '/admin/statistics'] },
+    { icon: <Home size={20} />, label: t('nav.home'), path: '/' },
+    { icon: <Library size={20} />, label: t('nav.bookshelf'), path: '/bookshelf', matches: ['/bookshelf', '/book/', '/series/', '/search'] },
+    { icon: <ListMusic size={20} />, label: t('nav.playlists'), path: '/playlists', matches: ['/playlists'] },
+    { icon: <User size={20} />, label: t('nav.mine'), path: '/mine', matches: ['/mine', '/history', '/favorites', '/personalization', '/notifications', '/statistics', '/admin/statistics'] },
   ] satisfies NavItem[];
 
   const adminItems = [
-    { icon: <Database size={20} />, label: '库管理', path: '/admin/libraries' },
-    { icon: <Download size={20} />, label: '缓存管理', path: '/downloads' },
-    { icon: <Puzzle size={20} />, label: '插件管理', path: '/admin/plugins' },
-    { icon: <Terminal size={20} />, label: '系统日志', path: '/admin/logs' },
-    { icon: <Users size={20} />, label: '用户管理', path: '/admin/users' },
+    { icon: <Database size={20} />, label: t('nav.libraries'), path: '/admin/libraries' },
+    { icon: <Download size={20} />, label: t('nav.downloads'), path: '/downloads' },
+    { icon: <Puzzle size={20} />, label: t('nav.plugins'), path: '/admin/plugins' },
+    { icon: <Terminal size={20} />, label: t('nav.logs'), path: '/admin/logs' },
+    { icon: <Users size={20} />, label: t('nav.users'), path: '/admin/users' },
   ] satisfies NavItem[];
 
   const handleLogout = () => {
@@ -130,35 +139,35 @@ const Layout: React.FC = () => {
       <div className="flex flex-col items-center justify-center h-screen bg-slate-50 dark:bg-slate-950 p-4">
         <div className="w-full max-w-sm bg-white dark:bg-slate-900 rounded-2xl shadow-xl p-8 text-center space-y-6 border border-slate-200 dark:border-slate-800">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary-50 dark:bg-primary-900/20 mb-2">
-            <img src="/logo.png" alt="Logo" className="w-10 h-10 object-contain" />
+            <img src="/logo.png" alt={t('common.logoAlt')} className="w-10 h-10 object-contain" />
           </div>
           
           {isConnecting ? (
             <>
-              <h2 className="text-xl font-bold dark:text-white">正在连接服务器...</h2>
+              <h2 className="text-xl font-bold dark:text-white">{t('connection.connectingTitle')}</h2>
               <div className="flex justify-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
               </div>
-              <p className="text-sm text-slate-500">正在验证您的登录凭证</p>
+              <p className="text-sm text-slate-500">{t('connection.connectingSubtitle')}</p>
             </>
           ) : (
             <>
-              <h2 className="text-xl font-bold text-slate-900 dark:text-white">连接失败</h2>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white">{t('connection.failedTitle')}</h2>
               <p className="text-sm text-red-500 bg-red-50 dark:bg-red-900/10 p-3 rounded-lg border border-red-100 dark:border-red-900/20">
-                {connectionError}
+                {connectionError ? t(connectionError) : null}
               </p>
               <div className="space-y-3 pt-2">
                 <button
                   onClick={() => window.location.reload()}
                   className="w-full py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl transition-colors"
                 >
-                  重试连接
+                  {t('common.retry')}
                 </button>
                 <button
                   onClick={handleLogout}
                   className="w-full py-2.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 font-bold rounded-xl transition-colors"
                 >
-                  退出登录
+                  {t('nav.logout')}
                 </button>
               </div>
             </>
@@ -169,7 +178,7 @@ const Layout: React.FC = () => {
               onClick={handleLogout}
               className="mt-4 text-sm text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 font-medium transition-colors"
             >
-              取消并退出登录
+              {t('connection.cancelAndLogout')}
             </button>
           )}
         </div>
@@ -232,19 +241,19 @@ const Layout: React.FC = () => {
       `}>
         <div className="flex flex-col h-full p-4">
           <div className="hidden xl:flex items-center gap-3 px-4 py-6 mb-4">
-            <img src="/logo.png" alt="Logo" className="w-10 h-10 shadow-lg shadow-primary-500/10 object-contain" />
+            <img src="/logo.png" alt={t('common.logoAlt')} className="w-10 h-10 shadow-lg shadow-primary-500/10 object-contain" />
             <span className="font-bold text-xl dark:text-white tracking-tight">Ting Reader</span>
           </div>
 
           <nav className="flex-1 space-y-1 overflow-y-auto custom-scrollbar">
             <div className="xl:block hidden">
-              <div className="text-xs font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 mt-4">主菜单</div>
+              <div className="text-xs font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 mt-4">{t('nav.mainMenu')}</div>
               {menuItems.map((item) => <NavLink key={item.path} item={item} />)}
             </div>
 
             {user?.role === 'admin' && (
               <div className="xl:mt-8">
-                <div className="text-xs font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 mt-4 xl:mt-0">管理后台</div>
+                <div className="text-xs font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 mt-4 xl:mt-0">{t('nav.admin')}</div>
                 {adminItems.map((item) => <NavLink key={item.path} item={item} />)}
               </div>
             )}
@@ -264,7 +273,7 @@ const Layout: React.FC = () => {
               <button 
                 onClick={handleLogout}
                 className="p-2 text-slate-400 hover:text-red-500 transition-colors"
-                title="退出登录"
+                title={t('nav.logout')}
               >
                 <LogOut size={20} />
               </button>
@@ -278,7 +287,7 @@ const Layout: React.FC = () => {
         {/* Mobile Header */}
         <div className="xl:hidden h-16 shrink-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 z-40 pt-[env(safe-area-inset-top)]">
           <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="Logo" className="w-9 h-9 shadow-lg shadow-primary-500/10 object-contain" />
+            <img src="/logo.png" alt={t('common.logoAlt')} className="w-9 h-9 shadow-lg shadow-primary-500/10 object-contain" />
             <span className="font-bold text-lg dark:text-white tracking-tight">Ting Reader</span>
           </div>
           <div className="flex items-center gap-2">
@@ -313,6 +322,7 @@ const Layout: React.FC = () => {
 
         {/* Player - Moved inside the right-side container to prevent sidebar overlap */}
         {hasCurrentChapter && <Player />}
+        <PluginExtensionHost />
       </div>
     </div>
   );

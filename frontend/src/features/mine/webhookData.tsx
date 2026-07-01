@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import React from 'react';
+import type { TFunction } from 'i18next';
 import type { NotificationEventOption } from '../../core/types';
 
 interface StatCardProps {
@@ -31,6 +32,7 @@ export type WebhookHeader = {
 export type WebhookDraft = {
   id?: string;
   name: string;
+  nameKey?: string;
   url: string;
   enabled: boolean;
   events: string[];
@@ -42,6 +44,7 @@ export type WebhookDraft = {
 export type WebhookPreset = {
   id: string;
   name: string;
+  nameKey?: string;
   urlPlaceholder: string;
   headers: Record<string, string>;
   bodyTemplate: string;
@@ -56,14 +59,16 @@ export const createHeader = (key = '', value = ''): WebhookHeader => ({
 export const WEBHOOK_PRESETS: WebhookPreset[] = [
   {
     id: 'ting-json',
-    name: '原始事件 JSON',
+    name: 'Raw Event JSON',
+    nameKey: 'notifications.presets.rawJson',
     urlPlaceholder: 'https://example.com/webhook',
     headers: { 'Content-Type': 'application/json' },
     bodyTemplate: '{{json:payload}}',
   },
   {
     id: 'wecom-markdown',
-    name: '企业微信 Markdown',
+    name: 'WeCom Markdown',
+    nameKey: 'notifications.presets.wecomMarkdown',
     urlPlaceholder: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...',
     headers: { 'Content-Type': 'application/json' },
     bodyTemplate: `{
@@ -75,7 +80,8 @@ export const WEBHOOK_PRESETS: WebhookPreset[] = [
   },
   {
     id: 'wecom-text',
-    name: '企业微信文本',
+    name: 'WeCom Text',
+    nameKey: 'notifications.presets.wecomText',
     urlPlaceholder: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...',
     headers: { 'Content-Type': 'application/json' },
     bodyTemplate: `{
@@ -111,7 +117,8 @@ export const WEBHOOK_PRESETS: WebhookPreset[] = [
   },
   {
     id: 'plain-text',
-    name: '纯文本',
+    name: 'Plain Text',
+    nameKey: 'notifications.presets.plainText',
     urlPlaceholder: 'https://example.com/webhook',
     headers: { 'Content-Type': 'text/plain; charset=utf-8' },
     bodyTemplate: '{{notification}}',
@@ -129,13 +136,13 @@ export const draftHeadersToRecord = (headers: WebhookHeader[]): Record<string, s
   );
 
 export const fallbackEvents: NotificationEventOption[] = [
-  { id: 'user.login', label: '用户登录', description: '用户成功登录系统' },
-  { id: 'playback.play', label: '播放', description: '用户开始播放作品或章节' },
-  { id: 'library.created', label: '新增媒体库', description: '管理员创建媒体库' },
-  { id: 'library.deleted', label: '删除媒体库', description: '管理员删除媒体库' },
-  { id: 'book.created', label: '作品入库', description: '作品被创建或入库' },
-  { id: 'book.deleted', label: '删除作品', description: '作品被删除' },
-  { id: 'library.scan_completed', label: '扫描完成', description: '媒体库扫描任务完成' },
+  { id: 'user.login', label: 'User Login', description: 'A user successfully logged in' },
+  { id: 'playback.play', label: 'Playback', description: 'A user started playing a work or chapter' },
+  { id: 'library.created', label: 'Library Created', description: 'An admin created a library' },
+  { id: 'library.deleted', label: 'Library Deleted', description: 'An admin deleted a library' },
+  { id: 'book.created', label: 'Book Imported', description: 'A work was created or imported' },
+  { id: 'book.deleted', label: 'Book Deleted', description: 'A work was deleted' },
+  { id: 'library.scan_completed', label: 'Scan Completed', description: 'A library scan completed' },
 ];
 
 export const createEmptyDraft = (defaultEvent = 'user.login'): WebhookDraft => ({
@@ -147,3 +154,27 @@ export const createEmptyDraft = (defaultEvent = 'user.login'): WebhookDraft => (
   headers: headersToDraft({ 'Content-Type': 'application/json' }),
   bodyTemplate: '{{json:payload}}',
 });
+
+export const notificationEventKeyById: Record<string, string> = {
+  'user.login': 'userLogin',
+  'playback.play': 'playbackPlay',
+  'library.created': 'libraryCreated',
+  'library.deleted': 'libraryDeleted',
+  'book.created': 'bookCreated',
+  'book.deleted': 'bookDeleted',
+  'library.scan_completed': 'libraryScanCompleted',
+};
+
+export const translateEventOption = (event: NotificationEventOption, t: TFunction): NotificationEventOption => {
+  const key = notificationEventKeyById[event.id];
+  if (!key) return event;
+  return {
+    ...event,
+    label: t(`notifications.events.${key}.label`),
+    description: t(`notifications.events.${key}.description`),
+  };
+};
+
+export const translatePresetName = (preset: WebhookPreset, t: TFunction) => (
+  preset.nameKey ? t(preset.nameKey) : preset.name
+);

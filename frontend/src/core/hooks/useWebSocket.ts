@@ -4,10 +4,10 @@ import { usePlayerStore } from '../stores/playerStore';
 
 interface ProgressUpdate {
   type: 'progress_updated';
-  bookId: string;
-  chapterId: string | null;
+  book_id: string;
+  chapter_id: string | null;
   position: number;
-  updatedAt: string;
+  updated_at: string;
 }
 
 interface ServerError {
@@ -160,14 +160,14 @@ function handleServerMessage(msg: ServerMessage) {
       // This enables cross-device/tab sync
       const store = usePlayerStore.getState();
       if (
-        store.currentBook?.id === msg.bookId &&
-        store.currentChapter?.id === msg.chapterId
+        store.currentBook?.id === msg.book_id &&
+        store.currentChapter?.id === msg.chapter_id
       ) {
         // If we're on the same book/chapter, update the chapter's progress
         // in our local chapters array
         const updatedChapters = store.chapters.map((c) =>
-          c.id === msg.chapterId
-            ? { ...c, progressPosition: msg.position, progressUpdatedAt: msg.updatedAt }
+          c.id === msg.chapter_id
+            ? { ...c, progress_position: msg.position, progress_updated_at: msg.updated_at }
             : c
         );
         usePlayerStore.setState({ chapters: updatedChapters });

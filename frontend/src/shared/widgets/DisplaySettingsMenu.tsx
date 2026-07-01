@@ -1,5 +1,6 @@
 import React from 'react';
 import { Filter } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 export type DisplaySettingsOption = {
   value: string;
@@ -27,9 +28,13 @@ const DisplaySettingsMenu: React.FC<Props> = ({
   onOpenChange,
   sections,
   className = '',
-  buttonLabel = '展示设置',
-  sheetLabel = '关闭展示设置',
+  buttonLabel,
+  sheetLabel,
 }) => {
+  const { t } = useTranslation();
+  const resolvedButtonLabel = buttonLabel ?? t('displaySettings.buttonLabel');
+  const resolvedSheetLabel = sheetLabel ?? t('displaySettings.sheetLabel');
+
   const handleSelect = (section: DisplaySettingsSection, value: string) => {
     section.onChange(value);
     onOpenChange(false);
@@ -71,7 +76,7 @@ const DisplaySettingsMenu: React.FC<Props> = ({
     <div className={`relative min-w-0 ${className}`}>
       <button
         type="button"
-        aria-label={buttonLabel}
+        aria-label={resolvedButtonLabel}
         onClick={() => onOpenChange(!open)}
         className={`p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors ${open ? 'ring-2 ring-primary-500' : ''}`}
       >
@@ -81,7 +86,7 @@ const DisplaySettingsMenu: React.FC<Props> = ({
       {open && (
         <div
           className="absolute right-0 top-full mt-2 w-56 max-w-[calc(100vw-2rem)] bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-xl z-50 py-2 animate-in zoom-in-95 duration-200"
-          aria-label={sheetLabel}
+          aria-label={resolvedSheetLabel}
         >
           {renderMenuContent()}
         </div>

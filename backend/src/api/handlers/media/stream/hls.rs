@@ -20,6 +20,7 @@ pub async fn handle_hls_request(
 ) -> Result<Response> {
     // 1. 获取输入源 URL
     let input_url = get_input_url(&state, &chapter, &library, is_strm).await?;
+    let is_remote_input = is_strm || library.library_type != "local";
 
     // 2. 创建 HLS 会话
     let session_id = state
@@ -52,13 +53,13 @@ pub async fn handle_hls_request(
         &session_id,
         &temp_dir,
         &input_url,
-        is_strm,
+        is_remote_input,
         seek.as_deref(),
     )
     .await?;
 
     // 4. 等待首分片生成
-    wait_for_first_segment(&temp_dir, is_strm).await;
+    wait_for_first_segment(&temp_dir, is_remote_input).await;
 
     // 5. 返回播放列表 URL（JSON 格式，前端解析后传给 ExoPlayer）
     let playlist_url = format!("/api/stream/hls/{}/playlist.m3u8", session_id);
@@ -112,10 +113,19 @@ async fn get_input_url(
                 .map_err(|e| TingError::IoError(e))?
                 .trim()
                 .to_string()
-        } else {
+        } else if library.library_type == "webdav" {
             let (mut reader, _) = state
                 .storage_service
                 .get_webdav_reader(library, &chapter.path, None, state.encryption_key.as_ref())
+                .await?;
+
+            let mut content = String::new();
+            reader.read_to_string(&mut content).await?;
+            content.trim().to_string()
+        } else {
+            let (mut reader, _) = state
+                .storage_service
+                .get_http_reader(&chapter.path, None)
                 .await?;
 
             let mut content = String::new();
@@ -127,9 +137,11 @@ async fn get_input_url(
             return Err(TingError::InvalidRequest(format!("Invalid strm URL")));
         }
 
-        tracing::info!("HLS 转码 strm: {}", sanitize_url(&url));
+        tracing::info!("HLS transcoding strm: {}", sanitize_url(&url));
         Ok(url)
     } else if library.library_type == "local" {
+        Ok(chapter.path.clone())
+    } else if library.library_type == "rss" {
         Ok(chapter.path.clone())
     } else {
         // 构建 WebDAV URL
@@ -259,7 +271,7 @@ async fn wait_for_first_segment(temp_dir: &std::path::Path, is_strm: bool) {
             if let Ok(metadata) = tokio::fs::metadata(&first_segment).await {
                 // 降低文件大小要求到 512 字节（约 0.03 秒的音频）
                 if metadata.len() > 512 {
-                    tracing::info!("首分片已生成: {} bytes", metadata.len());
+                    tracing::info!("First segment generated: {} bytes", metadata.len());
                     return;
                 }
             }
@@ -267,7 +279,10 @@ async fn wait_for_first_segment(temp_dir: &std::path::Path, is_strm: bool) {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
-    tracing::warn!("等待首分片超时，但继续返回（可能仍在转码中）");
+    tracing::warn!(
+        message_key = "media.hls.first_segment_timeout",
+        "Timed out waiting for first HLS segment; returning anyway"
+    );
 }
 
 /// 清理 URL 中的敏感信息（用于日志）

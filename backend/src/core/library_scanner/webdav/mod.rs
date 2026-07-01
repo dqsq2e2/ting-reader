@@ -5,8 +5,8 @@ mod processing;
 use super::{LibraryScanner, ScanMode, ScanResult, ScanStatus};
 use crate::core::error::{Result, TingError};
 use crate::core::library_scanner::shared::{
-    infer_series_directories, parse_chapter_range_dir_name, select_mergeable_range_group,
-    ChapterRangeDir, SeriesDirectoryCandidate,
+    infer_series_directories, parse_chapter_range_dir_name, select_mergeable_range_groups,
+    ChapterRangeDir, CoalescedRangeDirs, SeriesDirectoryCandidate,
 };
 use crate::db::repository::Repository;
 use sha2::{Digest, Sha256};
@@ -32,7 +32,7 @@ impl LibraryScanner {
 
         let mut scan_result = ScanResult::default();
         scan_result.start_time = Some(std::time::Instant::now());
-        self.update_progress(task_id, "正在扫描 WebDAV 目录...".to_string())
+        self.update_progress_key(task_id, "scan.webdav.scanning", serde_json::json!({}))
             .await;
 
         // 1. List files recursively
@@ -67,9 +67,10 @@ impl LibraryScanner {
             }
         }
 
-        self.update_progress(
+        self.update_progress_key(
             task_id,
-            format!("找到 {} 个包含音频文件的目录", dir_groups.len()),
+            "scan.audio_dirs.found",
+            serde_json::json!({ "count": dir_groups.len() }),
         )
         .await;
 
@@ -115,12 +116,14 @@ impl LibraryScanner {
             // Extract directory name from URL for logging
             let dir_name = self.webdav_url_name(&dir_url);
 
-            self.update_progress(
+            self.update_progress_key(
                 task_id,
-                format!(
-                    "处理中 ({}/{}): {}",
-                    processed_count, total_groups, dir_name
-                ),
+                "scan.item.processing",
+                serde_json::json!({
+                    "current": processed_count,
+                    "total": total_groups,
+                    "name": dir_name,
+                }),
             )
             .await;
 
@@ -157,7 +160,7 @@ impl LibraryScanner {
             }
             if existing_info.is_none() {
                 if let Some(child_dirs) = coalesced_range_dirs.get(&dir_url) {
-                    for child_dir in child_dirs {
+                    for child_dir in &child_dirs.child_dirs {
                         if let Some(info) = book_path_map.get(child_dir).cloned() {
                             existing_info = Some(info);
                             break;
@@ -269,6 +272,9 @@ impl LibraryScanner {
                     task_id,
                     scraper_config,
                     existing_info,
+                    coalesced_range_dirs
+                        .get(&dir_url)
+                        .and_then(|range_dirs| range_dirs.title_override.as_deref()),
                 )
                 .await
             {
@@ -294,7 +300,7 @@ impl LibraryScanner {
                         }
                     }
                     if let Some(child_dirs) = coalesced_range_dirs.get(&dir_url) {
-                        for child_dir in child_dirs {
+                        for child_dir in &child_dirs.child_dirs {
                             if let Some((child_book_id, manual_corrected, _)) =
                                 book_path_map.get(child_dir)
                             {
@@ -482,7 +488,7 @@ impl LibraryScanner {
         mut dir_groups: HashMap<String, Vec<WebDavFileEntry>>,
     ) -> (
         HashMap<String, Vec<WebDavFileEntry>>,
-        HashMap<String, Vec<String>>,
+        HashMap<String, CoalescedRangeDirs<String>>,
     ) {
         let mut candidates: HashMap<String, Vec<(String, ChapterRangeDir)>> = HashMap::new();
 
@@ -507,32 +513,50 @@ impl LibraryScanner {
             let parent_name = self.webdav_url_name(&parent_url);
             let ranges: Vec<ChapterRangeDir> =
                 entries.iter().map(|(_, range)| range.clone()).collect();
-            let Some(indices) = select_mergeable_range_group(&parent_name, &ranges) else {
-                continue;
-            };
 
-            let mut selected: Vec<(String, ChapterRangeDir)> = indices
-                .into_iter()
-                .map(|index| entries[index].clone())
-                .collect();
-            selected.sort_by_key(|(_, range)| (range.start, range.end));
+            for group in select_mergeable_range_groups(&parent_name, &ranges) {
+                let mut selected: Vec<(String, ChapterRangeDir)> = group
+                    .indices
+                    .into_iter()
+                    .map(|index| entries[index].clone())
+                    .collect();
+                selected.sort_by_key(|(_, range)| (range.start, range.end));
 
-            let child_dirs: Vec<String> = selected
-                .iter()
-                .map(|(child_dir, _)| child_dir.clone())
-                .collect();
+                let Some(first_child_dir) =
+                    selected.first().map(|(child_dir, _)| child_dir.clone())
+                else {
+                    continue;
+                };
 
-            for child_dir in &child_dirs {
-                if let Some(mut child_files) = dir_groups.remove(child_dir) {
-                    dir_groups
-                        .entry(parent_url.clone())
-                        .or_default()
-                        .append(&mut child_files);
+                let target_dir = if group.merge_into_parent {
+                    parent_url.clone()
+                } else {
+                    first_child_dir
+                };
+
+                let child_dirs: Vec<String> = selected
+                    .iter()
+                    .map(|(child_dir, _)| child_dir.clone())
+                    .collect();
+
+                for child_dir in &child_dirs {
+                    if let Some(mut child_files) = dir_groups.remove(child_dir) {
+                        dir_groups
+                            .entry(target_dir.clone())
+                            .or_default()
+                            .append(&mut child_files);
+                    }
                 }
-            }
 
-            if !child_dirs.is_empty() {
-                coalesced_range_dirs.insert(parent_url, child_dirs);
+                if !child_dirs.is_empty() {
+                    coalesced_range_dirs.insert(
+                        target_dir,
+                        CoalescedRangeDirs {
+                            child_dirs,
+                            title_override: group.title,
+                        },
+                    );
+                }
             }
         }
 

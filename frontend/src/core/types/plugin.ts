@@ -1,23 +1,48 @@
 export interface PluginDependency {
-  pluginName: string;
-  versionRequirement: string;
+  plugin_name: string;
+  version_requirement: string;
 }
 
 export interface PluginStats {
-  totalCalls: number;
-  successfulCalls: number;
-  failedCalls: number;
-  avgExecutionTimeMs: number;
+  total_calls: number;
+  successful_calls: number;
+  failed_calls: number;
+  avg_execution_time_ms: number;
+}
+
+export interface PluginCapability {
+  id: string;
+  kind: string;
+  invoke?: string;
+  [key: string]: unknown;
+}
+
+export interface PluginCapabilityRegistration {
+  plugin_id: string;
+  plugin_name: string;
+  capability: PluginCapability;
+}
+
+export interface ToolProviderRegistration extends PluginCapabilityRegistration {
+  tool?: unknown;
+}
+
+export interface LocalizedText {
+  zh?: string;
+  en?: string;
+  [key: string]: string | undefined;
 }
 
 export interface ScraperSearchField {
   key: string;
   label: string;
+  label_i18n?: LocalizedText;
   required?: boolean;
   type?: string;
-  fieldType?: string;
+  field_type?: string;
   placeholder?: string;
-  defaultFrom?: string;
+  placeholder_i18n?: LocalizedText;
+  default_from?: string;
 }
 
 export interface ScraperSource {
@@ -26,9 +51,11 @@ export interface ScraperSource {
   description?: string;
   version: string;
   enabled: boolean;
-  autoScrape: boolean;
-  searchFields: ScraperSearchField[];
-  resultFields: string[];
+  auto_scrape: boolean;
+  aggregate_auto_scrape: boolean;
+  search_fields: ScraperSearchField[];
+  result_fields: string[];
+  result_field_labels?: Record<string, LocalizedText>;
 }
 
 export interface ScraperSearchItem {
@@ -36,16 +63,13 @@ export interface ScraperSearchItem {
   title?: string;
   author?: string;
   narrator?: string | null;
-  coverUrl?: string | null;
   cover_url?: string | null;
   intro?: string | null;
   description?: string | null;
   tags?: string[];
   genre?: string | null;
   subtitle?: string | null;
-  publishedYear?: string | null;
   published_year?: string | null;
-  publishedDate?: string | null;
   published_date?: string | null;
   publisher?: string | null;
   isbn?: string | null;
@@ -61,58 +85,51 @@ export interface Plugin {
   id: string;
   name: string;
   version: string;
-  pluginType: 'scraper' | 'format' | 'utility';
+  plugin_type?: 'scraper' | 'format' | 'utility';
   author: string;
   description: string;
   state: 'active' | 'inactive' | 'loading' | 'failed';
   runtime?: string;
   license?: string;
   repo?: string;
-  descriptionEn?: string;
-  isEnabled?: boolean;
-  entryPoint?: string;
+  min_core_version?: string;
+  min_flutter_version?: string;
+  description_i18n?: LocalizedText;
+  is_enabled?: boolean;
+  entry_point?: string;
   dependencies?: PluginDependency[];
   permissions?: string[];
-  configSchema?: Record<string, unknown>;
-  supportedExtensions?: string[];
-  totalCalls?: number;
-  successfulCalls?: number;
-  failedCalls?: number;
-  successRate?: number;
+  config_schema?: Record<string, unknown>;
+  supported_extensions?: string[];
+  total_calls?: number;
+  successful_calls?: number;
+  failed_calls?: number;
+  success_rate?: number;
   stats?: PluginStats;
   error?: string;
-  scraper?: {
-    autoScrape?: boolean;
-    searchFields?: ScraperSearchField[];
-    resultFields?: string[];
-  };
+  capabilities?: PluginCapability[];
 }
 
 export interface StorePlugin {
   id: string;
   name: string;
   description: string;
-  longDescription?: string;
+  long_description?: string;
   icon?: string;
   repo?: string;
-  pluginType: 'scraper' | 'format' | 'utility';
   version: string;
-  downloadUrl: string | Record<string, string>;
+  download_url: string | Record<string, string>;
   size?: string | Record<string, string>;
   date?: string;
   dependencies?: string[];
   runtime?: string;
   license?: string;
   author?: string;
-  descriptionEn?: string;
+  description_i18n?: LocalizedText;
   permissions?: string[];
-  configSchema?: Record<string, unknown>;
-  supportedExtensions?: string[];
-  minCoreVersion?: string;
+  capabilities?: PluginCapability[];
+  config_schema?: Record<string, unknown>;
+  min_core_version?: string;
+  min_flutter_version?: string;
   downloads?: { name: string; url: string }[];
-  scraper?: {
-    autoScrape?: boolean;
-    searchFields?: ScraperSearchField[];
-    resultFields?: string[];
-  };
 }

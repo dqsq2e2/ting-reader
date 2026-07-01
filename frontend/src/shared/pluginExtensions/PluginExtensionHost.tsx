@@ -1,0 +1,148 @@
+import { MessageCircle, PlugZap, X } from "lucide-react";
+import { useState } from "react";
+import { invokePluginCapability } from "../../core/api/pluginCapabilities";
+import { useClientExtensions } from "../../core/hooks/useClientExtensions";
+import type { ClientExtensionDescriptor } from "../../core/pluginExtensions";
+import PluginWebContainer from "./PluginWebContainer";
+
+const extensionLabel = (extension: ClientExtensionDescriptor) =>
+  extension.title || extension.pluginName || extension.capability.id;
+
+const PluginExtensionHost = () => {
+  const { registry } = useClientExtensions();
+  const floatingActions = registry.bySlot["global.floating_action"] || [];
+  const panels = registry.bySlot["global.panel"] || [];
+  const [activeExtension, setActiveExtension] =
+    useState<ClientExtensionDescriptor | null>(null);
+  const [actionState, setActionState] = useState<
+    "idle" | "running" | "success" | "error"
+  >("idle");
+  const [actionMessage, setActionMessage] = useState<string>();
+
+  if (floatingActions.length === 0 && panels.length === 0) {
+    return null;
+  }
+
+  const openExtension = (extension: ClientExtensionDescriptor) => {
+    setActionState("idle");
+    setActionMessage(undefined);
+    setActiveExtension(extension);
+  };
+
+  const invokeActiveAction = async () => {
+    if (!activeExtension) return;
+
+    setActionState("running");
+    setActionMessage(undefined);
+    try {
+      const result = await invokePluginCapability(
+        activeExtension.pluginId,
+        activeExtension.capability.id,
+        {
+          slot: activeExtension.slot,
+          contexts: activeExtension.contexts,
+        },
+      );
+      setActionState("success");
+      setActionMessage(
+        typeof result === "string"
+          ? result
+          : JSON.stringify(result ?? { ok: true }, null, 2),
+      );
+    } catch (err) {
+      setActionState("error");
+      setActionMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const primaryActions = floatingActions.length > 0 ? floatingActions : panels;
+
+  return (
+    <>
+      <div className="fixed bottom-[calc(var(--bottom-nav-h,0px)+1rem)] right-4 z-[90] flex flex-col items-end gap-2 xl:bottom-6">
+        {primaryActions.slice(0, 3).map((extension) => (
+          <button
+            key={extension.id}
+            type="button"
+            onClick={() => openExtension(extension)}
+            className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-lg shadow-slate-900/10 transition-colors hover:bg-primary-50 hover:text-primary-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-primary-950/40 dark:hover:text-primary-300"
+            title={extensionLabel(extension)}
+          >
+            {extension.slot === "global.floating_action" ? (
+              <MessageCircle size={20} />
+            ) : (
+              <PlugZap size={20} />
+            )}
+          </button>
+        ))}
+      </div>
+
+      {activeExtension ? (
+        <div className="fixed inset-0 z-[120] flex items-end justify-end bg-slate-950/30 p-3 backdrop-blur-sm sm:p-6">
+          <section className="flex h-[min(42rem,88vh)] w-full max-w-md flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <header className="flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 px-4 dark:border-slate-800">
+              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary-50 text-primary-700 dark:bg-primary-950/40 dark:text-primary-300">
+                <PlugZap size={17} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 className="truncate text-sm font-semibold text-slate-950 dark:text-white">
+                  {extensionLabel(activeExtension)}
+                </h2>
+                <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                  {activeExtension.pluginName}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveExtension(null)}
+                className="flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-white"
+                title="Close"
+              >
+                <X size={18} />
+              </button>
+            </header>
+            <div
+              className={`flex flex-1 flex-col text-sm leading-6 text-slate-500 dark:text-slate-400 ${
+                activeExtension.renderMode === "web_container"
+                  ? "min-h-0"
+                  : "justify-center gap-4 px-6"
+              }`}
+            >
+              {activeExtension.renderMode === "action" ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={invokeActiveAction}
+                    disabled={actionState === "running"}
+                    className="inline-flex h-10 items-center justify-center rounded-md bg-primary-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700"
+                  >
+                    {actionState === "running" ? "Running..." : "Run"}
+                  </button>
+                  {actionMessage ? (
+                    <pre
+                      className={`max-h-64 overflow-auto rounded-md border px-3 py-2 text-left text-xs ${
+                        actionState === "error"
+                          ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300"
+                          : "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300"
+                      }`}
+                    >
+                      {actionMessage}
+                    </pre>
+                  ) : null}
+                </>
+              ) : activeExtension.renderMode === "web_container" ? (
+                <PluginWebContainer extension={activeExtension} />
+              ) : (
+                <div className="text-center">
+                  {activeExtension.capability.id}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : null}
+    </>
+  );
+};
+
+export default PluginExtensionHost;

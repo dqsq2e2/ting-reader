@@ -1,6 +1,5 @@
 use super::super::LibraryScanner;
 use crate::plugin::manager::FormatMethod;
-use crate::plugin::types::PluginType;
 use base64::Engine;
 use id3::TagLike;
 use sha2::{Digest, Sha256};
@@ -61,7 +60,16 @@ impl LibraryScanner {
                 let url = match tokio::fs::read_to_string(&temp_path).await {
                     Ok(content) => content.trim().to_string(),
                     Err(e) => {
-                        tracing::error!("无法读取 WebDAV strm 文件 {}: {}", file_url, e);
+                        tracing::error!(
+                            path = %file_url,
+                            error = %e,
+                            message_key = "strm.file.read_failed",
+                            message_params = %serde_json::json!({
+                                "path": file_url,
+                                "error": e.to_string(),
+                            }),
+                            "Failed to read strm file"
+                        );
                         let _ = tokio::fs::remove_file(&temp_path).await;
                         return (String::new(), title, None, None, None, 0);
                     }
@@ -70,37 +78,22 @@ impl LibraryScanner {
                 let _ = tokio::fs::remove_file(&temp_path).await;
 
                 if url.is_empty() || !url.starts_with("http") {
-                    tracing::warn!("WebDAV strm 文件 {} 包含无效的 URL: {}", file_url, url);
+                    tracing::warn!(
+                        path = %file_url,
+                        url = %url,
+                        message_key = "strm.url.invalid",
+                        message_params = %serde_json::json!({ "path": file_url }),
+                        "strm file contains invalid URL"
+                    );
                     return (String::new(), title, None, None, None, 0);
                 }
 
-                // Use FFprobe to get duration from the URL inside the .strm file
-                let duration = if let Some(ffmpeg_path) =
-                    self.plugin_manager.get_ffmpeg_path().await
+                let duration = if let Some(ffprobe_path) =
+                    self.plugin_manager.get_ffprobe_path().await
                 {
-                    let ffprobe_path = {
-                        let ffmpeg_dir = std::path::Path::new(&ffmpeg_path).parent();
-                        if let Some(dir) = ffmpeg_dir {
-                            let ffprobe_name = if cfg!(target_os = "windows") {
-                                "ffprobe.exe"
-                            } else {
-                                "ffprobe"
-                            };
-                            let probe = dir.join(ffprobe_name);
-                            if probe.exists() {
-                                Some(probe.to_string_lossy().to_string())
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    };
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
-                    if let Some(ffprobe_path) = ffprobe_path {
-                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-
-                        match tokio::process::Command::new(&ffprobe_path)
+                    match tokio::process::Command::new(&ffprobe_path)
                             .arg("-v").arg("error")
                             .arg("-user_agent").arg("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                             .arg("-headers").arg("Accept: */*")
@@ -109,36 +102,50 @@ impl LibraryScanner {
                             .arg(&url)
                             .output()
                             .await
-                        {
+                    {
                             Ok(output) if output.status.success() => {
                                 let duration_str = String::from_utf8_lossy(&output.stdout);
                                 match duration_str.trim().parse::<f64>() {
                                     Ok(dur) => {
                                         let duration_secs = dur.round() as i32;
-                                        tracing::info!("WebDAV strm 文件 {} 时长: {} 秒", title, duration_secs);
+                                        tracing::info!("WebDAV strm file {} duration: {} seconds", title, duration_secs);
                                         duration_secs
                                     }
                                     Err(_) => {
-                                        tracing::warn!("无法解析 FFprobe 输出: {}", duration_str);
+                                        tracing::warn!(
+                                            output = %duration_str,
+                                            message_key = "ffprobe.output_parse_failed",
+                                            "Failed to parse FFprobe output"
+                                        );
                                         0
                                     }
                                 }
                             }
                             Ok(output) => {
-                                tracing::warn!("FFprobe 获取 WebDAV strm 时长失败: {}", String::from_utf8_lossy(&output.stderr));
+                                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                                tracing::warn!(
+                                    error = %stderr,
+                                    message_key = "ffprobe.duration_failed",
+                                    message_params = %serde_json::json!({ "error": stderr }),
+                                    "FFprobe duration detection failed"
+                                );
                                 0
                             }
                             Err(e) => {
-                                tracing::warn!("无法运行 FFprobe: {}", e);
+                                tracing::warn!(
+                                    error = %e,
+                                    message_key = "ffprobe.run_failed",
+                                    message_params = %serde_json::json!({ "error": e.to_string() }),
+                                    "Failed to run FFprobe"
+                                );
                                 0
                             }
                         }
-                    } else {
-                        tracing::warn!("未找到 FFprobe，WebDAV strm 文件时长将设为 0");
-                        0
-                    }
                 } else {
-                    tracing::warn!("未找到 FFmpeg，WebDAV strm 文件时长将设为 0");
+                    tracing::warn!(
+                        message_key = "ffprobe.missing",
+                        "FFprobe not found; duration will be set to zero"
+                    );
                     0
                 };
 
@@ -198,7 +205,7 @@ impl LibraryScanner {
                 // Ask plugins for required size (e.g. for encrypted formats)
                 let plugins = self
                     .plugin_manager
-                    .find_plugins_by_type(PluginType::Format)
+                    .find_plugins_by_capability_kind("format_handler")
                     .await;
                 for plugin in plugins {
                     let params = serde_json::json!({
@@ -257,7 +264,7 @@ impl LibraryScanner {
                     // 1. 查找支持该格式的插件
                     let plugins = self
                         .plugin_manager
-                        .find_plugins_by_type(PluginType::Format)
+                        .find_plugins_by_capability_kind("format_handler")
                         .await;
                     let mut plugin_handled = false;
 
@@ -284,7 +291,11 @@ impl LibraryScanner {
                             .call_format(&plugin.id, FormatMethod::ExtractMetadata, params)
                             .await
                         {
-                            tracing::debug!("使用格式插件 {} 处理 {} 文件", plugin.name, ext);
+                            tracing::debug!(
+                                "Using format plugin {} to process {} file",
+                                plugin.name,
+                                ext
+                            );
 
                             // 提取元数据
                             if let Some(a) = result.get("album").and_then(|v| v.as_str()) {
@@ -311,7 +322,7 @@ impl LibraryScanner {
                                 duration = dur.round() as i32;
                                 if duration > 0 {
                                     tracing::debug!(
-                                        "格式插件 {} 获取到时长: {} 秒",
+                                        "Format plugin {} detected duration: {} seconds",
                                         plugin.name,
                                         duration
                                     );
@@ -331,7 +342,7 @@ impl LibraryScanner {
                     // 2. 如果没有插件处理，且是 MP3 文件，尝试使用 ID3 库（对部分文件支持好）
                     if !plugin_handled && ext == "mp3" {
                         if let Ok(tag) = id3::Tag::read_from_path(&temp_path) {
-                            debug!("使用 ID3 库处理 MP3 文件");
+                            debug!("Using ID3 library to process MP3 file");
                             if let Some(t) = tag.album() {
                                 if !t.trim().is_empty() {
                                     album = t.to_string();
@@ -390,13 +401,23 @@ impl LibraryScanner {
                                     if diff_ratio > 0.15 {
                                         // 差距超过15%，时长可能不准确，需要用 FFprobe 验证
                                         tracing::warn!(
-                                            "WebDAV 文件 {} 时长差距过大 (探测: {} 秒, 估算: {} 秒, 差距: {:.1}%), 将使用 FFprobe",
-                                            file_url, duration, estimated_duration, diff_ratio * 100.0
+                                            message_key = "webdav.duration.mismatch",
+                                            message_params = %serde_json::json!({
+                                                "file_url": file_url,
+                                                "duration": duration,
+                                                "estimated_duration": estimated_duration,
+                                                "diff_percent": diff_ratio * 100.0,
+                                            }),
+                                            file_url = %file_url,
+                                            duration = duration,
+                                            estimated_duration = estimated_duration,
+                                            diff_percent = diff_ratio * 100.0,
+                                            "WebDAV duration differs from size estimate; using FFprobe"
                                         );
                                         use_ffprobe = true;
                                     } else {
                                         tracing::debug!(
-                                            "WebDAV 文件 {} 时长验证通过 (探测: {} 秒, 估算: {} 秒, 差距: {:.1}%)",
+                                            "WebDAV file {} duration verified (detected: {}s, estimated: {}s, diff: {:.1}%)",
                                             file_url, duration, estimated_duration, diff_ratio * 100.0
                                         );
                                     }
@@ -406,94 +427,75 @@ impl LibraryScanner {
                     } else {
                         // 无法从部分文件中获取时长，需要 FFprobe
                         use_ffprobe = true;
-                        tracing::debug!("无法从部分文件获取 {} 时长，将使用 FFprobe", ext);
+                        tracing::debug!(
+                            "Could not get {} duration from partial file; using FFprobe",
+                            ext
+                        );
                     }
 
                     // 4. Use FFprobe when needed (fallback or validation)
                     if use_ffprobe {
-                        if let Some(ffmpeg_path) = self.plugin_manager.get_ffmpeg_path().await {
-                            let ffprobe_path = {
-                                let ffmpeg_dir = std::path::Path::new(&ffmpeg_path).parent();
-                                if let Some(dir) = ffmpeg_dir {
-                                    // ⭐ 跨平台：Windows 使用 ffprobe.exe，Linux/Mac 使用 ffprobe
-                                    let ffprobe_name = if cfg!(target_os = "windows") {
-                                        "ffprobe.exe"
-                                    } else {
-                                        "ffprobe"
-                                    };
+                        if let Some(ffprobe_path) = self.plugin_manager.get_ffprobe_path().await {
+                            // Add small delay before FFprobe to avoid overwhelming the server
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-                                    let probe = dir.join(ffprobe_name);
-                                    if probe.exists() {
-                                        Some(probe.to_string_lossy().to_string())
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
+                            // Build WebDAV URL with authentication
+                            let webdav_url = if file_url.starts_with("http://")
+                                || file_url.starts_with("https://")
+                            {
+                                url::Url::parse(file_url).ok()
+                            } else {
+                                None
                             };
 
-                            if let Some(ffprobe_path) = ffprobe_path {
-                                // Add small delay before FFprobe to avoid overwhelming the server
-                                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
-                                // Build WebDAV URL with authentication
-                                let webdav_url = if file_url.starts_with("http://")
-                                    || file_url.starts_with("https://")
+                            if let Some(mut url) = webdav_url {
+                                // Add authentication to URL if present
+                                if let (Some(username), Some(password)) =
+                                    (&library.username, &library.password)
                                 {
-                                    url::Url::parse(file_url).ok()
-                                } else {
-                                    None
-                                };
+                                    let decrypted_password =
+                                        crate::core::crypto::decrypt(password, key)
+                                            .unwrap_or_else(|_| password.clone());
+                                    url.set_username(username).ok();
+                                    url.set_password(Some(&decrypted_password)).ok();
+                                }
 
-                                if let Some(mut url) = webdav_url {
-                                    // Add authentication to URL if present
-                                    if let (Some(username), Some(password)) =
-                                        (&library.username, &library.password)
-                                    {
-                                        let decrypted_password =
-                                            crate::core::crypto::decrypt(password, key)
-                                                .unwrap_or_else(|_| password.clone());
-                                        url.set_username(username).ok();
-                                        url.set_password(Some(&decrypted_password)).ok();
-                                    }
+                                let url_str = url.to_string();
 
-                                    let url_str = url.to_string();
-
-                                    match tokio::process::Command::new(&ffprobe_path)
-                                        .arg("-v")
-                                        .arg("error")
-                                        .arg("-show_entries")
-                                        .arg("format=duration")
-                                        .arg("-of")
-                                        .arg("default=noprint_wrappers=1:nokey=1")
-                                        .arg(&url_str)
-                                        .output()
-                                        .await
-                                    {
-                                        Ok(output) if output.status.success() => {
-                                            let duration_str =
-                                                String::from_utf8_lossy(&output.stdout);
-                                            if let Ok(dur) = duration_str.trim().parse::<f64>() {
-                                                duration = dur.round() as i32;
-                                                debug!(
-                                                    "FFprobe 获取 WebDAV 文件时长: {} 秒 ({})",
-                                                    duration, ext
-                                                );
-                                            }
-                                        }
-                                        Ok(output) => {
+                                match tokio::process::Command::new(&ffprobe_path)
+                                    .arg("-v")
+                                    .arg("error")
+                                    .arg("-show_entries")
+                                    .arg("format=duration")
+                                    .arg("-of")
+                                    .arg("default=noprint_wrappers=1:nokey=1")
+                                    .arg(&url_str)
+                                    .output()
+                                    .await
+                                {
+                                    Ok(output) if output.status.success() => {
+                                        let duration_str = String::from_utf8_lossy(&output.stdout);
+                                        if let Ok(dur) = duration_str.trim().parse::<f64>() {
+                                            duration = dur.round() as i32;
                                             debug!(
-                                                "FFprobe 获取 WebDAV 时长失败: {}",
-                                                String::from_utf8_lossy(&output.stderr)
+                                                "FFprobe detected WebDAV file duration: {} seconds ({})",
+                                                duration, ext
                                             );
                                         }
-                                        Err(e) => {
-                                            debug!("无法运行 FFprobe: {}", e);
-                                        }
+                                    }
+                                    Ok(output) => {
+                                        debug!(
+                                            "FFprobe failed to get WebDAV duration: {}",
+                                            String::from_utf8_lossy(&output.stderr)
+                                        );
+                                    }
+                                    Err(e) => {
+                                        debug!("Failed to run FFprobe: {}", e);
                                     }
                                 }
                             }
+                        } else {
+                            debug!("FFprobe not found; keeping estimated WebDAV duration");
                         }
                     }
 
@@ -550,7 +552,7 @@ impl LibraryScanner {
 
                             let plugins = self
                                 .plugin_manager
-                                .find_plugins_by_type(PluginType::Format)
+                                .find_plugins_by_capability_kind("format_handler")
                                 .await;
                             for plugin in plugins {
                                 let supports_ext = plugin

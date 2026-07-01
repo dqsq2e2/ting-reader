@@ -1,5 +1,6 @@
 //! Plugin manager - core orchestration for the plugin system
 
+pub mod capabilities;
 pub mod discovery;
 pub mod dispatch;
 pub mod enums;
@@ -14,13 +15,15 @@ use tracing::info;
 
 use crate::core::error::{Result, TingError};
 use crate::plugin::config::PluginConfigManager;
+use crate::plugin::host_gateway::{PluginHostGateway, PluginHostGatewayHandle};
+use crate::plugin::js::npm::NpmManager;
 use crate::plugin::types::{
-    Plugin, PluginContext, PluginDependency, PluginId, PluginMetadata, PluginState, PluginType,
-    ScraperCapabilities,
+    LocalizedText, Plugin, PluginCapability, PluginContext, PluginDependency, PluginId,
+    PluginMetadata, PluginState, PluginStats, PluginType, ScraperCapabilities,
 };
 use crate::plugin::wasm::WasmRuntime;
 
-pub use enums::{FormatMethod, ScraperMethod, UtilityMethod};
+pub use enums::{FormatMethod, ScraperMethod};
 
 /// Configuration for the plugin manager
 #[derive(Debug, Clone)]
@@ -37,6 +40,7 @@ pub(crate) struct PluginEntry {
     pub(crate) instance: Arc<dyn Plugin>,
     pub(crate) state: PluginState,
     pub(crate) load_error: Option<String>,
+    pub(crate) stats: PluginStats,
     pub(crate) _active_tasks: Arc<std::sync::atomic::AtomicUsize>,
 }
 
@@ -47,6 +51,7 @@ impl PluginEntry {
             instance,
             state: PluginState::Loaded,
             load_error: None,
+            stats: PluginStats::new(),
             _active_tasks: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
     }
@@ -65,6 +70,8 @@ pub struct PluginInfo {
     pub version: String,
     pub author: String,
     pub description: String,
+    #[serde(default)]
+    pub description_i18n: LocalizedText,
     pub plugin_type: PluginType,
     pub state: PluginState,
     pub total_calls: u64,
@@ -86,7 +93,13 @@ pub struct PluginInfo {
     #[serde(default)]
     pub repo: Option<String>,
     #[serde(default)]
+    pub min_core_version: Option<String>,
+    #[serde(default)]
+    pub min_flutter_version: Option<String>,
+    #[serde(default)]
     pub scraper: Option<ScraperCapabilities>,
+    #[serde(default)]
+    pub capabilities: Vec<PluginCapability>,
 }
 
 impl PluginInfo {
@@ -97,6 +110,7 @@ impl PluginInfo {
             version: metadata.version.clone(),
             author: metadata.author.clone(),
             description: metadata.description.clone(),
+            description_i18n: metadata.description_i18n.clone(),
             plugin_type: metadata.plugin_type,
             state: *state,
             total_calls: 0,
@@ -110,7 +124,10 @@ impl PluginInfo {
             permissions: metadata.permissions.iter().map(|p| p.to_string()).collect(),
             license: metadata.license.clone(),
             repo: metadata.repo.clone(),
+            min_core_version: metadata.min_core_version.clone(),
+            min_flutter_version: metadata.min_flutter_version.clone(),
             scraper: metadata.scraper.clone(),
+            capabilities: metadata.effective_capabilities(),
         }
     }
 
@@ -121,6 +138,23 @@ impl PluginInfo {
     ) -> Self {
         let mut info = Self::from_metadata(metadata, state);
         info.error = Some(error);
+        info
+    }
+
+    pub(crate) fn from_entry(entry: &PluginEntry) -> Self {
+        let mut info = if entry.state == PluginState::Failed {
+            Self::from_metadata_with_error(
+                &entry.metadata,
+                &entry.state,
+                entry.load_error.clone().unwrap_or_default(),
+            )
+        } else {
+            Self::from_metadata(&entry.metadata, &entry.state)
+        };
+
+        info.total_calls = entry.stats.total_calls;
+        info.successful_calls = entry.stats.successful_calls;
+        info.failed_calls = entry.stats.failed_calls;
         info
     }
 }
@@ -168,6 +202,8 @@ pub struct PluginManager {
     pub(crate) load_semaphore: Arc<Semaphore>,
     pub(crate) store_cache: Arc<crate::plugin::store::PluginCache>,
     pub(crate) config_manager: std::sync::RwLock<Option<Arc<PluginConfigManager>>>,
+    pub(crate) npm_manager: Arc<NpmManager>,
+    pub(crate) host_gateway_handle: PluginHostGatewayHandle,
 }
 
 impl PluginManager {
@@ -179,6 +215,8 @@ impl PluginManager {
             .build()
             .map_err(|e| TingError::NetworkError(e.to_string()))?;
 
+        let npm_cache_dir = config.plugin_dir.join("data").join("npm-cache");
+
         Ok(Self {
             config,
             registry: Arc::new(RwLock::new(HashMap::new())),
@@ -189,6 +227,8 @@ impl PluginManager {
             load_semaphore: Arc::new(Semaphore::new(2)),
             store_cache: Arc::new(crate::plugin::store::PluginCache::new()),
             config_manager: std::sync::RwLock::new(None),
+            npm_manager: Arc::new(NpmManager::new(None, Some(npm_cache_dir))),
+            host_gateway_handle: PluginHostGatewayHandle::default(),
         })
     }
 
@@ -198,6 +238,14 @@ impl PluginManager {
         *lock = Some(cm);
     }
 
+    pub fn set_host_gateway(&self, gateway: &Arc<PluginHostGateway>) {
+        self.host_gateway_handle.set(gateway);
+    }
+
+    pub(crate) fn host_gateway_handle(&self) -> PluginHostGatewayHandle {
+        self.host_gateway_handle.clone()
+    }
+
     /// Trigger garbage collection on all plugins
     pub async fn garbage_collect_all(&self) {
         info!("Triggering garbage collection for all plugins");
@@ -205,7 +253,16 @@ impl PluginManager {
         let registry = self.registry.read().await;
         for entry in registry.values() {
             if let Err(e) = entry.instance.garbage_collect().await {
-                tracing::warn!("垃圾回收插件 {} 失败: {}", entry.metadata.name, e);
+                tracing::warn!(
+                    plugin = %entry.metadata.name,
+                    error = %e,
+                    message_key = "plugin.gc_failed",
+                    message_params = %serde_json::json!({
+                        "plugin": entry.metadata.name,
+                        "error": e.to_string(),
+                    }),
+                    "Plugin garbage collection failed"
+                );
             }
         }
 
@@ -213,14 +270,98 @@ impl PluginManager {
             crate::core::utils::release_memory();
         })
         .await
-        .unwrap_or_else(|e| tracing::warn!("释放内存失败: {}", e));
+        .unwrap_or_else(|e| {
+            tracing::warn!(
+                error = %e,
+                message_key = "system.memory.release_failed",
+                message_params = %serde_json::json!({ "error": e.to_string() }),
+                "Memory release failed"
+            )
+        });
     }
 
     /// List all installed plugins
     pub async fn list_plugins(&self) -> Vec<PluginInfo> {
         let registry = self.registry.read().await;
+        registry.values().map(PluginInfo::from_entry).collect()
+    }
+
+    /// Get the list of plugins from the store
+    pub async fn get_store_plugins(&self) -> Result<Vec<crate::plugin::store::StorePlugin>> {
+        self.load_store_plugins(false).await
+    }
+
+    /// Refresh the plugin store list by bypassing the backend cache.
+    pub async fn refresh_store_plugins(&self) -> Result<Vec<crate::plugin::store::StorePlugin>> {
+        self.store_cache.clear().await;
+        self.load_store_plugins(true).await
+    }
+
+    /// Clear the plugin store cache used by get_store_plugins.
+    pub async fn clear_store_cache(&self) {
+        self.store_cache.clear().await;
+    }
+
+    async fn load_store_plugins(
+        &self,
+        force_refresh: bool,
+    ) -> Result<Vec<crate::plugin::store::StorePlugin>> {
+        let mut providers = self.find_capabilities_by_kind("plugin_store").await;
+        providers.sort_by(|left, right| {
+            left.plugin_id
+                .cmp(&right.plugin_id)
+                .then_with(|| left.capability.id.cmp(&right.capability.id))
+        });
+
+        let Some(provider) = providers.into_iter().next() else {
+            return Ok(Vec::new());
+        };
+
+        let cache_key = format!("{}:{}", provider.plugin_id, provider.capability.id);
+        if !force_refresh {
+            if let Some(cached) = self.store_cache.get(&cache_key).await {
+                return Ok(cached);
+            }
+        }
+
+        let invoke = provider
+            .capability
+            .invoke
+            .clone()
+            .unwrap_or_else(|| "listPlugins".to_string());
+        let response = self
+            .invoke_plugin(
+                &provider.plugin_id,
+                &invoke,
+                serde_json::json!({ "force_refresh": force_refresh }),
+            )
+            .await?;
+        let plugins = crate::plugin::store::parse_store_plugins_response(response)?;
+        self.store_cache.set(cache_key, plugins.clone()).await;
+        Ok(plugins)
+    }
+
+    pub fn get_plugin(&self, id: &PluginId) -> Result<PluginMetadata> {
+        let registry = futures::executor::block_on(self.registry.read());
+        let entry = registry
+            .get(id)
+            .ok_or_else(|| TingError::PluginNotFound(id.clone()))?;
+        Ok(entry.metadata.clone())
+    }
+
+    pub async fn get_plugin_package_path(&self, id: &PluginId) -> Result<PathBuf> {
+        let cache = self.metadata_cache.read().await;
+        cache
+            .get(id)
+            .cloned()
+            .ok_or_else(|| TingError::PluginNotFound(id.clone()))
+    }
+
+    pub async fn find_plugins_by_type(&self, plugin_type: PluginType) -> Vec<PluginInfo> {
+        let registry = self.registry.read().await;
         registry
             .values()
+            .filter(|e| e.metadata.plugin_type == plugin_type)
             .map(|entry| {
                 if entry.state == PluginState::Failed {
                     PluginInfo::from_metadata_with_error(
@@ -235,24 +376,16 @@ impl PluginManager {
             .collect()
     }
 
-    /// Get the list of plugins from the store
-    pub async fn get_store_plugins(&self) -> Result<Vec<crate::plugin::store::StorePlugin>> {
-        crate::plugin::store::fetch_store_plugins_cached(&self.http_client, &self.store_cache).await
-    }
-
-    pub fn get_plugin(&self, id: &PluginId) -> Result<PluginMetadata> {
-        let registry = futures::executor::block_on(self.registry.read());
-        let entry = registry
-            .get(id)
-            .ok_or_else(|| TingError::PluginNotFound(id.clone()))?;
-        Ok(entry.metadata.clone())
-    }
-
-    pub async fn find_plugins_by_type(&self, plugin_type: PluginType) -> Vec<PluginInfo> {
+    pub async fn find_plugins_by_capability_kind(&self, kind: &str) -> Vec<PluginInfo> {
         let registry = self.registry.read().await;
         registry
             .values()
-            .filter(|e| e.metadata.plugin_type == plugin_type)
+            .filter(|e| {
+                e.metadata
+                    .effective_capabilities()
+                    .iter()
+                    .any(|capability| capability.kind == kind)
+            })
             .map(|entry| {
                 if entry.state == PluginState::Failed {
                     PluginInfo::from_metadata_with_error(
@@ -285,7 +418,12 @@ impl PluginManager {
 
         registry
             .values()
-            .filter(|e| e.metadata.plugin_type == PluginType::Format)
+            .filter(|e| {
+                e.metadata
+                    .effective_capabilities()
+                    .iter()
+                    .any(|capability| capability.kind == "format_handler")
+            })
             .find(|e| {
                 e.metadata
                     .supported_extensions

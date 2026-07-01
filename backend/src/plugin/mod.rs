@@ -9,10 +9,12 @@
 //! - Plugin interfaces (Scraper, Format, Utility)
 //! - npm dependency manager for JavaScript plugins
 
+pub mod cache;
 pub mod config;
 pub mod events;
 pub mod format;
 pub mod fs_utils;
+pub mod host_gateway;
 pub mod installer;
 pub mod js;
 pub mod logger;
@@ -22,12 +24,18 @@ pub mod native;
 pub mod registry;
 pub mod scraper;
 pub mod store;
+pub mod tr_package;
 pub mod types;
 pub mod utility;
 pub mod wasm;
 
+pub use cache::{PluginCache, PluginCacheItem};
 pub use config::{ConfigChangeEvent, PluginConfigManager};
 pub use format::{AudioFormat, AudioMetadata, FormatPlugin, ProgressCallback, TranscodeOptions};
+pub use host_gateway::{
+    plugin_host_user_from_invocation_args, PluginHostGateway, PluginHostGatewayHandle,
+    PluginHostPermission, PluginHostUser,
+};
 pub use installer::{PluginInstaller, PluginPackage};
 pub use js::npm::{
     NpmAuditResult, NpmDependency, NpmManager, NpmSecurityConfig, PackageJson,

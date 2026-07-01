@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import apiClient from '../../core/api/client';
 import type { Book, Playlist, PlaylistItem } from '../../core/types';
 import { getCoverUrl } from '../../core/utils/image';
@@ -15,17 +16,17 @@ type PlaylistIconSize = 'small' | 'medium' | 'large';
 type PlaylistCover = {
   id: string;
   title?: string;
-  coverUrl?: string;
-  libraryId?: string;
-  bookId?: string;
+  cover_url?: string;
+  library_id?: string;
+  book_id?: string;
 };
 
 const toBookCover = (book: Book, suffix = ''): PlaylistCover => ({
   id: `${book.id}${suffix}`,
   title: book.title,
-  coverUrl: book.coverUrl,
-  libraryId: book.libraryId,
-  bookId: book.id,
+  cover_url: book.cover_url,
+  library_id: book.library_id,
+  book_id: book.id,
 });
 
 const collectPlaylistCoverCandidates = (playlist: Playlist): PlaylistCover[] => {
@@ -43,9 +44,9 @@ const collectPlaylistCoverCandidates = (playlist: Playlist): PlaylistCover[] => 
         pushCover({
           id: `${item.series!.id}-${book.id || index}`,
           title: book.title || item.series!.title,
-          coverUrl: book.coverUrl || item.series!.coverUrl,
-          libraryId: book.libraryId || item.series!.libraryId,
-          bookId: book.id,
+          cover_url: book.cover_url || item.series!.cover_url,
+          library_id: book.library_id || item.series!.library_id,
+          book_id: book.id,
         });
       });
       return;
@@ -54,14 +55,14 @@ const collectPlaylistCoverCandidates = (playlist: Playlist): PlaylistCover[] => 
     pushCover({
       id: item.series.id,
       title: item.series.title,
-      coverUrl: item.series.coverUrl,
-      libraryId: item.series.libraryId,
+      cover_url: item.series.cover_url,
+      library_id: item.series.library_id,
     });
   };
 
   if (playlist.items && playlist.items.length > 0) {
     playlist.items.forEach(item => {
-      if (item.itemType === 'series') {
+      if (item.item_type === 'series') {
         pushSeriesCovers(item);
       } else if (item.book) {
         pushCover(toBookCover(item.book));
@@ -110,6 +111,7 @@ const getMobileGridStyle = (iconSize: PlaylistIconSize): React.CSSProperties => 
 };
 
 const MyPlaylistsPage: React.FC = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const currentChapter = usePlayerStore((state) => state.currentChapter);
   const coverShape = useBookshelfCoverShape();
@@ -132,7 +134,7 @@ const MyPlaylistsPage: React.FC = () => {
       setPlaylists(res.data || []);
       setPlaylistCoverSeed(Date.now());
     } catch (err) {
-      console.error('获取书单失败', err);
+      console.error('Failed to load playlists', err);
     } finally {
       setLoading(false);
     }
@@ -146,16 +148,16 @@ const MyPlaylistsPage: React.FC = () => {
     const loadSettings = async () => {
       try {
         const res = await apiClient.get('/api/settings');
-        const settings = res.data.settingsJson || {};
+        const settings = res.data.settings_json || {};
 
-        if (settings.playlistSortBy === 'updatedAt' || settings.playlistSortBy === 'title' || settings.playlistSortBy === 'count') {
-          setSortBy(settings.playlistSortBy);
+        if (settings.playlist_sort_by === 'updatedAt' || settings.playlist_sort_by === 'title' || settings.playlist_sort_by === 'count') {
+          setSortBy(settings.playlist_sort_by);
         }
-        if (settings.playlistIconSize === 'small' || settings.playlistIconSize === 'medium' || settings.playlistIconSize === 'large') {
-          setIconSize(settings.playlistIconSize);
+        if (settings.playlist_icon_size === 'small' || settings.playlist_icon_size === 'medium' || settings.playlist_icon_size === 'large') {
+          setIconSize(settings.playlist_icon_size);
         }
       } catch (err) {
-        console.error('加载书单展示设置失败', err);
+        console.error('Failed to load playlist display settings', err);
       }
     };
 
@@ -174,18 +176,18 @@ const MyPlaylistsPage: React.FC = () => {
     return nextPlaylists.sort((a, b) => {
       if (sortBy === 'title') return a.title.localeCompare(b.title, 'zh-CN');
       if (sortBy === 'count') return getPlaylistBookCount(b) - getPlaylistBookCount(a);
-      return new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime();
+      return new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime();
     });
   }, [playlists, query, sortBy]);
 
   const handleSortChange = (newSort: PlaylistSortBy) => {
     setSortBy(newSort);
-    apiClient.post('/api/settings', { playlistSortBy: newSort });
+    apiClient.post('/api/settings', { playlist_sort_by: newSort });
   };
 
   const handleIconSizeChange = (newSize: PlaylistIconSize) => {
     setIconSize(newSize);
-    apiClient.post('/api/settings', { playlistIconSize: newSize });
+    apiClient.post('/api/settings', { playlist_icon_size: newSize });
   };
 
   const handleCreate = async (event: React.FormEvent) => {
@@ -197,15 +199,15 @@ const MyPlaylistsPage: React.FC = () => {
       const res = await apiClient.post('/api/playlists', {
         title,
         description,
-        bookIds: [],
+        book_ids: [],
       });
       setShowCreateModal(false);
       setTitle('');
       setDescription('');
       navigate(`/playlists/${res.data.id}`);
     } catch (err) {
-      console.error('创建书单失败', err);
-      alert('创建书单失败');
+      console.error('Failed to create playlist', err);
+      alert(t('playlists.createFailed'));
     } finally {
       setSaving(false);
     }
@@ -226,10 +228,10 @@ const MyPlaylistsPage: React.FC = () => {
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
               <ListMusic className="text-primary-600" />
-              我的书单
+              {t('playlists.title')}
             </h1>
             <p className="text-sm md:text-base text-slate-500 dark:text-slate-400 mt-1 max-w-xl">
-              按通勤、睡前、专题整理你的听书队列。
+              {t('playlists.subtitle')}
             </p>
           </div>
 
@@ -238,7 +240,7 @@ const MyPlaylistsPage: React.FC = () => {
             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-primary-600 hover:bg-primary-700 text-white text-sm font-bold rounded-xl shadow-lg shadow-primary-500/25 transition-colors"
           >
             <Plus size={18} />
-            新建书单
+            {t('playlists.newPlaylist')}
           </button>
         </div>
 
@@ -249,7 +251,7 @@ const MyPlaylistsPage: React.FC = () => {
               <input
                 value={query}
                 onChange={event => setQuery(event.target.value)}
-                placeholder="搜索书单名称或描述"
+                placeholder={t('playlists.searchPlaylistPlaceholder')}
                 className="w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white shadow-sm"
                 />
             </div>
@@ -257,25 +259,25 @@ const MyPlaylistsPage: React.FC = () => {
               <DisplaySettingsMenu
                 open={showFilterMenu}
                 onOpenChange={setShowFilterMenu}
-                sheetLabel="关闭书单展示设置"
+                sheetLabel={t('playlists.closeDisplaySettings')}
                 sections={[
                   {
-                    title: '排序方式',
+                    title: t('playlists.sortBy'),
                     value: sortBy,
                     options: [
-                      { value: 'updatedAt', label: '最近更新' },
-                      { value: 'title', label: '书单名称' },
-                      { value: 'count', label: '作品数量' },
+                      { value: 'updatedAt', label: t('playlists.recentlyUpdated') },
+                      { value: 'title', label: t('playlists.playlistName') },
+                      { value: 'count', label: t('playlists.workCount') },
                     ],
                     onChange: (value) => handleSortChange(value as PlaylistSortBy),
                   },
                   {
-                    title: '图标大小',
+                    title: t('playlists.iconSize'),
                     value: iconSize,
                     options: [
-                      { value: 'large', label: '大图标' },
-                      { value: 'medium', label: '中图标（默认）' },
-                      { value: 'small', label: '小图标' },
+                      { value: 'large', label: t('playlists.largeIcon') },
+                      { value: 'medium', label: t('playlists.mediumIconDefault') },
+                      { value: 'small', label: t('playlists.smallIcon') },
                     ],
                     onChange: (value) => handleIconSizeChange(value as PlaylistIconSize),
                   },
@@ -290,14 +292,14 @@ const MyPlaylistsPage: React.FC = () => {
             <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-primary-50 dark:bg-primary-900/20 text-primary-600 mb-6">
               <ListMusic size={40} />
             </div>
-            <h3 className="text-xl font-bold dark:text-white">还没有书单</h3>
-            <p className="text-sm text-slate-500 mt-2 mb-8">新建一个书单，把想听的作品整理到一起。</p>
+            <h3 className="text-xl font-bold dark:text-white">{t('playlists.emptyTitle')}</h3>
+            <p className="text-sm text-slate-500 mt-2 mb-8">{t('playlists.emptyDescription')}</p>
             <button
               onClick={() => setShowCreateModal(true)}
               className="inline-flex items-center gap-2 px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-bold rounded-xl shadow-lg shadow-primary-500/25 transition-colors"
             >
               <Plus size={18} />
-              新建书单
+              {t('playlists.newPlaylist')}
             </button>
           </div>
         ) : filteredPlaylists.length === 0 ? (
@@ -305,8 +307,8 @@ const MyPlaylistsPage: React.FC = () => {
             <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 mb-6">
               <Search size={40} />
             </div>
-            <h3 className="text-xl font-bold dark:text-white">没有匹配的书单</h3>
-            <p className="text-sm text-slate-500 mt-2">换个关键词试试。</p>
+            <h3 className="text-xl font-bold dark:text-white">{t('playlists.noMatchedPlaylist')}</h3>
+            <p className="text-sm text-slate-500 mt-2">{t('playlists.tryAnotherKeyword')}</p>
           </div>
         ) : (
           <>
@@ -329,7 +331,7 @@ const MyPlaylistsPage: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 w-full max-w-md shadow-2xl border border-slate-100 dark:border-slate-800">
             <div className="flex items-center justify-between mb-5">
-              <h2 className="text-xl font-bold dark:text-white">新建书单</h2>
+              <h2 className="text-xl font-bold dark:text-white">{t('playlists.newPlaylist')}</h2>
               <button
                 onClick={() => setShowCreateModal(false)}
                 className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500"
@@ -340,22 +342,22 @@ const MyPlaylistsPage: React.FC = () => {
 
             <form onSubmit={handleCreate} className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-bold text-slate-600 dark:text-slate-400">名称</label>
+                <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('playlists.name')}</label>
                 <input
                   value={title}
                   onChange={event => setTitle(event.target.value)}
-                  placeholder="例如：通勤路上"
+                  placeholder={t('playlists.namePlaceholder')}
                   className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                   autoFocus
                 />
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-bold text-slate-600 dark:text-slate-400">描述</label>
+                <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('playlists.description')}</label>
                 <textarea
                   value={description}
                   onChange={event => setDescription(event.target.value)}
-                  placeholder="一句话描述这个书单"
+                  placeholder={t('playlists.descriptionPlaceholder')}
                   rows={3}
                   className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white resize-none"
                 />
@@ -367,14 +369,14 @@ const MyPlaylistsPage: React.FC = () => {
                   onClick={() => setShowCreateModal(false)}
                   className="px-5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm font-bold"
                 >
-                  取消
+                  {t('common.cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={saving || !title.trim()}
                   className="px-5 py-2.5 rounded-xl bg-primary-600 text-white text-sm font-bold disabled:opacity-50"
                 >
-                  {saving ? '创建中...' : '创建'}
+                  {saving ? t('playlists.creating') : t('playlists.create')}
                 </button>
               </div>
             </form>
@@ -403,6 +405,7 @@ const PlaylistCard = ({
   coverSeed: number;
   compactOnMobile?: boolean;
 }) => {
+  const { t } = useTranslation();
   const covers = collectPlaylistCovers(playlist, coverSeed);
   const bookCount = getPlaylistBookCount(playlist);
   const titleClass = iconSize === 'large' ? 'text-xl' : iconSize === 'small' ? 'text-sm' : 'text-lg';
@@ -419,7 +422,7 @@ const PlaylistCard = ({
             {covers.map(book => (
               <img
                 key={book.id}
-                src={getCoverUrl(book.coverUrl, book.libraryId, book.bookId)}
+                src={getCoverUrl(book.cover_url, book.library_id, book.book_id)}
                 alt={book.title}
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
@@ -441,9 +444,9 @@ const PlaylistCard = ({
           {playlist.title}
         </h3>
         <p className={`text-sm text-slate-500 mt-1 ${iconSize === 'small' || compactOnMobile ? 'truncate' : 'line-clamp-2 min-h-10'}`}>
-          {playlist.description || `${bookCount} 本书`}
+          {playlist.description || t('playlists.bookCount', { count: bookCount })}
         </p>
-        <p className="text-xs text-slate-400 font-bold mt-3">{bookCount} 本书</p>
+        <p className="text-xs text-slate-400 font-bold mt-3">{t('playlists.bookCount', { count: bookCount })}</p>
       </div>
     </Link>
   );

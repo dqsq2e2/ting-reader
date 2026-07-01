@@ -22,11 +22,3 @@ pub enum FormatMethod {
     GetStreamUrl,
     WriteMetadata,
 }
-
-/// Method enum for utility plugin calls
-#[derive(Debug, Clone, Copy)]
-pub enum UtilityMethod {
-    GetFfmpegPath,
-    GetFfprobePath,
-    CheckVersion,
-}

@@ -15,12 +15,12 @@ use crate::db::repository::{
     TaskRepository,
 };
 use crate::plugin::manager::{FormatMethod, PluginManager};
-use crate::plugin::types::PluginType;
 use std::path::Path;
 use std::sync::Arc;
 use tracing::{info, warn};
 
 pub mod local;
+pub mod rss;
 pub mod shared;
 pub mod webdav;
 
@@ -177,10 +177,18 @@ impl LibraryScanner {
         self
     }
 
-    /// Update task progress if task_repo and task_id are available
-    pub(crate) async fn update_progress(&self, task_id: Option<&str>, message: String) {
+    /// Update task progress with a frontend-localizable key.
+    pub(crate) async fn update_progress_key(
+        &self,
+        task_id: Option<&str>,
+        message_key: &str,
+        message_params: serde_json::Value,
+    ) {
         if let (Some(repo), Some(tid)) = (&self.task_repo, task_id) {
-            if let Err(e) = repo.update_progress(tid, &message).await {
+            if let Err(e) = repo
+                .update_progress_key(tid, message_key, message_params)
+                .await
+            {
                 warn!("Failed to update task progress: {}", e);
             }
         }
@@ -202,10 +210,10 @@ impl LibraryScanner {
     pub(crate) async fn get_supported_extensions(&self) -> Vec<String> {
         let mut extensions: Vec<String> = AUDIO_EXTENSIONS.iter().map(|&s| s.to_string()).collect();
 
-        // Get extensions from Format plugins
+        // Get extensions from format_handler capabilities.
         let plugins = self
             .plugin_manager
-            .find_plugins_by_type(PluginType::Format)
+            .find_plugins_by_capability_kind("format_handler")
             .await;
         for plugin in plugins {
             if let Some(exts) = &plugin.supported_extensions {
@@ -231,22 +239,25 @@ impl LibraryScanner {
     ) -> Result<ScanResult> {
         info!(
             target: "audit::scan",
+            message_key = "scan.started",
+            message_params = %serde_json::json!({
+                "path": library_path,
+                "library_id": library_id,
+                "mode": mode.as_str(),
+            }),
             scan_mode = %mode.as_str(),
-            "开始扫描存储库: {} (ID: {})",
-            library_path,
-            library_id
+            library_id = %library_id,
+            path = %library_path,
+            "Library scan started"
         );
-        self.update_progress(
+        self.update_progress_key(
             task_id,
-            format!(
-                "开始扫描存储库: {} ({})",
-                library_path,
-                if mode.is_full() {
-                    "全量同步"
-                } else {
-                    "增量同步"
-                }
-            ),
+            "scan.started",
+            serde_json::json!({
+                "path": library_path,
+                "library_id": library_id,
+                "mode": mode.as_str(),
+            }),
         )
         .await;
         self.check_cancellation(task_id).await?;
@@ -278,6 +289,8 @@ impl LibraryScanner {
         let scan_result = if library.library_type == "webdav" {
             self.scan_webdav_library(&library, task_id, &scraper_config, mode)
                 .await?
+        } else if library.library_type == "rss" {
+            self.scan_rss_library(&library, task_id, mode).await?
         } else {
             // Local library scan
             let path = Path::new(library_path);
@@ -306,21 +319,40 @@ impl LibraryScanner {
 
         info!(
             target: "audit::scan",
-            "存储库 '{}' 扫描完成：共 {} 本书，新增 {} 本，更新 {} 本，错误 {} 个",
-            library_path, scan_result.total_books, scan_result.books_created, scan_result.books_updated, scan_result.errors.len()
+            message_key = "scan.completed",
+            message_params = %serde_json::json!({
+                "path": library_path,
+                "total": scan_result.total_books,
+                "created": scan_result.books_created,
+                "updated": scan_result.books_updated,
+                "deleted": scan_result.books_deleted,
+                "errors": scan_result.errors.len(),
+            }),
+            path = %library_path,
+            total_books = scan_result.total_books,
+            books_created = scan_result.books_created,
+            books_updated = scan_result.books_updated,
+            books_deleted = scan_result.books_deleted,
+            errors = scan_result.errors.len(),
+            "Library scan completed"
         );
-        self.update_progress(
+        self.update_progress_key(
             task_id,
-            format!(
-                "扫描完成。处理了 {} 本书。",
-                scan_result.books_created + scan_result.books_updated
-            ),
+            "scan.completed",
+            serde_json::json!({
+                "path": library_path,
+                "total": scan_result.total_books,
+                "created": scan_result.books_created,
+                "updated": scan_result.books_updated,
+                "deleted": scan_result.books_deleted,
+                "errors": scan_result.errors.len(),
+            }),
         )
         .await;
 
         // Trigger Merge Suggestions
         if let Some(merge_service) = &self.merge_service {
-            self.update_progress(task_id, "正在处理自动合并...".to_string())
+            self.update_progress_key(task_id, "scan.auto_merge.processing", serde_json::json!({}))
                 .await;
             if let Err(e) = merge_service.process_auto_merges().await {
                 warn!("Failed to process auto-merges: {}", e);
@@ -386,47 +418,43 @@ impl LibraryScanner {
             let url = match tokio::fs::read_to_string(path).await {
                 Ok(content) => content.trim().to_string(),
                 Err(e) => {
-                    tracing::error!("无法读取 strm 文件 {}: {}", path.display(), e);
+                    tracing::error!(
+                        path = %path.display(),
+                        error = %e,
+                        message_key = "strm.file.read_failed",
+                        message_params = %serde_json::json!({
+                            "path": path.display().to_string(),
+                            "error": e.to_string(),
+                        }),
+                        "Failed to read strm file"
+                    );
                     return (String::new(), t, None, None, None, 0);
                 }
             };
 
             if url.is_empty() || !url.starts_with("http") {
-                tracing::warn!("strm 文件 {} 包含无效的 URL: {}", path.display(), url);
+                tracing::warn!(
+                    path = %path.display(),
+                    url = %url,
+                    message_key = "strm.url.invalid",
+                    message_params = %serde_json::json!({
+                        "path": path.display().to_string(),
+                    }),
+                    "strm file contains invalid URL"
+                );
                 return (String::new(), t, None, None, None, 0);
             }
 
-            // Try to get duration using FFprobe (derive from FFmpeg path)
-            let duration = if let Some(ffmpeg_path) = self.plugin_manager.get_ffmpeg_path().await {
-                let ffprobe_path = {
-                    let ffmpeg_dir = std::path::Path::new(&ffmpeg_path).parent();
-                    if let Some(dir) = ffmpeg_dir {
-                        // ⭐ 跨平台：Windows 使用 ffprobe.exe，Linux/Mac 使用 ffprobe
-                        let ffprobe_name = if cfg!(target_os = "windows") {
-                            "ffprobe.exe"
-                        } else {
-                            "ffprobe"
-                        };
+            // Try to get duration using the plugin-provided FFprobe path.
+            let duration = if let Some(ffprobe_path) = self.plugin_manager.get_ffprobe_path().await
+            {
+                tracing::info!("Using FFprobe to get strm file duration: {}", url);
 
-                        let probe = dir.join(ffprobe_name);
-                        if probe.exists() {
-                            Some(probe.to_string_lossy().to_string())
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                };
+                // Add small delay to avoid overwhelming the server
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
-                if let Some(ffprobe_path) = ffprobe_path {
-                    tracing::info!("使用 FFprobe 获取 strm 文件时长: {}", url);
-
-                    // Add small delay to avoid overwhelming the server
-                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-
-                    // Add User-Agent and other headers to avoid being blocked
-                    match tokio::process::Command::new(&ffprobe_path)
+                // Add User-Agent and other headers to avoid being blocked
+                match tokio::process::Command::new(&ffprobe_path)
                     .arg("-v").arg("error")
                     .arg("-user_agent").arg("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                     .arg("-headers").arg("Accept: */*")
@@ -441,34 +469,48 @@ impl LibraryScanner {
                         match duration_str.trim().parse::<f64>() {
                             Ok(dur) => {
                                 let duration_secs = dur.round() as i32;
-                                tracing::info!("strm 文件 {} 时长: {} 秒", t, duration_secs);
+                                tracing::info!("strm file {} duration: {} seconds", t, duration_secs);
                                 duration_secs
                             }
                             Err(_) => {
-                                tracing::warn!("无法解析 FFprobe 输出: {}", duration_str);
+                                tracing::warn!(
+                                    output = %duration_str,
+                                    message_key = "ffprobe.output_parse_failed",
+                                    "Failed to parse FFprobe output"
+                                );
                                 0
                             }
                         }
                     }
                     Ok(output) => {
-                        tracing::warn!("FFprobe 获取时长失败: {}", String::from_utf8_lossy(&output.stderr));
+                        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                        tracing::warn!(
+                            error = %stderr,
+                            message_key = "ffprobe.duration_failed",
+                            message_params = %serde_json::json!({ "error": stderr }),
+                            "FFprobe duration detection failed"
+                        );
                         0
                     }
                     Err(e) => {
-                        tracing::warn!("无法运行 FFprobe: {}", e);
+                        tracing::warn!(
+                            error = %e,
+                            message_key = "ffprobe.run_failed",
+                            message_params = %serde_json::json!({ "error": e.to_string() }),
+                            "Failed to run FFprobe"
+                        );
                         0
                     }
                 }
-                } else {
-                    tracing::warn!("未找到 FFprobe，strm 文件时长将设为 0");
-                    0
-                }
             } else {
-                tracing::warn!("未找到 FFmpeg 插件，strm 文件时长将设为 0");
+                tracing::warn!(
+                    message_key = "ffprobe.missing",
+                    "FFprobe not found; duration will be set to zero"
+                );
                 0
             };
 
-            tracing::info!("检测到 strm 文件: {}, 时长: {} 秒", t, duration);
+            tracing::info!("Detected strm file: {}, duration: {} seconds", t, duration);
 
             return (String::new(), t, None, None, None, duration);
         }
@@ -487,7 +529,7 @@ impl LibraryScanner {
         // 1. 优先尝试格式插件
         let plugins = self
             .plugin_manager
-            .find_plugins_by_type(PluginType::Format)
+            .find_plugins_by_capability_kind("format_handler")
             .await;
         let mut plugin_handled = false;
 
@@ -514,7 +556,11 @@ impl LibraryScanner {
                 .call_format(&plugin.id, FormatMethod::ExtractMetadata, params)
                 .await
             {
-                tracing::debug!("使用格式插件 {} 处理 {} 文件", plugin.name, ext);
+                tracing::debug!(
+                    "Using format plugin {} to process {} file",
+                    plugin.name,
+                    ext
+                );
 
                 if let Some(t) = result.get("title").and_then(|v| v.as_str()) {
                     if !t.trim().is_empty() {
@@ -544,7 +590,11 @@ impl LibraryScanner {
                 if let Some(dur) = result.get("duration").and_then(|v| v.as_f64()) {
                     duration = dur.round() as i32;
                     if duration > 0 {
-                        tracing::debug!("格式插件 {} 获取到时长: {} 秒", plugin.name, duration);
+                        tracing::debug!(
+                            "Format plugin {} detected duration: {} seconds",
+                            plugin.name,
+                            duration
+                        );
                     }
                 }
                 if let Some(c) = result.get("cover_url").and_then(|v| v.as_str()) {
@@ -569,10 +619,10 @@ impl LibraryScanner {
             if ext == "mp3" {
                 if let Ok(id3_duration) = self.get_id3_duration(path).await {
                     duration = id3_duration;
-                    tracing::debug!("使用 ID3 获取 MP3 时长: {} 秒", duration);
+                    tracing::debug!("Using ID3 to get MP3 duration: {} seconds", duration);
                 } else if let Ok(meta) = self.audio_streamer.read_metadata(path) {
                     duration = meta.duration.as_secs() as i32;
-                    tracing::debug!("使用 Symphonia 获取 MP3 时长: {} 秒", duration);
+                    tracing::debug!("Using Symphonia to get MP3 duration: {} seconds", duration);
                 }
             } else {
                 // Other formats: compare ID3 with file size estimation
@@ -586,14 +636,14 @@ impl LibraryScanner {
                         // 差距小于15%，信任ID3
                         duration = id3_duration;
                         tracing::debug!(
-                            "使用 ID3 获取 {} 时长: {} 秒 (估算: {} 秒, 差距: {:.1}%)",
+                            "Using ID3 to get {} duration: {} seconds (estimated: {} seconds, diff: {:.1}%)",
                             ext,
                             duration,
                             estimated_duration,
                             diff_ratio * 100.0
                         );
                     } else {
-                        tracing::debug!("ID3 时长差距过大 (ID3: {} 秒, 估算: {} 秒, 差距: {:.1}%), 将使用 FFprobe", 
+                        tracing::debug!("ID3 duration differs too much (ID3: {}s, estimated: {}s, diff: {:.1}%); using FFprobe",
                                       id3_duration, estimated_duration, diff_ratio * 100.0);
                     }
                 }
@@ -602,7 +652,11 @@ impl LibraryScanner {
                 if duration == 0 {
                     if let Ok(meta) = self.audio_streamer.read_metadata(path) {
                         duration = meta.duration.as_secs() as i32;
-                        tracing::debug!("使用 Symphonia 获取 {} 时长: {} 秒", ext, duration);
+                        tracing::debug!(
+                            "Using Symphonia to get {} duration: {} seconds",
+                            ext,
+                            duration
+                        );
                     }
                 }
             }

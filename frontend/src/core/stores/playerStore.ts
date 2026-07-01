@@ -36,8 +36,8 @@ interface PlayerState {
 
 /** Check if a chapter's progress indicates it has been fully played */
 function isChapterFinished(chapter: Chapter): boolean {
-  if (!chapter.progressPosition || !chapter.duration || chapter.duration <= 0) return false;
-  return chapter.progressPosition / chapter.duration >= 0.95;
+  if (!chapter.progress_position || !chapter.duration || chapter.duration <= 0) return false;
+  return chapter.progress_position / chapter.duration >= 0.95;
 }
 
 export const usePlayerStore = create<PlayerState>((set, get) => ({
@@ -67,10 +67,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           chapter = orderedChapters.find(c => c.id === startChapterId) || orderedChapters[0];
         } else {
           // Sort by progressUpdatedAt descending and take the first one that has progress
-          const playedChapters = orderedChapters.filter(c => c.progressUpdatedAt);
+          const playedChapters = orderedChapters.filter(c => c.progress_updated_at);
           if (playedChapters.length > 0) {
             playedChapters.sort((a, b) => {
-              return new Date(b.progressUpdatedAt!).getTime() - new Date(a.progressUpdatedAt!).getTime();
+              return new Date(b.progress_updated_at!).getTime() - new Date(a.progress_updated_at!).getTime();
             });
             chapter = playedChapters[0];
           } else {
@@ -79,7 +79,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         }
 
         // If chapter is finished, restart from beginning
-        const startPos = isChapterFinished(chapter) ? 0 : (chapter.progressPosition || 0);
+        const startPos = isChapterFinished(chapter) ? 0 : (chapter.progress_position || 0);
 
         const newState: Partial<PlayerState> = {
           currentBook: book,
@@ -89,8 +89,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           currentTime: startPos
         };
 
-        if (book.themeColor && !isTooLight(book.themeColor)) {
-          newState.themeColor = book.themeColor;
+        if (book.theme_color && !isTooLight(book.theme_color)) {
+          newState.themeColor = book.theme_color;
         } else {
           newState.themeColor = '#F2EDE4'; // Reset to default
         }
@@ -149,7 +149,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           // Clicking a finished chapter clears its progress and restarts from beginning
           startPos = 0;
         } else {
-          startPos = orderedChapter.progressPosition || 0;
+          startPos = orderedChapter.progress_position || 0;
         }
 
         const newState: Partial<PlayerState> = {
@@ -160,8 +160,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           currentTime: startPos
         };
 
-        if (book.themeColor && !isTooLight(book.themeColor)) {
-          newState.themeColor = book.themeColor;
+        if (book.theme_color && !isTooLight(book.theme_color)) {
+          newState.themeColor = book.theme_color;
         } else {
           newState.themeColor = '#F2EDE4'; // Reset to default
         }

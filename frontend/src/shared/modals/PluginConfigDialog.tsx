@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import apiClient from '../../core/api/client';
 import { X, Save, Loader2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+
+const SECRET_UNCHANGED_PLACEHOLDER = '__TING_READER_SECRET_UNCHANGED__';
 
 interface Props {
   pluginId: string;
@@ -10,11 +13,107 @@ interface Props {
   onSaved: () => void;
 }
 
-function fieldLabel(key: string, prop: Record<string, unknown>): string {
-  return (typeof prop.title === 'string' ? prop.title : '') || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+function localizedSchemaText(value: unknown, language: string): string {
+  if (typeof value === 'string') return value.trim();
+  if (!value || typeof value !== 'object') return '';
+
+  const record = value as Record<string, unknown>;
+  const preferred = language.toLowerCase().startsWith('en')
+    ? ['en', 'enUS', 'en-US']
+    : ['zh', 'zhCN', 'zh-CN', 'zhHans', 'zh-Hans'];
+  const fallbackKeys = language.toLowerCase().startsWith('en')
+    ? ['zh', 'zhCN', 'zh-CN', 'zhHans', 'zh-Hans']
+    : ['en', 'enUS', 'en-US'];
+
+  for (const key of [...preferred, ...fallbackKeys]) {
+    const text = typeof record[key] === 'string' ? record[key].trim() : '';
+    if (text) return text;
+  }
+
+  const fallbackText = Object.values(record).find(
+    (text): text is string => typeof text === 'string' && text.trim().length > 0
+  );
+  return fallbackText?.trim() || '';
+}
+
+function localizedSchemaPair(value: unknown, language: string): string {
+  if (typeof value === 'string') return value.trim();
+  if (!value || typeof value !== 'object') return '';
+
+  const record = value as Record<string, unknown>;
+  const zh = (
+    localizedSchemaText({ zh: record.zh, zhCN: record.zhCN, 'zh-CN': record['zh-CN'], zhHans: record.zhHans, 'zh-Hans': record['zh-Hans'] }, 'zh-CN') ||
+    localizedSchemaText(value, 'zh-CN')
+  );
+  const en = (
+    localizedSchemaText({ en: record.en, enUS: record.enUS, 'en-US': record['en-US'] }, 'en-US') ||
+    localizedSchemaText(value, 'en-US')
+  );
+
+  if (zh && en && zh !== en) {
+    return language.toLowerCase().startsWith('en') ? `${en} / ${zh}` : `${zh} / ${en}`;
+  }
+  return zh || en;
+}
+
+function enumOptionLabel(
+  option: string,
+  index: number,
+  prop: Record<string, unknown>,
+  language: string
+): string {
+  const rawLabels =
+    prop.enum_labels ||
+    prop.enumLabels ||
+    prop['x-enum-labels'] ||
+    prop.enumNames;
+
+  if (Array.isArray(rawLabels)) {
+    const label = localizedSchemaPair(rawLabels[index], language);
+    if (label) return label;
+  }
+
+  if (rawLabels && typeof rawLabels === 'object') {
+    const label = localizedSchemaPair((rawLabels as Record<string, unknown>)[option], language);
+    if (label) return label;
+  }
+
+  return option;
+}
+
+function fieldLabel(key: string, prop: Record<string, unknown>, language: string): string {
+  return (
+    localizedSchemaText(prop.title_i18n, language) ||
+    localizedSchemaText(prop.label_i18n, language) ||
+    localizedSchemaText(prop.title, language) ||
+    localizedSchemaText(prop.label, language) ||
+    key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+  );
+}
+
+function fieldDescription(prop: Record<string, unknown>, language: string): string {
+  return (
+    localizedSchemaText(prop.description_i18n, language) ||
+    localizedSchemaText(prop.description, language)
+  );
+}
+
+function fieldPlaceholder(prop: Record<string, unknown>, language: string): string {
+  return (
+    localizedSchemaText(prop.placeholder_i18n, language) ||
+    localizedSchemaText(prop.placeholder, language)
+  );
+}
+
+function isEncryptedField(prop: Record<string, unknown>): boolean {
+  return prop['x-encrypted'] === true ||
+    prop.encrypted === true ||
+    prop.format === 'password' ||
+    prop.format === 'secret';
 }
 
 const PluginConfigDialog: React.FC<Props> = ({ pluginId, pluginName, configSchema, onClose, onSaved }) => {
+  const { t, i18n } = useTranslation();
   const [config, setConfig] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -44,7 +143,7 @@ const PluginConfigDialog: React.FC<Props> = ({ pluginId, pluginName, configSchem
       onSaved();
       onClose();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '保存配置失败';
+      const msg = err instanceof Error ? err.message : t('pluginConfig.saveFailed');
       setError(msg);
     } finally {
       setSaving(false);
@@ -59,9 +158,13 @@ const PluginConfigDialog: React.FC<Props> = ({ pluginId, pluginName, configSchem
 
   const renderField = (key: string, prop: Record<string, unknown>) => {
     const value = config[key] ?? prop.default ?? '';
-    const label = fieldLabel(key, prop);
+    const language = i18n.resolvedLanguage || i18n.language || 'zh-CN';
+    const label = fieldLabel(key, prop, language);
+    const description = fieldDescription(prop, language);
+    const encrypted = isEncryptedField(prop);
     const propType = typeof prop.type === 'string' ? prop.type : 'string';
     const propEnum = Array.isArray(prop.enum) ? (prop.enum as string[]) : [];
+    const displayValue = encrypted && value === SECRET_UNCHANGED_PLACEHOLDER ? '' : value;
 
     if (propEnum.length > 0) {
       return (
@@ -72,12 +175,12 @@ const PluginConfigDialog: React.FC<Props> = ({ pluginId, pluginName, configSchem
             onChange={e => setValue(key, e.target.value)}
             className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
           >
-            {propEnum.map(opt => (
-              <option key={opt} value={opt}>{opt}</option>
+            {propEnum.map((opt, index) => (
+              <option key={opt} value={opt}>{enumOptionLabel(opt, index, prop, language)}</option>
             ))}
           </select>
-          {!!prop.description && (
-            <p className="mt-1 text-xs text-slate-400">{String(prop.description)}</p>
+          {!!description && (
+            <p className="mt-1 text-xs text-slate-400">{description}</p>
           )}
         </div>
       );
@@ -97,8 +200,8 @@ const PluginConfigDialog: React.FC<Props> = ({ pluginId, pluginName, configSchem
             <label htmlFor={`cfg-${key}`} className="text-sm font-medium text-slate-700 dark:text-slate-300 cursor-pointer">
               {label}
             </label>
-            {!!prop.description && (
-              <span className="text-xs text-slate-400">{String(prop.description)}</span>
+            {!!description && (
+              <span className="text-xs text-slate-400">{description}</span>
             )}
           </div>
         );
@@ -113,8 +216,8 @@ const PluginConfigDialog: React.FC<Props> = ({ pluginId, pluginName, configSchem
               onChange={e => setValue(key, e.target.value === '' ? '' : Number(e.target.value))}
               className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
             />
-            {!!prop.description && (
-              <p className="mt-1 text-xs text-slate-400">{String(prop.description)}</p>
+            {!!description && (
+              <p className="mt-1 text-xs text-slate-400">{description}</p>
             )}
           </div>
         );
@@ -123,13 +226,17 @@ const PluginConfigDialog: React.FC<Props> = ({ pluginId, pluginName, configSchem
           <div key={key} className="mb-4">
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">{label}</label>
             <input
-              type="text"
-              value={String(value)}
+              type={encrypted ? 'password' : 'text'}
+              value={String(displayValue)}
               onChange={e => setValue(key, e.target.value)}
+              placeholder={encrypted ? t('pluginConfig.secretPlaceholder') : fieldPlaceholder(prop, language)}
               className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
             />
-            {!!prop.description && (
-              <p className="mt-1 text-xs text-slate-400">{String(prop.description)}</p>
+            {encrypted && (
+              <p className="mt-1 text-xs text-slate-400">{t('pluginConfig.encryptedHint')}</p>
+            )}
+            {!!description && (
+              <p className="mt-1 text-xs text-slate-400">{description}</p>
             )}
           </div>
         );
@@ -142,7 +249,7 @@ const PluginConfigDialog: React.FC<Props> = ({ pluginId, pluginName, configSchem
         <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
         <div className="relative bg-white dark:bg-slate-900 p-8 rounded-3xl shadow-2xl flex flex-col items-center gap-4">
           <Loader2 className="animate-spin text-primary-600" size={40} />
-          <p className="font-bold text-slate-600 dark:text-slate-400">正在加载配置...</p>
+          <p className="font-bold text-slate-600 dark:text-slate-400">{t('pluginConfig.loading')}</p>
         </div>
       </div>
     );
@@ -155,7 +262,7 @@ const PluginConfigDialog: React.FC<Props> = ({ pluginId, pluginName, configSchem
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800">
           <div>
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white">插件配置</h2>
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">{t('pluginConfig.title')}</h2>
             <p className="text-sm text-slate-500 dark:text-slate-400">{pluginName}</p>
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
@@ -166,7 +273,7 @@ const PluginConfigDialog: React.FC<Props> = ({ pluginId, pluginName, configSchem
         {/* Form */}
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {Object.keys(properties).length === 0 ? (
-            <p className="text-slate-400 text-sm text-center py-8">该插件无可配置项。</p>
+            <p className="text-slate-400 text-sm text-center py-8">{t('pluginConfig.empty')}</p>
           ) : (
             Object.entries(properties).map(([key, prop]) => renderField(key, prop))
           )}
@@ -184,7 +291,7 @@ const PluginConfigDialog: React.FC<Props> = ({ pluginId, pluginName, configSchem
             onClick={onClose}
             className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
           >
-            取消
+            {t('common.cancel')}
           </button>
           <button
             onClick={handleSave}
@@ -196,7 +303,7 @@ const PluginConfigDialog: React.FC<Props> = ({ pluginId, pluginName, configSchem
             ) : (
               <Save size={16} />
             )}
-            保存
+            {t('common.save')}
           </button>
         </div>
       </div>

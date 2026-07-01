@@ -59,17 +59,42 @@ pub fn decrypt_value(encryption_key: &[u8; 32], encrypted: &str) -> Result<Strin
         .map_err(|e| TingError::ConfigError(format!("Invalid UTF-8 in decrypted data: {}", e)))
 }
 
-/// Extract encrypted field paths from schema (fields with "x-encrypted": true)
+/// Extract encrypted field paths from schema.
+///
+/// The canonical marker is `x-encrypted: true`, but the UI also treats
+/// `encrypted: true` and `format: password|secret` as sensitive fields. Keep
+/// the backend in lockstep so a password-looking field is never stored in
+/// plain text because the manifest used a supported alias.
 pub fn extract_encrypted_fields(schema: &Value) -> Vec<String> {
     let mut encrypted_fields = Vec::new();
     if let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) {
         for (field_name, field_schema) in properties {
-            if let Some(true) = field_schema.get("x-encrypted").and_then(|v| v.as_bool()) {
+            if is_encrypted_field_schema(field_schema) {
                 encrypted_fields.push(field_name.clone());
             }
         }
     }
     encrypted_fields
+}
+
+fn is_encrypted_field_schema(field_schema: &Value) -> bool {
+    field_schema
+        .get("x-encrypted")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || field_schema
+            .get("encrypted")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        || matches!(
+            field_schema
+                .get("format")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .map(str::to_ascii_lowercase)
+                .as_deref(),
+            Some("password" | "secret")
+        )
 }
 
 /// Encrypt sensitive fields in a configuration value

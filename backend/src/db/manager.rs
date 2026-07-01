@@ -23,6 +23,20 @@ pub struct DatabaseManager {
 }
 
 impl DatabaseManager {
+    fn pool_busy_error(error: impl std::fmt::Display) -> TingError {
+        let error = error.to_string();
+        tracing::warn!(
+            error = %error,
+            message_key = "database.connection.failed",
+            message_params = %serde_json::json!({ "error": error }),
+            "Failed to get database connection"
+        );
+        TingError::DatabaseError(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            Some("Database connection pool is busy; please retry later".to_string()),
+        ))
+    }
+
     /// Create a new DatabaseManager with the specified database path and pool size
     pub fn new(db_path: &Path, pool_size: u32, busy_timeout: Duration) -> Result<Self> {
         // Ensure parent directory exists
@@ -94,13 +108,7 @@ impl DatabaseManager {
 
     /// Get a connection from the pool
     pub fn get_connection(&self) -> Result<PooledConnection<SqliteConnectionManager>> {
-        self.pool.get().map_err(|e| {
-            tracing::warn!("获取数据库连接失败: {}", e);
-            TingError::DatabaseError(rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                Some("数据库连接池繁忙，请稍后重试".to_string()),
-            ))
-        })
+        self.pool.get().map_err(Self::pool_busy_error)
     }
 
     /// Execute a database operation asynchronously
@@ -115,13 +123,7 @@ impl DatabaseManager {
         let pool = self.pool.clone();
 
         task::spawn_blocking(move || {
-            let conn = pool.get().map_err(|e| {
-                tracing::warn!("获取数据库连接失败: {}", e);
-                TingError::DatabaseError(rusqlite::Error::SqliteFailure(
-                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                    Some("数据库连接池繁忙，请稍后重试".to_string()),
-                ))
-            })?;
+            let conn = pool.get().map_err(Self::pool_busy_error)?;
             f(&conn)
         })
         .await
@@ -140,13 +142,7 @@ impl DatabaseManager {
         let pool = self.pool.clone();
 
         task::spawn_blocking(move || {
-            let mut conn = pool.get().map_err(|e| {
-                tracing::warn!("获取数据库连接失败: {}", e);
-                TingError::DatabaseError(rusqlite::Error::SqliteFailure(
-                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                    Some("数据库连接池繁忙，请稍后重试".to_string()),
-                ))
-            })?;
+            let mut conn = pool.get().map_err(Self::pool_busy_error)?;
 
             let tx = conn.transaction().map_err(TingError::DatabaseError)?;
             let result = f(&tx)?;
@@ -207,13 +203,7 @@ impl DatabaseManager {
                 std::fs::create_dir_all(parent).map_err(|e| TingError::IoError(e))?;
             }
 
-            let src_conn = pool.get().map_err(|e| {
-                tracing::warn!("获取数据库连接失败: {}", e);
-                TingError::DatabaseError(rusqlite::Error::SqliteFailure(
-                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                    Some("数据库连接池繁忙，请稍后重试".to_string()),
-                ))
-            })?;
+            let src_conn = pool.get().map_err(Self::pool_busy_error)?;
 
             // Open destination database
             let mut dst_conn = Connection::open(&backup_path).map_err(TingError::DatabaseError)?;

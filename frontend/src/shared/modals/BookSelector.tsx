@@ -4,6 +4,7 @@ import type { Book } from '../../core/types';
 import { Search, X, Book as BookIcon, Loader2 } from 'lucide-react';
 import { getCoverUrl } from '../../core/utils/image';
 import { getCoverAspectClass, useBookshelfCoverShape } from '../../core/hooks/useBookshelfCoverShape';
+import { useTranslation } from 'react-i18next';
 
 interface Props {
   onSelect: (book: Book) => void;
@@ -12,6 +13,7 @@ interface Props {
 }
 
 const BookSelector: React.FC<Props> = ({ onSelect, onClose, excludeIds }) => {
+  const { t } = useTranslation();
   const coverShape = useBookshelfCoverShape();
   const [search, setSearch] = useState('');
   const [books, setBooks] = useState<Book[]>([]);
@@ -52,7 +54,7 @@ const BookSelector: React.FC<Props> = ({ onSelect, onClose, excludeIds }) => {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜索目标书籍..."
+            placeholder={t('shared.bookSelectorPlaceholder')}
             className="flex-1 bg-transparent border-none p-0 text-slate-900 dark:text-white focus:ring-0 placeholder-slate-400"
             autoFocus
           />
@@ -68,7 +70,7 @@ const BookSelector: React.FC<Props> = ({ onSelect, onClose, excludeIds }) => {
             </div>
           ) : books.length === 0 ? (
             <div className="py-8 text-center text-slate-500 text-sm">
-              未找到相关书籍
+              {t('shared.noMatchedBooks')}
             </div>
           ) : (
             <div className="space-y-1">
@@ -79,9 +81,9 @@ const BookSelector: React.FC<Props> = ({ onSelect, onClose, excludeIds }) => {
                   className="w-full flex items-center gap-3 p-3 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors text-left group"
                 >
                   <div className={`w-12 sm:w-10 ${getCoverAspectClass(coverShape)} bg-slate-200 dark:bg-slate-700 rounded-md overflow-hidden shrink-0 relative shadow-sm`}>
-                    {book.coverUrl ? (
+                    {book.cover_url ? (
                       <img 
-                        src={getCoverUrl(book.coverUrl, book.libraryId, book.id)} 
+                        src={getCoverUrl(book.cover_url, book.library_id, book.id)}
                         referrerPolicy="no-referrer"
                         className="w-full h-full object-cover" 
                         alt="" 
@@ -96,7 +98,7 @@ const BookSelector: React.FC<Props> = ({ onSelect, onClose, excludeIds }) => {
                     <h4 className="font-bold text-slate-900 dark:text-white truncate group-hover:text-primary-600 transition-colors">
                         {book.title}
                     </h4>
-                    <p className="text-xs text-slate-500 truncate">{book.author || '未知作者'}</p>
+                    <p className="text-xs text-slate-500 truncate">{book.author || t('shared.unknownAuthor')}</p>
                   </div>
                 </button>
               ))}

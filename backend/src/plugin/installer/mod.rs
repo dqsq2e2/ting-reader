@@ -11,6 +11,8 @@ mod tests;
 
 use crate::core::error::{Result, TingError};
 use crate::plugin::fs_utils;
+use crate::plugin::tr_package;
+use crate::plugin::types::metadata::{parse_plugin_metadata_content, read_plugin_metadata};
 use crate::plugin::types::{PluginId, PluginMetadata};
 use rollback::InstallationBackup;
 use serde::{Deserialize, Serialize};
@@ -19,7 +21,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::{debug, error, info};
 
-/// Plugin package format (.tpkg file structure)
+/// Plugin package metadata and integrity summary.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PluginPackage {
     /// Plugin metadata
@@ -121,34 +123,15 @@ impl PluginInstaller {
 
         if package_path.is_dir() {
             // Directory package
-            let metadata_path = package_path.join("plugin.json");
-            if !metadata_path.exists() {
-                return Err(TingError::PluginLoadError(
-                    "plugin.json not found in package".to_string(),
-                ));
-            }
-
-            // Read metadata
-            let metadata_content = fs::read_to_string(&metadata_path)?;
-            serde_json::from_str(&metadata_content)
-                .map_err(|e| TingError::PluginLoadError(format!("Invalid plugin.json: {}", e)))
+            read_plugin_metadata(package_path)
+        } else if tr_package::has_tr_magic(package_path)? {
+            let metadata_content = tr_package::read_manifest_file(package_path, "plugin.yml")?;
+            parse_plugin_metadata_content(&metadata_content, "plugin.yml")
         } else {
-            // Zip package
-            let file = fs::File::open(package_path)?;
-            let mut archive = zip::ZipArchive::new(file).map_err(|e| {
-                TingError::PluginLoadError(format!("Failed to open zip archive: {}", e))
-            })?;
-
-            let mut metadata_file = archive.by_name("plugin.json").map_err(|_| {
-                TingError::PluginLoadError("plugin.json not found in zip archive".to_string())
-            })?;
-
-            let mut metadata_content = String::new();
-            use std::io::Read;
-            metadata_file.read_to_string(&mut metadata_content)?;
-
-            serde_json::from_str(&metadata_content)
-                .map_err(|e| TingError::PluginLoadError(format!("Invalid plugin.json: {}", e)))
+            Err(TingError::PluginLoadError(format!(
+                "{} is not a valid Ting Reader .tr package",
+                package_path.display()
+            )))
         }
     }
 
@@ -190,7 +173,7 @@ impl PluginInstaller {
                 hasher.update(&file_content);
             }
         } else {
-            // Hash the single file (zip)
+            // Hash the single package file.
             let file_content = fs::read(plugin_path)?;
             hasher.update(&file_content);
         }
@@ -220,54 +203,17 @@ impl PluginInstaller {
         if source_path.is_dir() {
             // Copy all files from source to target
             fs_utils::copy_dir_recursive(source_path, target_path)?;
+        } else if tr_package::has_tr_magic(source_path)? {
+            tr_package::extract_tr_package(source_path, target_path)?;
+            tr_package::write_install_provenance(source_path, target_path)?;
         } else {
-            // Extract zip archive
-            self.extract_zip(source_path, target_path)?;
+            return Err(TingError::PluginLoadError(format!(
+                "{} is not a valid Ting Reader .tr package",
+                source_path.display()
+            )));
         }
 
         info!("Plugin files extracted to: {}", target_path.display());
-        Ok(())
-    }
-
-    /// Extract zip archive to target directory
-    fn extract_zip(&self, source: &Path, target: &Path) -> Result<()> {
-        let file = fs::File::open(source)?;
-        let mut archive = zip::ZipArchive::new(file).map_err(|e| {
-            TingError::PluginLoadError(format!("Failed to open zip archive: {}", e))
-        })?;
-
-        for i in 0..archive.len() {
-            let mut file = archive.by_index(i).map_err(|e| {
-                TingError::PluginLoadError(format!("Failed to read zip entry: {}", e))
-            })?;
-
-            let outpath = match file.enclosed_name() {
-                Some(path) => target.join(path),
-                None => continue,
-            };
-
-            if file.name().ends_with('/') {
-                fs::create_dir_all(&outpath)?;
-            } else {
-                if let Some(p) = outpath.parent() {
-                    if !p.exists() {
-                        fs::create_dir_all(p)?;
-                    }
-                }
-                let mut outfile = fs::File::create(&outpath)?;
-                std::io::copy(&mut file, &mut outfile)?;
-            }
-
-            // Get and set permissions
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                if let Some(mode) = file.unix_mode() {
-                    fs::set_permissions(&outpath, fs::Permissions::from_mode(mode))?;
-                }
-            }
-        }
-
         Ok(())
     }
 

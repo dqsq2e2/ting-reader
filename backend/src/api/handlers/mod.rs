@@ -38,6 +38,7 @@ use crate::db::repository::{
 };
 use crate::plugin::config::PluginConfigManager;
 use crate::plugin::manager::PluginManager;
+use crate::plugin::{PluginCache, PluginHostGateway};
 use std::sync::Arc;
 
 /// Shared application state for handlers
@@ -56,6 +57,8 @@ pub struct AppState {
     pub book_service: Arc<BookService>,
     pub scraper_service: Arc<ScraperService>,
     pub plugin_manager: Arc<PluginManager>,
+    pub plugin_cache: Arc<PluginCache>,
+    pub plugin_host_gateway: Arc<PluginHostGateway>,
     pub config_manager: Arc<PluginConfigManager>,
     pub task_queue: Arc<TaskQueue>,
     pub config: Arc<tokio::sync::RwLock<Config>>,
@@ -70,7 +73,6 @@ pub struct AppState {
     pub audio_streamer: Arc<AudioStreamer>,
     pub merge_service: Arc<MergeService>,
     pub nfo_manager: Arc<NfoManager>,
-    pub plugin_cache: Arc<crate::plugin::store::PluginCache>,
     pub active_preload_tasks:
         Arc<tokio::sync::Mutex<std::collections::HashMap<String, tokio::task::JoinHandle<()>>>>,
     pub library_watcher: Arc<LibraryWatcher>,

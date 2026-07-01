@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import apiClient from '../../core/api/client';
 import type { Library, ScraperSource } from '../../core/types';
 import {
@@ -14,21 +15,39 @@ import {
   Edit,
   Wifi,
   ChevronDown,
-  RotateCcw
+  RotateCcw,
+  Rss
 } from 'lucide-react';
 import HelpHint from '../../shared/ui/HelpHint';
 import ScraperConfigurator from './ScraperConfigurator';
 
 const DEFAULT_SCRAPER_CONFIG = JSON.stringify({
-  extractAudioCover: true,
-  preferAudioTitle: true,
-  nfoWritingEnabled: false,
-  metadataWritingEnabled: false,
-  disableWatcher: false,
-  cloudMode: false,
+  extract_audio_cover: true,
+  use_filename_as_title: true,
+  nfo_writing_enabled: false,
+  metadata_writing_enabled: false,
+  disable_watcher: false,
+  cloud_mode: false,
 }, null, 2);
 
+const libraryTypeLabel = (type: Library['library_type'], t: (key: string) => string) => {
+  if (type === 'local') return t('adminLibraries.localStorage');
+  if (type === 'rss') return t('adminLibraries.rssSubscription');
+  return 'WebDAV';
+};
+
+const libraryTypeBadgeClass = (type: Library['library_type']) => {
+  if (type === 'local') {
+    return 'bg-amber-100 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400';
+  }
+  if (type === 'rss') {
+    return 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400';
+  }
+  return 'bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400';
+};
+
 const AdminLibraries: React.FC = () => {
+  const { t } = useTranslation();
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -39,19 +58,19 @@ const AdminLibraries: React.FC = () => {
   const [availableFolders, setAvailableFolders] = useState<{name: string, path: string}[]>([]);
   const [currentBrowsePath, setCurrentBrowsePath] = useState('');
   const [isFolderMenuOpen, setIsFolderMenuOpen] = useState(false);
-  const [scraperSources, setScraperSources] = useState<Pick<ScraperSource, 'id' | 'name' | 'autoScrape'>[]>([]);
+  const [scraperSources, setScraperSources] = useState<Pick<ScraperSource, 'id' | 'name' | 'auto_scrape'>[]>([]);
   const [showJsonEditor, setShowJsonEditor] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
     name: '',
-    type: 'webdav' as 'webdav' | 'local',
+    type: 'webdav' as 'webdav' | 'local' | 'rss',
     url: '',
     username: '',
     password: '',
-    rootPath: '/',
-    scraperConfig: DEFAULT_SCRAPER_CONFIG
+    root_path: '/',
+    scraper_config: DEFAULT_SCRAPER_CONFIG
   });
 
   useEffect(() => {
@@ -63,10 +82,10 @@ const AdminLibraries: React.FC = () => {
     try {
       const response = await apiClient.get('/api/scraper/sources');
       if (response.data && response.data.sources) {
-        setScraperSources((response.data.sources as ScraperSource[]).filter(source => source.autoScrape));
+        setScraperSources((response.data.sources as ScraperSource[]).filter(source => source.auto_scrape));
       }
     } catch (err) {
-      console.error('获取刮削源失败', err);
+      console.error('Failed to fetch scraper sources', err);
     }
   };
 
@@ -81,7 +100,7 @@ const AdminLibraries: React.FC = () => {
       const response = await apiClient.get('/api/storage/folders', { params: { sub_path: subPath } });
       setAvailableFolders(response.data);
     } catch (err) {
-      console.error('获取文件夹失败', err);
+      console.error('Failed to fetch folders', err);
     }
   };
 
@@ -90,7 +109,7 @@ const AdminLibraries: React.FC = () => {
       const response = await apiClient.get('/api/libraries');
       setLibraries(response.data);
     } catch (err) {
-      console.error('获取库失败', err);
+      console.error('Failed to fetch libraries', err);
     } finally {
       setLoading(false);
     }
@@ -100,11 +119,11 @@ const AdminLibraries: React.FC = () => {
     setEditingId(lib.id);
 
     // Determine the type safely
-    const libType = lib.libraryType === 'local' ? 'local' : 'webdav';
+    const libType = lib.library_type === 'local' || lib.library_type === 'rss' ? lib.library_type : 'webdav';
 
     // Handle scraper config - check if it's already a string or an object
     let scraperConfigStr = '';
-    const configData = lib.scraperConfig;
+    const configData = lib.scraper_config;
     if (configData) {
       if (typeof configData === 'string') {
         scraperConfigStr = configData;
@@ -119,15 +138,15 @@ const AdminLibraries: React.FC = () => {
       url: lib.url,
       username: lib.username || '',
       password: '', // Don't populate password for security, let user enter new one if needed
-      rootPath: lib.rootPath || '/',
-      scraperConfig: scraperConfigStr
+      root_path: lib.root_path || '/',
+      scraper_config: scraperConfigStr
     });
     setIsModalOpen(true);
   };
 
   const handleTestConnection = async () => {
     if (!formData.url) {
-      alert('请输入 WebDAV 地址');
+      alert(t('adminLibraries.requireWebdavUrl'));
       return;
     }
 
@@ -137,21 +156,21 @@ const AdminLibraries: React.FC = () => {
         url: formData.url,
         username: formData.username || null,
         password: formData.password || null,
-        root_path: formData.rootPath || null
+        root_path: formData.root_path || null
       };
 
       const response = await apiClient.post('/api/libraries/test-connection', payload);
 
       if (response.data.success) {
-        alert('连接成功！');
+        alert(t('adminLibraries.connectionSuccess'));
       } else {
         alert(`${response.data.message}`);
       }
     } catch (err) {
       console.error(err);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const msg = (err as any).response?.data?.message || (err as any).message || '未知错误';
-      alert(`请求失败: ${msg}`);
+      const msg = (err as any).response?.data?.message || (err as any).message || t('adminLibraries.unknownError');
+      alert(t('adminLibraries.requestFailed', { message: msg }));
     } finally {
       setTestingConnection(false);
     }
@@ -162,25 +181,28 @@ const AdminLibraries: React.FC = () => {
     try {
       const payload: Record<string, unknown> = {
         name: formData.name,
-        libraryType: formData.type,
+        library_type: formData.type,
       };
 
       if (formData.type === 'local') {
         payload.path = formData.url;
+      } else if (formData.type === 'rss') {
+        payload.rss_feed_url = formData.url;
+        payload.root_path = '/';
       } else {
-        payload.webdavUrl = formData.url;
-        payload.webdavUsername = formData.username;
+        payload.webdav_url = formData.url;
+        payload.webdav_username = formData.username;
         if (formData.password || !editingId) {
-             payload.webdavPassword = formData.password;
+             payload.webdav_password = formData.password;
         }
-        payload.rootPath = formData.rootPath;
+        payload.root_path = formData.root_path;
       }
 
-      if (formData.scraperConfig) {
+      if (formData.type !== 'rss' && formData.scraper_config) {
         try {
-          payload.scraperConfig = JSON.parse(formData.scraperConfig);
+          payload.scraper_config = JSON.parse(formData.scraper_config);
         } catch {
-          alert('刮削源配置 JSON 格式错误');
+          alert(t('adminLibraries.jsonInvalid'));
           return;
         }
       }
@@ -199,7 +221,7 @@ const AdminLibraries: React.FC = () => {
       }
       setIsModalOpen(false);
       setEditingId(null);
-      setFormData({ name: '', type: 'webdav', url: '', username: '', password: '', rootPath: '/', scraperConfig: DEFAULT_SCRAPER_CONFIG });
+      setFormData({ name: '', type: 'webdav', url: '', username: '', password: '', root_path: '/', scraper_config: DEFAULT_SCRAPER_CONFIG });
       await fetchLibraries();
 
       // Note: Scanning is now automatically triggered by the backend upon creation.
@@ -207,7 +229,7 @@ const AdminLibraries: React.FC = () => {
       // but for creation, the backend handles it to avoid duplicate tasks.
     } catch (err) {
       console.error(err);
-      alert(editingId ? '修改失败，请检查配置' : '添加失败，请检查配置');
+      alert(editingId ? t('adminLibraries.updateFailed') : t('adminLibraries.addFailed'));
     }
   };
 
@@ -217,11 +239,11 @@ const AdminLibraries: React.FC = () => {
     try {
       await apiClient.post(`/api/libraries/${id}/scan`, { mode });
       if (!silent) {
-        alert('扫描任务已启动');
+        alert(t('adminLibraries.scanStarted'));
       }
     } catch {
       if (!silent) {
-        alert('扫描启动失败');
+        alert(t('adminLibraries.scanStartFailed'));
       }
     } finally {
       setScanning(null);
@@ -234,7 +256,7 @@ const AdminLibraries: React.FC = () => {
       setDeleteConfirmId(null);
       fetchLibraries();
     } catch {
-      alert('删除失败');
+      alert(t('adminLibraries.deleteFailed'));
     }
   };
 
@@ -244,21 +266,21 @@ const AdminLibraries: React.FC = () => {
         <div className="text-center md:text-left">
           <h1 className="text-2xl md:text-3xl font-bold dark:text-white flex items-center justify-center md:justify-start gap-3">
             <Database size={28} className="text-primary-600 md:w-8 md:h-8" />
-            存储库管理
+            {t('adminLibraries.title')}
           </h1>
-          <p className="text-sm md:text-base text-slate-500 mt-1">配置您的 WebDAV 或本地存储源并同步资源</p>
+          <p className="text-sm md:text-base text-slate-500 mt-1">{t('adminLibraries.subtitle')}</p>
         </div>
         <div className="flex items-center gap-3 w-full md:w-auto">
           <button
             onClick={() => {
               setEditingId(null);
-              setFormData({ name: '', type: 'webdav', url: '', username: '', password: '', rootPath: '/', scraperConfig: DEFAULT_SCRAPER_CONFIG });
+              setFormData({ name: '', type: 'webdav', url: '', username: '', password: '', root_path: '/', scraper_config: DEFAULT_SCRAPER_CONFIG });
               setIsModalOpen(true);
             }}
             className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 md:px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 transition-all text-sm md:text-base"
           >
             <Plus size={18} className="md:w-5 md:h-5" />
-            添加库
+            {t('adminLibraries.addLibrary')}
           </button>
         </div>
       </div>
@@ -268,32 +290,30 @@ const AdminLibraries: React.FC = () => {
           <div key={lib.id} className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-100 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="flex items-center gap-4 min-w-0 w-full md:w-auto">
               <div className="w-14 h-14 rounded-xl bg-primary-50 dark:bg-primary-900/20 text-primary-600 flex items-center justify-center shrink-0">
-                <Database size={28} />
+                {lib.library_type === 'rss' ? <Rss size={28} /> : <Database size={28} />}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="text-xl font-bold dark:text-white truncate">{lib.name}</h3>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0 ${
-                    lib.libraryType === 'local'
-                      ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400'
-                      : 'bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400'
-                  }`}>
-                    {lib.libraryType === 'local' ? '本地存储' : 'WebDAV'}
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0 ${libraryTypeBadgeClass(lib.library_type)}`}>
+                    {libraryTypeLabel(lib.library_type, t)}
                   </span>
                 </div>
                 <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 mt-1">
-                  {lib.libraryType !== 'local' && (
+                  {lib.library_type !== 'local' && (
                     <div className="flex items-center gap-1.5 text-sm text-slate-500 min-w-0">
                       <Globe size={14} className="shrink-0" />
                       <span className="truncate max-w-[180px] sm:max-w-[240px] md:max-w-[300px]" title={lib.url}>{lib.url}</span>
                     </div>
                   )}
-                  <div className="flex items-center gap-1.5 text-sm text-slate-500 min-w-0">
-                    <Folder size={14} className="shrink-0" />
-                    <span className="truncate max-w-[180px] sm:max-w-[240px] md:max-w-[300px]" title={lib.libraryType === 'local' ? lib.url : lib.rootPath}>
-                      {lib.libraryType === 'local' ? lib.url : lib.rootPath}
-                    </span>
-                  </div>
+                  {lib.library_type !== 'rss' && (
+                    <div className="flex items-center gap-1.5 text-sm text-slate-500 min-w-0">
+                      <Folder size={14} className="shrink-0" />
+                      <span className="truncate max-w-[180px] sm:max-w-[240px] md:max-w-[300px]" title={lib.library_type === 'local' ? lib.url : lib.root_path}>
+                        {lib.library_type === 'local' ? lib.url : lib.root_path}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -310,7 +330,7 @@ const AdminLibraries: React.FC = () => {
                 ) : (
                   <RefreshCw size={18} />
                 )}
-                同步
+                {t('adminLibraries.sync')}
                 <ChevronDown size={16} className={`transition-transform ${syncMenuOpenId === lib.id ? 'rotate-180' : ''}`} />
               </button>
               {syncMenuOpenId === lib.id && (
@@ -321,7 +341,7 @@ const AdminLibraries: React.FC = () => {
                     className="w-full px-4 py-3 text-left text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2"
                   >
                     <RefreshCw size={15} />
-                    增量同步
+                    {t('adminLibraries.incrementalSync')}
                   </button>
                   <button
                     type="button"
@@ -329,7 +349,7 @@ const AdminLibraries: React.FC = () => {
                     className="w-full px-4 py-3 text-left text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2"
                   >
                     <RotateCcw size={15} />
-                    全量同步
+                    {t('adminLibraries.fullSync')}
                   </button>
                 </div>
               )}
@@ -352,7 +372,7 @@ const AdminLibraries: React.FC = () => {
         {libraries.length === 0 && !loading && (
           <div className="py-20 text-center bg-slate-50 dark:bg-slate-900/50 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-800">
             <Database size={48} className="mx-auto text-slate-300 mb-4" />
-            <p className="text-slate-500">暂无存储库，点击右上角添加</p>
+            <p className="text-slate-500">{t('adminLibraries.empty')}</p>
           </div>
         )}
       </div>
@@ -365,20 +385,20 @@ const AdminLibraries: React.FC = () => {
             <div className="w-16 h-16 bg-red-50 dark:bg-red-900/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
               <AlertCircle size={32} />
             </div>
-            <h3 className="text-xl font-bold dark:text-white mb-2">确认删除？</h3>
-            <p className="text-slate-500 text-sm mb-8">此操作将永久删除该存储库及其所有关联的书籍、章节和播放进度，且不可恢复。</p>
+            <h3 className="text-xl font-bold dark:text-white mb-2">{t('adminLibraries.deleteTitle')}</h3>
+            <p className="text-slate-500 text-sm mb-8">{t('adminLibraries.deleteMessage')}</p>
             <div className="flex gap-3">
               <button
                 onClick={() => setDeleteConfirmId(null)}
                 className="flex-1 py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all"
               >
-                取消
+                {t('common.cancel')}
               </button>
               <button
                 onClick={() => handleDelete(deleteConfirmId)}
                 className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl shadow-lg shadow-red-500/30 transition-all"
               >
-                确认删除
+                {t('adminLibraries.confirmDelete')}
               </button>
             </div>
           </div>
@@ -391,15 +411,29 @@ const AdminLibraries: React.FC = () => {
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsModalOpen(false)}></div>
           <div className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
             <div className="p-8 overflow-y-auto">
-              <h2 className="text-2xl font-bold dark:text-white mb-6">{editingId ? '编辑存储库' : '添加存储库'}</h2>
+              <h2 className="text-2xl font-bold dark:text-white mb-6">
+                {editingId ? t('adminLibraries.editLibrary') : t('adminLibraries.addStorageLibrary')}
+              </h2>
               <form onSubmit={handleSaveLibrary} className="space-y-4">
                 <div className="space-y-2">
-                  <label className="text-sm font-bold text-slate-600 dark:text-slate-400">库类型</label>
-                  <div className="grid grid-cols-2 gap-3">
+                  <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('adminLibraries.libraryType')}</label>
+                  <div className="grid grid-cols-3 gap-3">
                     <button
                       type="button"
                       disabled={!!editingId}
-                      onClick={() => setFormData({...formData, type: 'webdav', url: '', rootPath: '/'})}
+                      onClick={() => setFormData({...formData, type: 'rss', url: '', root_path: '/'})}
+                      className={`py-2.5 rounded-xl font-bold transition-all border ${
+                        formData.type === 'rss'
+                          ? 'bg-primary-50 border-primary-200 text-primary-600'
+                          : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-400'
+                      } ${editingId ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      {t('adminLibraries.rssSubscription')}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!!editingId}
+                      onClick={() => setFormData({...formData, type: 'webdav', url: '', root_path: '/'})}
                       className={`py-2.5 rounded-xl font-bold transition-all border ${
                         formData.type === 'webdav'
                           ? 'bg-primary-50 border-primary-200 text-primary-600'
@@ -411,26 +445,26 @@ const AdminLibraries: React.FC = () => {
                     <button
                       type="button"
                       disabled={!!editingId}
-                      onClick={() => setFormData({...formData, type: 'local', url: '', rootPath: '/'})}
+                      onClick={() => setFormData({...formData, type: 'local', url: '', root_path: '/'})}
                       className={`py-2.5 rounded-xl font-bold transition-all border ${
                         formData.type === 'local'
                           ? 'bg-primary-50 border-primary-200 text-primary-600'
                           : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-400'
                       } ${editingId ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
-                      本地存储
+                      {t('adminLibraries.localStorage')}
                     </button>
                   </div>
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-sm font-bold text-slate-600 dark:text-slate-400">库名称</label>
+                  <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('adminLibraries.libraryName')}</label>
                   <input
                     type="text"
                     required
                     value={formData.name}
                     onChange={e => setFormData({...formData, name: e.target.value})}
-                    placeholder="例如：我的 NAS"
+                    placeholder={t('adminLibraries.libraryNamePlaceholder')}
                     className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                   />
                 </div>
@@ -438,7 +472,7 @@ const AdminLibraries: React.FC = () => {
                 {formData.type === 'webdav' ? (
                   <>
                     <div className="space-y-2">
-                      <label className="text-sm font-bold text-slate-600 dark:text-slate-400">WebDAV 地址</label>
+                      <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('adminLibraries.webdavAddress')}</label>
                       <input
                         type="url"
                         required
@@ -450,7 +484,7 @@ const AdminLibraries: React.FC = () => {
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <label className="text-sm font-bold text-slate-600 dark:text-slate-400">用户名</label>
+                        <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('adminLibraries.username')}</label>
                         <input
                           type="text"
                           required
@@ -460,23 +494,23 @@ const AdminLibraries: React.FC = () => {
                         />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-sm font-bold text-slate-600 dark:text-slate-400">密码</label>
+                        <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('adminLibraries.password')}</label>
                         <input
                           type="password"
                           required={!editingId}
                           value={formData.password}
                           onChange={e => setFormData({...formData, password: e.target.value})}
-                          placeholder={editingId ? "不修改请留空" : ""}
+                          placeholder={editingId ? t('adminLibraries.passwordPlaceholder') : ''}
                           className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                         />
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-sm font-bold text-slate-600 dark:text-slate-400">根目录</label>
+                      <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('adminLibraries.rootPath')}</label>
                       <input
                         type="text"
-                        value={formData.rootPath}
-                        onChange={e => setFormData({...formData, rootPath: e.target.value})}
+                        value={formData.root_path}
+                        onChange={e => setFormData({...formData, root_path: e.target.value})}
                         placeholder="/"
                         className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                       />
@@ -489,14 +523,26 @@ const AdminLibraries: React.FC = () => {
                         className="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-bold rounded-xl hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm"
                       >
                         {testingConnection ? <Loader2 size={16} className="animate-spin" /> : <Wifi size={16} />}
-                        测试连接
+                        {t('adminLibraries.testConnection')}
                       </button>
                     </div>
                   </>
+                ) : formData.type === 'rss' ? (
+                  <div className="space-y-2">
+                    <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('adminLibraries.rssFeedUrl')}</label>
+                    <input
+                      type="url"
+                      required
+                      value={formData.url}
+                      onChange={e => setFormData({...formData, url: e.target.value})}
+                      placeholder="https://example.com/podcast/feed.xml"
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                    />
+                  </div>
                 ) : (
                   <div className="space-y-4">
                     <div className="space-y-2">
-                      <label className="text-sm font-bold text-slate-600 dark:text-slate-400">选择本地路径 (相对 storage/ 目录)</label>
+                      <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('adminLibraries.localPath')}</label>
                       <div className="relative">
                         {/* Selector Trigger */}
                         <button
@@ -507,9 +553,9 @@ const AdminLibraries: React.FC = () => {
                           <div className="flex items-center gap-3 overflow-hidden">
                             <Folder size={18} className="text-primary-500 shrink-0" />
                             <div className="flex flex-col items-start overflow-hidden">
-                              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">当前已选</span>
+                              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{t('adminLibraries.currentSelected')}</span>
                               <span className="text-sm dark:text-white truncate font-medium">
-                                {formData.url || '(根目录 storage/)'}
+                                {formData.url || t('adminLibraries.storageRoot')}
                               </span>
                             </div>
                           </div>
@@ -550,13 +596,13 @@ const AdminLibraries: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setFormData({...formData, url: currentBrowsePath, rootPath: '/'});
+                                  setFormData({...formData, url: currentBrowsePath, root_path: '/'});
                                   setIsFolderMenuOpen(false);
                                 }}
                                 className="flex-1 py-2 bg-primary-600 text-white text-xs font-bold rounded-xl hover:bg-primary-700 shadow-lg shadow-primary-500/20 transition-all flex items-center justify-center gap-2"
                               >
                                 <CheckCircle2 size={14} />
-                                选择此目录: {currentBrowsePath || '根目录'}
+                                {t('adminLibraries.chooseThisDirectory', { path: currentBrowsePath || t('adminLibraries.rootDirectory') })}
                               </button>
                             </div>
 
@@ -569,7 +615,7 @@ const AdminLibraries: React.FC = () => {
                                   className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-400 transition-colors"
                                 >
                                   <RefreshCw size={14} />
-                                  <span className="text-xs font-medium">返回上一级...</span>
+                                  <span className="text-xs font-medium">{t('adminLibraries.goParent')}</span>
                                 </button>
                               )}
                               {availableFolders.length > 0 ? (
@@ -592,7 +638,7 @@ const AdminLibraries: React.FC = () => {
                               ) : (
                                 <div className="px-4 py-10 text-center">
                                   <Folder size={32} className="mx-auto text-slate-200 dark:text-slate-800 mb-2" />
-                                  <p className="text-slate-400 text-xs italic">当前目录下没有子文件夹</p>
+                                  <p className="text-slate-400 text-xs italic">{t('adminLibraries.noSubfolders')}</p>
                                 </div>
                               )}
                             </div>
@@ -603,39 +649,41 @@ const AdminLibraries: React.FC = () => {
                   </div>
                 )}
 
+                {formData.type !== 'rss' && (
                 <div className="space-y-4 pt-2 border-t border-slate-100 dark:border-slate-800">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
-                      <label className="text-sm font-bold text-slate-600 dark:text-slate-400">刮削源配置</label>
-                      <HelpHint text="高级模式可直接编辑 metadataPriority, defaultSources, coverSources, introSources, authorSources, narratorSources, tagsSources 等配置。" />
+                      <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('adminLibraries.scraperConfig')}</label>
+                      <HelpHint text={t('adminLibraries.scraperHelp')} />
                     </div>
                     <button
                       type="button"
                       onClick={() => setShowJsonEditor(!showJsonEditor)}
                       className="text-xs text-primary-600 font-bold hover:underline"
                     >
-                      {showJsonEditor ? '切换至简易模式' : '切换至高级模式 (JSON)'}
+                      {showJsonEditor ? t('adminLibraries.simpleMode') : t('adminLibraries.advancedMode')}
                     </button>
                   </div>
 
                   {!showJsonEditor ? (
                     <ScraperConfigurator
-                      configStr={formData.scraperConfig}
+                      configStr={formData.scraper_config}
                       sources={scraperSources}
-                      onChange={(newConfigStr) => setFormData({...formData, scraperConfig: newConfigStr})}
+                      onChange={(newConfigStr) => setFormData({...formData, scraper_config: newConfigStr})}
                       libraryType={formData.type}
                     />
                   ) : (
                     <div className="space-y-2">
                       <textarea
-                        value={formData.scraperConfig}
-                        onChange={e => setFormData({...formData, scraperConfig: e.target.value})}
-                        placeholder='{"defaultSources": ["xiimalaya-scraper-js"]}'
+                        value={formData.scraper_config}
+                        onChange={e => setFormData({...formData, scraper_config: e.target.value})}
+                        placeholder='{"default_sources": ["ximalaya-scraper-wasm"]}'
                         className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white font-mono text-sm h-32"
                       />
                     </div>
                   )}
                 </div>
+                )}
 
                 <div className="flex gap-4 pt-6">
                   <button
@@ -643,13 +691,13 @@ const AdminLibraries: React.FC = () => {
                     onClick={() => setIsModalOpen(false)}
                     className="flex-1 py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all"
                   >
-                    取消
+                    {t('common.cancel')}
                   </button>
                   <button
                     type="submit"
                     className="flex-1 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 transition-all"
                   >
-                    保存配置
+                    {t('adminLibraries.saveConfig')}
                   </button>
                 </div>
               </form>

@@ -11,7 +11,10 @@ pub async fn calculate_theme_color_from_bytes(bytes: &[u8]) -> Result<Option<Str
 
     // Decode image in a blocking task to avoid blocking the async runtime
     let result = tokio::task::spawn_blocking(move || {
-        tracing::debug!("颜色提取：从内存加载图像 ({} 字节)", bytes_vec.len());
+        tracing::debug!(
+            "Color extraction: loading image from memory ({} bytes)",
+            bytes_vec.len()
+        );
         match image::load_from_memory(&bytes_vec) {
             Ok(img) => {
                 // Get palette
@@ -39,13 +42,21 @@ pub async fn calculate_theme_color_from_bytes(bytes: &[u8]) -> Result<Option<Str
                         }
                     }
                     Err(e) => {
-                        tracing::warn!("提取颜色失败: {:?}", e);
+                        tracing::warn!(
+                            error = ?e,
+                            message_key = "image.palette.extract_failed",
+                            "Image palette extraction failed"
+                        );
                         None
                     }
                 }
             }
             Err(e) => {
-                tracing::warn!("解码图像失败: {}", e);
+                tracing::warn!(
+                    error = %e,
+                    message_key = "image.decode_failed",
+                    "Image decode failed"
+                );
                 None
             }
         }
@@ -107,12 +118,22 @@ pub async fn calculate_theme_color(url_or_path: &str) -> Result<Option<String>> 
             Ok(response) => match response.bytes().await {
                 Ok(b) => b.to_vec(),
                 Err(e) => {
-                    tracing::warn!("下载封面图像失败: {}", e);
+                    tracing::warn!(
+                        error = %e,
+                        message_key = "image.cover.download_failed",
+                        message_params = %serde_json::json!({ "error": e.to_string() }),
+                        "Failed to download cover image"
+                    );
                     return Ok(None);
                 }
             },
             Err(e) => {
-                tracing::warn!("获取封面图像失败: {}", e);
+                tracing::warn!(
+                    error = %e,
+                    message_key = "image.cover.fetch_failed",
+                    message_params = %serde_json::json!({ "error": e.to_string() }),
+                    "Failed to fetch cover image"
+                );
                 return Ok(None);
             }
         }
@@ -125,7 +146,16 @@ pub async fn calculate_theme_color(url_or_path: &str) -> Result<Option<String>> 
         match tokio::fs::read(path).await {
             Ok(b) => b,
             Err(e) => {
-                tracing::warn!("读取本地封面图像失败: {}", e);
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    message_key = "image.cover.read_failed",
+                    message_params = %serde_json::json!({
+                        "path": path.display().to_string(),
+                        "error": e.to_string(),
+                    }),
+                    "Failed to read local cover image"
+                );
                 return Ok(None);
             }
         }
@@ -179,12 +209,22 @@ pub async fn calculate_theme_color_with_client(
             Ok(response) => match response.bytes().await {
                 Ok(b) => b.to_vec(),
                 Err(e) => {
-                    tracing::warn!("下载封面图像失败: {}", e);
+                    tracing::warn!(
+                        error = %e,
+                        message_key = "image.cover.download_failed",
+                        message_params = %serde_json::json!({ "error": e.to_string() }),
+                        "Failed to download cover image"
+                    );
                     return Ok(None);
                 }
             },
             Err(e) => {
-                tracing::warn!("获取封面图像失败: {}", e);
+                tracing::warn!(
+                    error = %e,
+                    message_key = "image.cover.fetch_failed",
+                    message_params = %serde_json::json!({ "error": e.to_string() }),
+                    "Failed to fetch cover image"
+                );
                 return Ok(None);
             }
         }
@@ -197,7 +237,16 @@ pub async fn calculate_theme_color_with_client(
         match tokio::fs::read(path).await {
             Ok(b) => b,
             Err(e) => {
-                tracing::warn!("读取本地封面图像失败: {}", e);
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    message_key = "image.cover.read_failed",
+                    message_params = %serde_json::json!({
+                        "path": path.display().to_string(),
+                        "error": e.to_string(),
+                    }),
+                    "Failed to read local cover image"
+                );
                 return Ok(None);
             }
         }

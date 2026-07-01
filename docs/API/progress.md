@@ -62,7 +62,7 @@
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `progress_ids` | string[] | 要隐藏的进度记录 ID，优先用于精确删除。 |
-| `chapter_ids` | string[] | 要隐藏的章节 ID，可作为旧客户端或无进度记录 ID 时的兜底。 |
+| `chapter_ids` | string[] | 要隐藏的章节 ID。 |
 
 响应：`200 OK`
 

@@ -1,7 +1,11 @@
 use super::runtime::WasmRuntime;
+use super::sandbox::Permission;
 use crate::core::error::{Result, TingError};
 use crate::plugin::scraper::{Chapter, ScraperPlugin, SearchResult};
 use crate::plugin::types::{Plugin, PluginContext, PluginId, PluginMetadata};
+use crate::plugin::{
+    plugin_host_user_from_invocation_args, PluginHostGatewayHandle, PluginHostUser,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -85,6 +89,16 @@ impl WasmPlugin {
             );
             inner.store.data_mut().http_responses.clear();
         }
+        if !inner.store.data().host_responses.is_empty() {
+            let count = inner.store.data().host_responses.len();
+            tracing::warn!(
+                plugin_id = %self.plugin_id,
+                function = function_name,
+                count = count,
+                "Cleaning up leaked HostGateway responses after function call"
+            );
+            inner.store.data_mut().host_responses.clear();
+        }
 
         match call_result {
             Ok(Ok(())) => {
@@ -145,7 +159,26 @@ impl WasmPlugin {
             .call_async(&mut inner.store, (method_ptr, params_ptr))
             .await
             .map_err(|e| TingError::PluginExecutionError(format!("Invoke failed: {}", e)))?;
+        if !inner.store.data().host_responses.is_empty() {
+            let count = inner.store.data().host_responses.len();
+            tracing::warn!(
+                plugin_id = %self.plugin_id,
+                count = count,
+                "Cleaning up leaked HostGateway responses after invoke"
+            );
+            inner.store.data_mut().host_responses.clear();
+        }
         Ok(results)
+    }
+
+    async fn set_host_invocation_context(&self, args: &serde_json::Value) {
+        let mut inner = self.inner.lock().await;
+        inner.store.data_mut().current_user = plugin_host_user_from_invocation_args(args);
+    }
+
+    async fn clear_host_invocation_context(&self) {
+        let mut inner = self.inner.lock().await;
+        inner.store.data_mut().current_user = None;
     }
 
     /// Get access to the WASM memory
@@ -285,13 +318,20 @@ impl WasmPlugin {
             .map_err(|e| TingError::PluginExecutionError(format!("Invalid UTF-8 string: {}", e)))
     }
 
-    pub async fn search_with_params(&self, params: serde_json::Value) -> Result<SearchResult> {
-        let params = serde_json::to_string(&params).map_err(|e| {
-            TingError::PluginExecutionError(format!("Failed to serialize search params: {}", e))
+    async fn invoke_raw_json(&self, method: &str, params: serde_json::Value) -> Result<String> {
+        let params_json = serde_json::to_string(&params).map_err(|e| {
+            TingError::PluginExecutionError(format!("Failed to serialize invoke params: {}", e))
         })?;
-        let (method_ptr, params_ptr) = self.write_args("search", &params).await?;
-        let result_ptr = self.invoke(method_ptr, params_ptr).await?;
-        let result_json = self.read_string(result_ptr).await?;
+        let (method_ptr, params_ptr) = self.write_args(method, &params_json).await?;
+
+        self.set_host_invocation_context(&params).await;
+        let result = async {
+            let result_ptr = self.invoke(method_ptr, params_ptr).await?;
+            self.read_string(result_ptr).await
+        }
+        .await;
+        self.clear_host_invocation_context().await;
+        let result_json = result?;
 
         if let Ok(err_obj) = serde_json::from_str::<serde_json::Value>(&result_json) {
             if let Some(err_msg) = err_obj.get("error").and_then(|v| v.as_str()) {
@@ -302,6 +342,21 @@ impl WasmPlugin {
             }
         }
 
+        Ok(result_json)
+    }
+
+    pub async fn invoke_json(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let result_json = self.invoke_raw_json(method, params).await?;
+        serde_json::from_str(&result_json)
+            .map_err(|e| TingError::PluginExecutionError(format!("Invalid invoke result: {}", e)))
+    }
+
+    pub async fn search_with_params(&self, params: serde_json::Value) -> Result<SearchResult> {
+        let result_json = self.invoke_raw_json("search", params).await?;
         serde_json::from_str(&result_json)
             .map_err(|e| TingError::PluginExecutionError(format!("Invalid search result: {}", e)))
     }
@@ -371,29 +426,17 @@ impl ScraperPlugin for WasmPlugin {
     }
 
     async fn get_chapters(&self, book_id: &str) -> Result<Vec<Chapter>> {
-        let params = serde_json::json!({ "id": book_id }).to_string();
-        let (method_ptr, params_ptr) = self.write_args("get_chapters", &params).await?;
-        let result_ptr = self.invoke(method_ptr, params_ptr).await?;
-        let result_json = self.read_string(result_ptr).await?;
-
-        if let Ok(err_obj) = serde_json::from_str::<serde_json::Value>(&result_json) {
-            if let Some(err_msg) = err_obj.get("error").and_then(|v| v.as_str()) {
-                return Err(TingError::PluginExecutionError(format!(
-                    "WASM error: {}",
-                    err_msg
-                )));
-            }
-        }
-
+        let result_json = self
+            .invoke_raw_json("get_chapters", serde_json::json!({ "id": book_id }))
+            .await?;
         serde_json::from_str(&result_json)
             .map_err(|e| TingError::PluginExecutionError(format!("Invalid chapters: {}", e)))
     }
 
     async fn download_cover(&self, url: &str) -> Result<Vec<u8>> {
-        let params = serde_json::json!({ "url": url }).to_string();
-        let (method_ptr, params_ptr) = self.write_args("download_cover", &params).await?;
-        let result_ptr = self.invoke(method_ptr, params_ptr).await?;
-        let result_json = self.read_string(result_ptr).await?;
+        let result_json = self
+            .invoke_raw_json("download_cover", serde_json::json!({ "url": url }))
+            .await?;
 
         let wrapper: serde_json::Value = serde_json::from_str(&result_json)
             .map_err(|e| TingError::PluginExecutionError(format!("Invalid JSON: {}", e)))?;
@@ -420,10 +463,9 @@ impl ScraperPlugin for WasmPlugin {
     }
 
     async fn get_audio_url(&self, chapter_id: &str) -> Result<String> {
-        let params = serde_json::json!({ "id": chapter_id }).to_string();
-        let (method_ptr, params_ptr) = self.write_args("get_audio_url", &params).await?;
-        let result_ptr = self.invoke(method_ptr, params_ptr).await?;
-        let result_json = self.read_string(result_ptr).await?;
+        let result_json = self
+            .invoke_raw_json("get_audio_url", serde_json::json!({ "id": chapter_id }))
+            .await?;
 
         let wrapper: serde_json::Value = serde_json::from_str(&result_json)
             .map_err(|e| TingError::PluginExecutionError(format!("Invalid JSON: {}", e)))?;
@@ -511,6 +553,24 @@ pub struct PluginState {
     /// HTTP Responses storage for simple host function
     pub(crate) http_responses: HashMap<u32, Vec<u8>>,
 
+    /// HostGateway responses returned through ting_env.host_invoke
+    pub(crate) host_responses: HashMap<u32, Vec<u8>>,
+
+    /// Domains allowed by manifest network_access permissions
+    pub(crate) allowed_domains: Vec<String>,
+
+    /// Plugin instance id used for HostGateway permission and cache scoping
+    pub(crate) plugin_id: PluginId,
+
+    /// Manifest permissions used by HostGateway authorization
+    pub(crate) permissions: Vec<Permission>,
+
+    /// Optional HostGateway bridge configured by PluginManager
+    pub(crate) host_gateway: Option<PluginHostGatewayHandle>,
+
+    /// User context scoped to the current plugin invocation
+    pub(crate) current_user: Option<PluginHostUser>,
+
     /// Resource limiter for memory and compute
     pub(crate) limiter: StoreLimits,
 }
@@ -526,6 +586,12 @@ impl PluginState {
             table: ResourceTable::new(),
             adapter: WasiPreview1Adapter::new(),
             http_responses: HashMap::new(),
+            host_responses: HashMap::new(),
+            allowed_domains: Vec::new(),
+            plugin_id: String::new(),
+            permissions: Vec::new(),
+            host_gateway: None,
+            current_user: None,
             limiter: StoreLimits::default(),
         }
     }
@@ -540,6 +606,12 @@ impl PluginState {
             table: ResourceTable::new(),
             adapter: WasiPreview1Adapter::new(),
             http_responses: HashMap::new(),
+            host_responses: HashMap::new(),
+            allowed_domains: Vec::new(),
+            plugin_id: String::new(),
+            permissions: Vec::new(),
+            host_gateway: None,
+            current_user: None,
             limiter: StoreLimits::new(memory_limit),
         }
     }

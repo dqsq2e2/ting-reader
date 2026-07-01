@@ -7,6 +7,7 @@ use tracing::{error, info};
 use super::super::types::{Plugin, PluginContext, PluginMetadata, PluginType};
 use super::plugin::JavaScriptPluginLoader;
 use crate::core::error::{Result, TingError};
+use crate::plugin::PluginHostGatewayHandle;
 
 /// Command sent to the JS worker thread
 enum JsCommand {
@@ -41,6 +42,13 @@ pub struct JavaScriptPluginWrapper {
 impl JavaScriptPluginWrapper {
     /// Create a new JavaScript plugin wrapper
     pub fn new(loader: JavaScriptPluginLoader) -> Result<Self> {
+        Self::new_with_host_gateway(loader, None)
+    }
+
+    pub fn new_with_host_gateway(
+        loader: JavaScriptPluginLoader,
+        host_gateway: Option<PluginHostGatewayHandle>,
+    ) -> Result<Self> {
         let metadata = loader.metadata().clone();
         let plugin_id = format!("{}@{}", metadata.name, metadata.version);
         let plugin_dir = loader.plugin_dir().to_path_buf();
@@ -54,6 +62,7 @@ impl JavaScriptPluginWrapper {
         let plugin_id_clone = plugin_id.clone();
         let plugin_id_clone2 = plugin_id.clone(); // For panic handler
         let _metadata_clone = metadata.clone();
+        let host_gateway_for_thread = host_gateway.clone();
 
         // Spawn dedicated thread for this plugin
         let thread_result = thread::Builder::new()
@@ -93,7 +102,9 @@ impl JavaScriptPluginWrapper {
                         };
 
                         // Create executor
-                        let mut executor = match loader.create_executor() {
+                        let mut executor = match loader
+                            .create_executor_with_host_gateway(host_gateway_for_thread.clone())
+                        {
                             Ok(e) => e,
                             Err(e) => {
                                 let err_msg = format!("Failed to create JS executor: {}", e);

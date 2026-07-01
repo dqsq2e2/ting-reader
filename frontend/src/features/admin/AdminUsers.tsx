@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import apiClient from '../../core/api/client';
 import type { User as UserType, Library, Book, Series } from '../../core/types';
 import { 
@@ -14,6 +15,7 @@ import {
 import { formatDate } from '../../core/utils/date';
 
 const AdminUsers: React.FC = () => {
+  const { t } = useTranslation();
   const [users, setUsers] = useState<UserType[]>([]);
   // const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -24,8 +26,8 @@ const AdminUsers: React.FC = () => {
     username: '',
     password: '',
     role: 'user' as 'user' | 'admin',
-    librariesAccessible: [] as string[],
-    booksAccessible: [] as string[]
+    libraries_accessible: [] as string[],
+    books_accessible: [] as string[]
   });
   
   // Book/Series Search
@@ -45,7 +47,7 @@ const AdminUsers: React.FC = () => {
       const response = await apiClient.get('/api/libraries');
       setLibraries(response.data);
     } catch (err) {
-      console.error('获取库失败', err);
+      console.error('Failed to load libraries', err);
     }
   };
 
@@ -54,7 +56,7 @@ const AdminUsers: React.FC = () => {
       const response = await apiClient.get('/api/users');
       setUsers(response.data);
     } catch (err) {
-      console.error('获取用户失败', err);
+      console.error('Failed to load users', err);
     } finally {
       // setLoading(false);
     }
@@ -79,7 +81,7 @@ const AdminUsers: React.FC = () => {
           setSeriesSearchResults(filteredSeries.slice(0, 5)); // Limit to 5
           
         } catch (err) {
-          console.error('搜索书籍/系列失败', err);
+          console.error('Failed to search books or series', err);
         } finally {
           setIsSearchingBooks(false);
         }
@@ -109,7 +111,7 @@ const AdminUsers: React.FC = () => {
 
   const handleOpenEditModal = async (user: UserType) => {
     setEditingId(user.id);
-    const booksAccessible = Array.isArray(user.booksAccessible) ? user.booksAccessible : [];
+    const booksAccessible = Array.isArray(user.books_accessible) ? user.books_accessible : [];
     
     // Fetch details for selected books to display names
     const books = [];
@@ -134,8 +136,8 @@ const AdminUsers: React.FC = () => {
       username: user.username, 
       password: '', 
       role: user.role,
-      librariesAccessible: Array.isArray(user.librariesAccessible) ? user.librariesAccessible : [],
-      booksAccessible
+      libraries_accessible: Array.isArray(user.libraries_accessible) ? user.libraries_accessible : [],
+      books_accessible: booksAccessible
     });
     setBookSearchQuery('');
     setIsModalOpen(true);
@@ -149,9 +151,9 @@ const AdminUsers: React.FC = () => {
       // If admin, they have access to all, so we don't need to send specific libraries
       if (payload.role === 'admin') {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        delete (payload as any).librariesAccessible;
+        delete (payload as any).libraries_accessible;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        delete (payload as any).booksAccessible;
+        delete (payload as any).books_accessible;
       }
 
       if (editingId) {
@@ -170,8 +172,8 @@ const AdminUsers: React.FC = () => {
         }
         // Always send permissions if role is user, to ensure sync
         if (payload.role === 'user') {
-          updateData.librariesAccessible = payload.librariesAccessible;
-          updateData.booksAccessible = payload.booksAccessible;
+          updateData.libraries_accessible = payload.libraries_accessible;
+          updateData.books_accessible = payload.books_accessible;
         }
 
         if (Object.keys(updateData).length > 0) {
@@ -181,29 +183,29 @@ const AdminUsers: React.FC = () => {
         await apiClient.post('/api/users', payload);
       }
       setIsModalOpen(false);
-      setFormData({ 
-        username: '', 
-        password: '', 
-        role: 'user', 
-        librariesAccessible: [], 
-        booksAccessible: [] 
+      setFormData({
+        username: '',
+        password: '',
+        role: 'user',
+        libraries_accessible: [],
+        books_accessible: []
       });
       setEditingId(null);
       fetchUsers();
     } catch (err: unknown) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const msg = (err as any)?.response?.data?.error || '操作失败';
+        const msg = (err as any)?.response?.data?.error || t('adminUsers.operationFailed');
         alert(msg);
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('确定要删除此用户吗？')) return;
+    if (!confirm(t('adminUsers.deleteConfirm'))) return;
     try {
       await apiClient.delete(`/api/users/${id}`);
       fetchUsers();
     } catch {
-      alert('删除失败');
+      alert(t('adminUsers.deleteFailed'));
     }
   };
 
@@ -213,9 +215,9 @@ const AdminUsers: React.FC = () => {
         <div className="text-center md:text-left">
           <h1 className="text-2xl md:text-3xl font-bold dark:text-white flex items-center justify-center md:justify-start gap-3">
             <Users size={28} className="text-primary-600 md:w-8 md:h-8" />
-            用户管理
+            {t('adminUsers.title')}
           </h1>
-          <p className="text-sm md:text-base text-slate-500 mt-1">管理系统访问权限与账号</p>
+          <p className="text-sm md:text-base text-slate-500 mt-1">{t('adminUsers.subtitle')}</p>
         </div>
         <div className="flex items-center gap-3 w-full md:w-auto">
           <button 
@@ -225,15 +227,15 @@ const AdminUsers: React.FC = () => {
                 username: '', 
                 password: '', 
                 role: 'user',
-                librariesAccessible: [],
-                booksAccessible: []
+                libraries_accessible: [],
+                books_accessible: []
               });
               setIsModalOpen(true);
             }}
             className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 md:px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 transition-all text-sm md:text-base"
           >
             <Plus size={18} className="md:w-5 md:h-5" />
-            创建用户
+            {t('adminUsers.createUser')}
           </button>
         </div>
       </div>
@@ -244,10 +246,10 @@ const AdminUsers: React.FC = () => {
           <table className="w-full text-left">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 text-sm font-bold uppercase tracking-wider">
-                <th className="px-6 py-4">用户信息</th>
-                <th className="px-6 py-4">角色</th>
-                <th className="px-6 py-4">创建时间</th>
-                <th className="px-6 py-4 text-right">操作</th>
+                <th className="px-6 py-4">{t('adminUsers.userInfo')}</th>
+                <th className="px-6 py-4">{t('adminUsers.role')}</th>
+                <th className="px-6 py-4">{t('adminUsers.createdAt')}</th>
+                <th className="px-6 py-4 text-right">{t('adminUsers.actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -271,13 +273,13 @@ const AdminUsers: React.FC = () => {
                         : 'bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400'
                     }`}>
                       {u.role === 'admin' ? <ShieldCheck size={14} /> : <Shield size={14} />}
-                      {u.role === 'admin' ? '管理员' : '普通用户'}
+                      {u.role === 'admin' ? t('adminUsers.admin') : t('adminUsers.regularUser')}
                     </div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2 text-sm text-slate-500">
                       <Calendar size={14} />
-                      {formatDate(u.createdAt)}
+                      {formatDate(u.created_at)}
                     </div>
                   </td>
                   <td className="px-6 py-4 text-right">
@@ -339,11 +341,11 @@ const AdminUsers: React.FC = () => {
                     : 'bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400'
                 }`}>
                   {u.role === 'admin' ? <ShieldCheck size={14} /> : <Shield size={14} />}
-                  {u.role === 'admin' ? '管理员' : '普通用户'}
+                  {u.role === 'admin' ? t('adminUsers.admin') : t('adminUsers.regularUser')}
                 </div>
                 <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium">
                   <Calendar size={14} />
-                  {formatDate(u.createdAt)}
+                  {formatDate(u.created_at)}
                 </div>
               </div>
             </div>
@@ -358,14 +360,14 @@ const AdminUsers: React.FC = () => {
           <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[85vh]">
             <div className="p-8 overflow-y-auto flex-1">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold dark:text-white">{editingId ? '修改用户信息' : '创建新账号'}</h2>
+                <h2 className="text-2xl font-bold dark:text-white">{editingId ? t('adminUsers.editUser') : t('adminUsers.createAccount')}</h2>
                 <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                   <X size={24} />
                 </button>
               </div>
               <form onSubmit={handleSaveUser} className="space-y-5">
                 <div className="space-y-2">
-                  <label className="text-sm font-bold text-slate-600 dark:text-slate-400">用户名</label>
+                  <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('adminUsers.username')}</label>
                   <input 
                     type="text" 
                     required
@@ -375,7 +377,7 @@ const AdminUsers: React.FC = () => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{editingId ? '新密码 (留空则不修改)' : '初始密码'}</label>
+                  <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{editingId ? t('adminUsers.newPasswordHint') : t('adminUsers.initialPassword')}</label>
                   <input 
                     type="password" 
                     required={!editingId}
@@ -385,7 +387,7 @@ const AdminUsers: React.FC = () => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-bold text-slate-600 dark:text-slate-400">权限角色</label>
+                  <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('adminUsers.permissionRole')}</label>
                   <div className="grid grid-cols-2 gap-3">
                     <button
                       type="button"
@@ -396,7 +398,7 @@ const AdminUsers: React.FC = () => {
                           : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-400'
                       }`}
                     >
-                      普通用户
+                      {t('adminUsers.regularUser')}
                     </button>
                     <button
                       type="button"
@@ -407,7 +409,7 @@ const AdminUsers: React.FC = () => {
                           : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-400'
                       }`}
                     >
-                      管理员
+                      {t('adminUsers.admin')}
                     </button>
                   </div>
                 </div>
@@ -415,21 +417,21 @@ const AdminUsers: React.FC = () => {
                 {formData.role === 'user' && (
                   <>
                     <div className="space-y-2">
-                      <label className="text-sm font-bold text-slate-600 dark:text-slate-400">可访问的库</label>
+                      <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('adminUsers.accessibleLibraries')}</label>
                       <div className="space-y-2 max-h-40 overflow-y-auto p-3 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
                         {libraries.length > 0 ? libraries.map(lib => (
                           <label key={lib.id} className="flex items-center gap-2 cursor-pointer">
                             <input
                               type="checkbox"
-                              checked={(formData.librariesAccessible || []).includes(lib.id)}
+                              checked={(formData.libraries_accessible || []).includes(lib.id)}
                               onChange={(e) => {
                                 const checked = e.target.checked;
                                 setFormData(prev => {
-                                  const current = prev.librariesAccessible || [];
+                                  const current = prev.libraries_accessible || [];
                                   if (checked) {
-                                    return { ...prev, librariesAccessible: [...current, lib.id] };
+                                    return { ...prev, libraries_accessible: [...current, lib.id] };
                                   } else {
-                                    return { ...prev, librariesAccessible: current.filter(id => id !== lib.id) };
+                                    return { ...prev, libraries_accessible: current.filter((id: string) => id !== lib.id) };
                                   }
                                 });
                               }}
@@ -438,19 +440,19 @@ const AdminUsers: React.FC = () => {
                             <span className="text-sm text-slate-700 dark:text-slate-300">{lib.name}</span>
                           </label>
                         )) : (
-                          <p className="text-xs text-slate-400">暂无库可分配，请先添加库</p>
+                          <p className="text-xs text-slate-400">{t('adminUsers.noLibraries')}</p>
                         )}
                       </div>
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-sm font-bold text-slate-600 dark:text-slate-400">特定书籍权限 (搜索书名或系列名添加)</label>
+                      <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('adminUsers.specificBookPermission')}</label>
                       <div className="relative">
                         <input
                           type="text"
                           value={bookSearchQuery}
                           onChange={(e) => setBookSearchQuery(e.target.value)}
-                          placeholder="输入书名或系列名搜索..."
+                          placeholder={t('adminUsers.searchBookPlaceholder')}
                           className="w-full pl-4 pr-10 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white text-sm"
                         />
                         {isSearchingBooks && (
@@ -461,7 +463,7 @@ const AdminUsers: React.FC = () => {
                             {seriesSearchResults.length > 0 && (
                               <div className="py-1">
                                 <div className="px-4 py-1 text-xs font-bold text-slate-400 uppercase tracking-wider bg-slate-50 dark:bg-slate-800/50">
-                                  系列
+                                  {t('adminUsers.series')}
                                 </div>
                                 {seriesSearchResults.map(series => (
                                   <button
@@ -475,7 +477,7 @@ const AdminUsers: React.FC = () => {
                                         setSelectedBooks([...selectedBooks, ...newBooks]);
                                         setFormData(prev => ({
                                           ...prev,
-                                          booksAccessible: [...(prev.booksAccessible || []), ...newBooks.map(b => b.id)]
+                                          books_accessible: [...(prev.books_accessible || []), ...newBooks.map(b => b.id)]
                                         }));
                                       }
                                       setBookSearchQuery('');
@@ -486,7 +488,7 @@ const AdminUsers: React.FC = () => {
                                   >
                                     <div className="flex flex-col truncate">
                                       <span className="truncate font-medium">{series.title}</span>
-                                      <span className="text-xs text-slate-500 truncate">共 {series.books?.length || 0} 本书</span>
+                                      <span className="text-xs text-slate-500 truncate">{t('adminUsers.seriesBookCount', { count: series.books?.length || 0 })}</span>
                                     </div>
                                     <Plus size={14} className="opacity-0 group-hover:opacity-100 text-primary-600 flex-shrink-0 ml-2" />
                                   </button>
@@ -497,7 +499,7 @@ const AdminUsers: React.FC = () => {
                             {bookSearchResults.length > 0 && (
                               <div className="py-1">
                                 <div className="px-4 py-1 text-xs font-bold text-slate-400 uppercase tracking-wider bg-slate-50 dark:bg-slate-800/50">
-                                  书籍
+                                  {t('adminUsers.books')}
                                 </div>
                                 {bookSearchResults.map(book => (
                                   <button
@@ -508,7 +510,7 @@ const AdminUsers: React.FC = () => {
                                         setSelectedBooks([...selectedBooks, book]);
                                         setFormData(prev => ({
                                           ...prev,
-                                          booksAccessible: [...(prev.booksAccessible || []), book.id]
+                                          books_accessible: [...(prev.books_accessible || []), book.id]
                                         }));
                                       }
                                       setBookSearchQuery('');
@@ -537,7 +539,7 @@ const AdminUsers: React.FC = () => {
                                 setSelectedBooks(selectedBooks.filter(b => b.id !== book.id));
                                 setFormData(prev => ({
                                   ...prev,
-                                  booksAccessible: (prev.booksAccessible || []).filter(id => id !== book.id)
+                                  books_accessible: (prev.books_accessible || []).filter((id: string) => id !== book.id)
                                 }));
                               }}
                               className="p-0.5 hover:bg-primary-100 dark:hover:bg-primary-900/40 rounded text-primary-500"
@@ -548,7 +550,7 @@ const AdminUsers: React.FC = () => {
                         ))}
                       </div>
                       <p className="text-[10px] text-slate-400">
-                        提示：用户将拥有所选库下的所有书籍权限，以及此处单独添加的特定书籍权限。
+                        {t('adminUsers.permissionHint')}
                       </p>
                     </div>
                   </>
@@ -558,7 +560,7 @@ const AdminUsers: React.FC = () => {
                   type="submit"
                   className="w-full py-4 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 transition-all mt-4"
                 >
-                  {editingId ? '保存修改' : '立即创建'}
+                  {editingId ? t('adminUsers.saveChanges') : t('adminUsers.createNow')}
                 </button>
               </form>
             </div>

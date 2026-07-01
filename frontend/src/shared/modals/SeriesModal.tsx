@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import apiClient from '../../core/api/client';
 import type { Book } from '../../core/types';
+import { useTranslation } from 'react-i18next';
 
 interface SeriesModalProps {
   isOpen: boolean;
@@ -10,6 +11,7 @@ interface SeriesModalProps {
 }
 
 const SeriesModal: React.FC<SeriesModalProps> = ({ isOpen, onClose, selectedBooks, onSuccess }) => {
+  const { t } = useTranslation();
   const firstBook = selectedBooks[0];
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
@@ -22,7 +24,7 @@ const SeriesModal: React.FC<SeriesModalProps> = ({ isOpen, onClose, selectedBook
     if (isOpen && firstBook) {
       setAuthor(firstBook.author || '');
       setNarrator(firstBook.narrator || '');
-      setCoverUrl(firstBook.coverUrl || '');
+      setCoverUrl(firstBook.cover_url || '');
       setDescription(firstBook.description || '');
       // Reset title when opening
       setTitle('');
@@ -36,7 +38,7 @@ const SeriesModal: React.FC<SeriesModalProps> = ({ isOpen, onClose, selectedBook
     setLoading(true);
     try {
       await apiClient.post('/api/v1/series', {
-        library_id: firstBook.libraryId,
+        library_id: firstBook.library_id,
         title,
         author: author || undefined, // Send undefined if empty to let backend decide or stick to empty
         narrator: narrator || undefined,
@@ -48,7 +50,7 @@ const SeriesModal: React.FC<SeriesModalProps> = ({ isOpen, onClose, selectedBook
       onClose();
     } catch (err) {
       console.error('创建系列失败', err);
-      alert('创建系列失败');
+      alert(t('seriesModal.createFailed'));
     } finally {
       setLoading(false);
     }
@@ -57,51 +59,51 @@ const SeriesModal: React.FC<SeriesModalProps> = ({ isOpen, onClose, selectedBook
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-lg p-6 shadow-xl animate-in zoom-in-95 duration-200">
-        <h2 className="text-xl font-bold mb-4 text-slate-900 dark:text-white">创建新系列</h2>
+        <h2 className="text-xl font-bold mb-4 text-slate-900 dark:text-white">{t('seriesModal.title')}</h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">系列名称</label>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t('seriesModal.seriesName')}</label>
             <input
               type="text"
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary-500 outline-none text-slate-900 dark:text-white"
-              placeholder="输入系列名称"
+              placeholder={t('seriesModal.seriesNamePlaceholder')}
             />
           </div>
           
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">作者</label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t('seriesModal.author')}</label>
               <input
                 type="text"
                 value={author}
                 onChange={(e) => setAuthor(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary-500 outline-none text-slate-900 dark:text-white"
-                placeholder="可选"
+                placeholder={t('seriesModal.optional')}
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">演播</label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t('seriesModal.narrator')}</label>
               <input
                 type="text"
                 value={narrator}
                 onChange={(e) => setNarrator(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary-500 outline-none text-slate-900 dark:text-white"
-                placeholder="可选"
+                placeholder={t('seriesModal.optional')}
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">简介</label>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t('seriesModal.description')}</label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
               className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary-500 outline-none text-slate-900 dark:text-white resize-none"
-              placeholder="可选"
+              placeholder={t('seriesModal.optional')}
             />
           </div>
 
@@ -111,14 +113,14 @@ const SeriesModal: React.FC<SeriesModalProps> = ({ isOpen, onClose, selectedBook
               onClick={onClose}
               className="px-4 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
             >
-              取消
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
               disabled={loading || !title}
               className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? '创建中...' : '创建系列'}
+              {loading ? t('seriesModal.creating') : t('seriesModal.create')}
             </button>
           </div>
         </form>

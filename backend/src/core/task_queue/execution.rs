@@ -30,6 +30,26 @@ impl TaskQueue {
                     .await?;
                 info!(items = result.items.len(), "Scraper search completed");
             }
+            TaskPayload::PluginInvoke {
+                plugin_id,
+                method,
+                params,
+            } => {
+                let plugin_manager = self.plugin_manager.as_ref().ok_or_else(|| {
+                    crate::core::error::TingError::TaskError(
+                        "Plugin manager not configured".to_string(),
+                    )
+                })?;
+
+                info!(
+                    plugin_id = %plugin_id,
+                    method = %method,
+                    "Executing plugin invoke task"
+                );
+                plugin_manager
+                    .invoke_plugin(plugin_id, method, params.clone())
+                    .await?;
+            }
             TaskPayload::Custom { task_type, data } => match task_type.as_str() {
                 "library_scan" => {
                     self.handle_library_scan(data, &task.id).await?;
@@ -38,11 +58,7 @@ impl TaskQueue {
                     self.handle_write_metadata(data, &task.id).await?;
                 }
                 _ => {
-                    warn!(task_type = %task_type, "Unknown task type");
-                    return Err(crate::core::error::TingError::TaskError(format!(
-                        "Unknown task type: {}",
-                        task_type
-                    )));
+                    self.handle_plugin_task(task_type, data, &task.id).await?;
                 }
             },
             _ => {
@@ -50,6 +66,55 @@ impl TaskQueue {
                 debug!("Task payload type not yet implemented");
             }
         }
+
+        Ok(())
+    }
+
+    async fn handle_plugin_task(
+        &self,
+        task_type: &str,
+        data: &serde_json::Value,
+        task_id: &str,
+    ) -> Result<()> {
+        let plugin_manager = self.plugin_manager.as_ref().ok_or_else(|| {
+            crate::core::error::TingError::TaskError("Plugin manager not configured".to_string())
+        })?;
+        let handlers = plugin_manager.find_task_handlers(Some(task_type)).await;
+        let Some(handler) = handlers.into_iter().next() else {
+            warn!(task_type = %task_type, "Unknown task type");
+            return Err(crate::core::error::TingError::TaskError(format!(
+                "Unknown task type: {}",
+                task_type
+            )));
+        };
+
+        let invoke_method = handler
+            .registration
+            .capability
+            .invoke
+            .clone()
+            .unwrap_or_else(|| handler.registration.capability.id.clone());
+
+        info!(
+            task_id = %task_id,
+            task_type = %task_type,
+            plugin_id = %handler.registration.plugin_id,
+            capability_id = %handler.registration.capability.id,
+            "Dispatching custom task to plugin task_handler"
+        );
+
+        plugin_manager
+            .invoke_plugin(
+                &handler.registration.plugin_id,
+                &invoke_method,
+                serde_json::json!({
+                    "task_id": task_id,
+                    "task_type": task_type,
+                    "data": data,
+                    "capability_id": handler.registration.capability.id,
+                }),
+            )
+            .await?;
 
         Ok(())
     }
@@ -139,6 +204,14 @@ impl TaskQueue {
             .await?;
 
         info!(
+            message_key = "scan.library.completed",
+            message_params = %serde_json::json!({
+                "library_name": library.name,
+                "created": result.books_created,
+                "updated": result.books_updated,
+                "deleted": result.books_deleted,
+                "errors": result.errors.len(),
+            }),
             library_id = %library_id,
             library_name = %library.name,
             library_type = %library.library_type,
@@ -148,40 +221,61 @@ impl TaskQueue {
             books_deleted = result.books_deleted,
             errors = result.errors.len(),
             scan_mode = %scan_mode.as_str(),
-            "Library scan completed for '{}'",
-            library.name
+            "Library scan completed"
         );
 
         // Update task message with result
-        let message = format!(
-            "存储库「{}」扫描完成，新增 {} 本，更新 {} 本，删除 {} 本",
-            library.name, result.books_created, result.books_updated, result.books_deleted
-        );
-        if let Err(e) = self.task_repo.update_progress(task_id, &message).await {
+        if let Err(e) = self
+            .task_repo
+            .update_progress_key(
+                task_id,
+                "scan.library.completed",
+                serde_json::json!({
+                    "library_name": library.name,
+                    "created": result.books_created,
+                    "updated": result.books_updated,
+                    "deleted": result.books_deleted,
+                    "errors": result.errors.len(),
+                }),
+            )
+            .await
+        {
             warn!(task_id = %task_id, error = %e, "Failed to update task progress message");
         }
 
         if let Some(notification_repo) = &self.notification_repo {
-            crate::core::notifications::dispatch_notification_event(
-                notification_repo.clone(),
-                crate::core::notifications::NotificationEventPayload::new(
-                    "library.scan_completed",
-                    "媒体库扫描完成",
-                    message.clone(),
-                    serde_json::json!({
-                        "library_id": library.id,
-                        "library_name": library.name,
-                        "library_type": library.library_type,
-                        "path": library_path,
-                        "mode": scan_mode.as_str(),
-                        "task_id": task_id,
-                        "books_created": result.books_created,
-                        "books_updated": result.books_updated,
-                        "books_deleted": result.books_deleted,
-                        "errors": result.errors.len(),
-                    }),
+            let payload = crate::core::notifications::NotificationEventPayload::new(
+                "library.scan_completed",
+                "Library scan completed",
+                format!(
+                    "Library {} scan completed: created {}, updated {}, deleted {}",
+                    library.name, result.books_created, result.books_updated, result.books_deleted
                 ),
+                serde_json::json!({
+                    "library_id": library.id,
+                    "library_name": library.name,
+                    "library_type": library.library_type,
+                    "path": library_path,
+                    "mode": scan_mode.as_str(),
+                    "task_id": task_id,
+                    "books_created": result.books_created,
+                    "books_updated": result.books_updated,
+                    "books_deleted": result.books_deleted,
+                    "errors": result.errors.len(),
+                }),
             );
+            if let Some(plugin_manager) = &self.plugin_manager {
+                crate::core::notifications::dispatch_application_event(
+                    notification_repo.clone(),
+                    plugin_manager.clone(),
+                    payload,
+                );
+            } else {
+                crate::core::notifications::dispatch_notification_event(
+                    notification_repo.clone(),
+                    payload,
+                );
+            }
         }
 
         if !result.errors.is_empty() {
@@ -315,13 +409,18 @@ impl TaskQueue {
 
         for (index, chapter) in chapters.iter().enumerate() {
             // Update progress
-            let progress_msg = format!(
-                "正在写入第 {}/{} 章: {}",
-                index + 1,
-                total_chapters,
-                chapter.title.as_deref().unwrap_or("")
-            );
-            let _ = self.task_repo.update_progress(task_id, &progress_msg).await;
+            let _ = self
+                .task_repo
+                .update_progress_key(
+                    task_id,
+                    "metadata.chapter.writing",
+                    serde_json::json!({
+                        "current": index + 1,
+                        "total": total_chapters,
+                        "chapter_title": chapter.title.as_deref().unwrap_or(""),
+                    }),
+                )
+                .await;
 
             let path = std::path::Path::new(&chapter.path);
             if !path.exists() {
@@ -336,7 +435,7 @@ impl TaskQueue {
                 .to_string_lossy()
                 .to_lowercase();
             let plugins = plugin_manager
-                .find_plugins_by_type(crate::plugin::types::PluginType::Format)
+                .find_plugins_by_capability_kind("format_handler")
                 .await;
 
             // Prioritize native-audio-support if available for this extension
@@ -478,19 +577,32 @@ impl TaskQueue {
             let _ = tokio::fs::remove_file(path).await;
         }
 
-        let final_msg = format!(
-            "元数据写入完成，成功 {} 章，失败 {} 章",
-            success_count, error_count
-        );
-        let _ = self.task_repo.update_progress(task_id, &final_msg).await;
+        let _ = self
+            .task_repo
+            .update_progress_key(
+                task_id,
+                "metadata.write.completed",
+                serde_json::json!({
+                    "success": success_count,
+                    "failed": error_count,
+                }),
+            )
+            .await;
 
         tracing::info!(
             target: "audit::metadata",
-            "书籍 '{}' (ID: {}) 音频文件元数据写入完成：成功 {} 章，失败 {} 章",
-            book.title.as_deref().unwrap_or("未知"),
-            book.id,
-            success_count,
-            error_count
+            message_key = "metadata.write.completed_for_book",
+            message_params = %serde_json::json!({
+                "book_title": book.title.as_deref().unwrap_or(""),
+                "book_id": book.id,
+                "success": success_count,
+                "failed": error_count,
+            }),
+            book_id = %book.id,
+            book_title = %book.title.as_deref().unwrap_or(""),
+            success = success_count,
+            failed = error_count,
+            "Book metadata write completed"
         );
 
         Ok(())

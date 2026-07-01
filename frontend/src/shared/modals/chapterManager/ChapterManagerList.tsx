@@ -1,5 +1,6 @@
 import React from 'react';
 import { Check, Folder, Pencil, SearchX } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import type { Book, Library } from '../../../core/types';
 import AutoSizer from '../../widgets/AutoSizer';
 import FixedSizeList from '../../widgets/VirtualList';
@@ -27,13 +28,14 @@ const ChapterManagerList: React.FC<Props> = ({
   onToggleSelection,
   onEdit,
 }) => {
+  const { t } = useTranslation();
   if (chapters.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-slate-400">
         <SearchX size={42} className="text-slate-300 dark:text-slate-600" />
         <div>
-          <p className="text-base font-semibold text-slate-600 dark:text-slate-300">没有匹配章节</p>
-          <p className="mt-1 text-sm">换一个关键词或切换正文/番外试试。</p>
+          <p className="text-base font-semibold text-slate-600 dark:text-slate-300">{t('chapterManager.noMatchedChapters')}</p>
+          <p className="mt-1 text-sm">{t('chapterManager.noMatchedChaptersHint')}</p>
         </div>
       </div>
     );
@@ -94,7 +96,8 @@ const ChapterRow: React.FC<ChapterRowProps> = ({
   onToggleSelection,
   onEdit,
 }) => {
-  const location = formatChapterLocation(chapter, book, pathLibrary);
+  const { t } = useTranslation();
+  const location = formatChapterLocation(chapter, book, pathLibrary, t('chapterManager.unknownLibrary'));
 
   const handleRowClick = () => {
     if (selectionMode) {
@@ -130,7 +133,7 @@ const ChapterRow: React.FC<ChapterRowProps> = ({
         )}
 
         <span className="flex min-w-9 shrink-0 items-center justify-center rounded-xl bg-primary-50 px-2 py-2 text-xs font-semibold leading-none text-primary-600 dark:bg-slate-800 sm:min-w-11">
-          #{chapter.chapterIndex}
+          #{chapter.chapter_index}
         </span>
 
         <span className="min-w-0 flex-1">
@@ -145,14 +148,14 @@ const ChapterRow: React.FC<ChapterRowProps> = ({
 
         {changed && (
           <span className="hidden shrink-0 rounded-lg bg-cyan-50 px-2 py-1 text-xs font-semibold leading-none text-primary-600 dark:bg-primary-900/20 sm:inline-flex">
-            已修改
+            {t('chapterManager.changed')}
           </span>
         )}
 
         {!selectionMode && (
           <span
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-primary-600 dark:text-slate-400 dark:hover:bg-slate-800"
-            title="编辑章节"
+            title={t('chapterManager.editChapter')}
             onClick={(event) => {
               event.stopPropagation();
               onEdit(chapter);

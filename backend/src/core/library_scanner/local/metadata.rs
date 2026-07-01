@@ -1,10 +1,9 @@
 use super::super::{LibraryScanner, MetadataSource, STANDARD_EXTENSIONS};
 use crate::plugin::manager::FormatMethod;
-use crate::plugin::types::PluginType;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize)]
 pub(crate) struct ScannedMetadata {
     pub(crate) title: Option<String>,
     pub(crate) author: Option<String>,
@@ -25,6 +24,8 @@ pub(crate) struct ScannedMetadata {
     pub(crate) json_tags: Vec<String>,
     pub(crate) json_series: Vec<String>,
     pub(crate) json_chapters: Option<Vec<crate::core::metadata_writer::AudiobookshelfChapter>>,
+    pub(crate) chapter_title_template: Option<String>,
+    pub(crate) chapter_titles: Vec<String>,
 }
 
 impl ScannedMetadata {
@@ -90,6 +91,12 @@ impl ScannedMetadata {
         if other.json_chapters.is_some() {
             self.json_chapters = other.json_chapters;
         }
+        if other.chapter_title_template.is_some() {
+            self.chapter_title_template = other.chapter_title_template;
+        }
+        if !other.chapter_titles.is_empty() {
+            self.chapter_titles = other.chapter_titles;
+        }
     }
 }
 
@@ -99,6 +106,7 @@ impl LibraryScanner {
         dir: &Path,
         files: &[PathBuf],
         scraper_config: &crate::db::models::ScraperConfig,
+        fallback_title_override: Option<&str>,
     ) -> (ScannedMetadata, MetadataSource) {
         let mut final_meta = ScannedMetadata::default();
         let mut final_source = MetadataSource::Fallback;
@@ -108,16 +116,19 @@ impl LibraryScanner {
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("Unknown Book");
-        let (cleaned_title, _) = self.text_cleaner.clean_chapter_title(dir_name, None);
+        let base_title = fallback_title_override
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(dir_name);
+        let (cleaned_title, _) = self.text_cleaner.clean_chapter_title(base_title, None);
         final_meta.title = Some(cleaned_title);
 
         // Fallback Author from "Author - Title" pattern
-        if dir_name.contains(" - ") {
-            let parts: Vec<&str> = dir_name.split(" - ").collect();
+        if base_title.contains(" - ") {
+            let parts: Vec<&str> = base_title.split(" - ").collect();
             if parts.len() >= 2 {
                 final_meta.author = Some(parts[0].trim().to_string());
                 // Also update title if we are assuming Author - Title pattern
-                if final_meta.title.is_some() && final_meta.title.as_deref() == Some(dir_name) {
+                if final_meta.title.is_some() && final_meta.title.as_deref() == Some(base_title) {
                     let (cleaned_title_part, _) =
                         self.text_cleaner.clean_chapter_title(parts[1], None);
                     final_meta.title = Some(cleaned_title_part);
@@ -210,8 +221,20 @@ impl LibraryScanner {
                 }
                 "scraper" => {
                     if let Some(ref title) = final_meta.title {
+                        let context = serde_json::json!({
+                            "library_type": "local",
+                            "directory": dir.to_string_lossy(),
+                            "directory_name": base_title,
+                            "chapters": build_chapter_title_candidates(files),
+                            "current_metadata": final_meta,
+                        });
                         if let Some(meta) = self
-                            .extract_from_scraper(title, &final_meta.author, scraper_config)
+                            .extract_from_scraper(
+                                title,
+                                &final_meta.author,
+                                scraper_config,
+                                context,
+                            )
                             .await
                         {
                             if scraper_config.use_filename_as_title {
@@ -364,7 +387,7 @@ impl LibraryScanner {
             // 1. 优先尝试格式插件
             let plugins = self
                 .plugin_manager
-                .find_plugins_by_type(PluginType::Format)
+                .find_plugins_by_capability_kind("format_handler")
                 .await;
             let mut plugin_handled = false;
 
@@ -385,10 +408,14 @@ impl LibraryScanner {
                     .await
                 {
                     if index == 0 {
-                        tracing::debug!("使用格式插件 {} 处理第一个 {} 文件", plugin.name, ext);
+                        tracing::debug!(
+                            "Using format plugin {} to process the first {} file",
+                            plugin.name,
+                            ext
+                        );
                     } else {
                         tracing::debug!(
-                            "使用格式插件 {} 处理第 {} 个 {} 文件（补充元数据）",
+                            "Using format plugin {} to process file #{} ({}) for supplemental metadata",
                             plugin.name,
                             index + 1,
                             ext
@@ -437,7 +464,7 @@ impl LibraryScanner {
                                 m.cover_url = Some(c.to_string());
                                 found = true;
                                 if index > 0 {
-                                    tracing::info!("从第 {} 个文件中找到封面", index + 1);
+                                    tracing::info!("Found cover in file #{}", index + 1);
                                 }
                             }
                         }
@@ -467,10 +494,10 @@ impl LibraryScanner {
             if !plugin_handled && is_standard {
                 if let Ok(meta) = self.audio_streamer.read_metadata(file_path) {
                     if index == 0 {
-                        tracing::debug!("使用 Symphonia 处理第一个 {} 文件", ext);
+                        tracing::debug!("Using Symphonia to process the first {} file", ext);
                     } else {
                         tracing::debug!(
-                            "使用 Symphonia 处理第 {} 个 {} 文件（补充元数据）",
+                            "Using Symphonia to process file #{} ({}) for supplemental metadata",
                             index + 1,
                             ext
                         );
@@ -521,7 +548,7 @@ impl LibraryScanner {
                             m.cover_url = Some(path);
                             found = true;
                             if index > 0 {
-                                tracing::info!("从第 {} 个文件中找到封面", index + 1);
+                                tracing::info!("Found cover in file #{}", index + 1);
                             }
                         }
                     }
@@ -535,13 +562,13 @@ impl LibraryScanner {
             let has_cover_if_needed = !extract_cover || m.cover_url.is_some();
 
             if has_basic_metadata && has_cover_if_needed {
-                tracing::debug!("已找到完整元数据，停止尝试其他文件");
+                tracing::debug!("Complete metadata found; stopping file attempts");
                 break;
             }
 
             // 限制尝试的文件数量，避免扫描太多文件（最多 3 个）
             if index >= 2 {
-                tracing::debug!("已尝试 3 个文件，停止");
+                tracing::debug!("Tried 3 files; stopping");
                 break;
             }
         }
@@ -561,10 +588,14 @@ impl LibraryScanner {
         title: &str,
         _author: &Option<String>,
         scraper_config: &crate::db::models::ScraperConfig,
+        context: serde_json::Value,
     ) -> Option<ScannedMetadata> {
         if let Some(scraper) = &self.scraper_service {
             // Basic scrape check
-            if let Ok(detail) = scraper.scrape_book_metadata(title, scraper_config).await {
+            if let Ok(detail) = scraper
+                .scrape_book_metadata_with_context(title, scraper_config, Some(context))
+                .await
+            {
                 let mut m = ScannedMetadata::default();
                 if !detail.intro.is_empty() {
                     m.description = Some(detail.intro);
@@ -595,6 +626,8 @@ impl LibraryScanner {
                 if detail.abridged {
                     m.abridged = true;
                 }
+                m.chapter_title_template = detail.chapter_title_template;
+                m.chapter_titles = detail.chapter_titles;
                 return Some(m);
             }
         }
@@ -654,4 +687,30 @@ impl LibraryScanner {
         }
         None
     }
+}
+
+fn build_chapter_title_candidates(files: &[PathBuf]) -> Vec<serde_json::Value> {
+    files
+        .iter()
+        .enumerate()
+        .map(|(index, path)| {
+            let filename = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_string();
+            let title = path
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or(&filename)
+                .to_string();
+
+            serde_json::json!({
+                "index": index + 1,
+                "filename": filename,
+                "title": title,
+                "path": path.to_string_lossy(),
+            })
+        })
+        .collect()
 }

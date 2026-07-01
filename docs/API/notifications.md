@@ -89,7 +89,7 @@ JSON 安全输出：
 - `events` 至少包含一个受支持事件。
 - `headers` 可选，请求头名称和值必须合法。
 - `body_template` 可选，默认 `{{json:payload}}`。
-- `secret` 是旧版兼容字段，存在时发送 `X-Ting-Webhook-Secret`。
+- `secret` 存在时发送 `X-Ting-Webhook-Secret`。
 
 ## 接口
 

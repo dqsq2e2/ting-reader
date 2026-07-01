@@ -18,15 +18,24 @@ export const DEFAULT_HOME_LAYOUT: HomeLayoutSettings = {
 
 export const normalizeHomeLayout = (value: unknown): HomeLayoutSettings => {
   const source = typeof value === 'object' && value !== null
-    ? value as Partial<Record<keyof HomeLayoutSettings, unknown>>
+    ? value as Record<string, unknown>
     : {};
 
   return {
-    showHero: typeof source.showHero === 'boolean' ? source.showHero : DEFAULT_HOME_LAYOUT.showHero,
-    showStats: typeof source.showStats === 'boolean' ? source.showStats : DEFAULT_HOME_LAYOUT.showStats,
-    showRecommended: typeof source.showRecommended === 'boolean' ? source.showRecommended : DEFAULT_HOME_LAYOUT.showRecommended,
-    showRecent: typeof source.showRecent === 'boolean' ? source.showRecent : DEFAULT_HOME_LAYOUT.showRecent,
-    showRecentlyAdded: typeof source.showRecentlyAdded === 'boolean' ? source.showRecentlyAdded : DEFAULT_HOME_LAYOUT.showRecentlyAdded,
-    showCollections: typeof source.showCollections === 'boolean' ? source.showCollections : DEFAULT_HOME_LAYOUT.showCollections,
+    showHero: typeof source.show_hero === 'boolean' ? source.show_hero : DEFAULT_HOME_LAYOUT.showHero,
+    showStats: typeof source.show_stats === 'boolean' ? source.show_stats : DEFAULT_HOME_LAYOUT.showStats,
+    showRecommended: typeof source.show_recommended === 'boolean' ? source.show_recommended : DEFAULT_HOME_LAYOUT.showRecommended,
+    showRecent: typeof source.show_recent === 'boolean' ? source.show_recent : DEFAULT_HOME_LAYOUT.showRecent,
+    showRecentlyAdded: typeof source.show_recently_added === 'boolean' ? source.show_recently_added : DEFAULT_HOME_LAYOUT.showRecentlyAdded,
+    showCollections: typeof source.show_collections === 'boolean' ? source.show_collections : DEFAULT_HOME_LAYOUT.showCollections,
   };
 };
+
+export const serializeHomeLayout = (value: HomeLayoutSettings) => ({
+  show_hero: value.showHero,
+  show_stats: value.showStats,
+  show_recommended: value.showRecommended,
+  show_recent: value.showRecent,
+  show_recently_added: value.showRecentlyAdded,
+  show_collections: value.showCollections,
+});

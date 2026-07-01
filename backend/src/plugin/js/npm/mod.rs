@@ -1,7 +1,7 @@
 //! npm Dependency Manager
 //!
 //! Handles npm dependency resolution and installation for JavaScript plugins.
-//! - Parse npm dependencies from plugin.json
+//! - Parse npm dependencies from the plugin manifest
 //! - Generate package.json files
 //! - Execute npm install commands
 //! - Manage node_modules paths
@@ -85,7 +85,7 @@ impl NpmManager {
         self.log_dir = Some(log_dir);
     }
 
-    /// Parse npm dependencies from plugin.json (static method)
+    /// Parse npm dependencies from plugin manifest metadata (static method)
     pub fn parse_dependencies(plugin_json: &Value) -> Vec<NpmDependency> {
         let mut dependencies = Vec::new();
 

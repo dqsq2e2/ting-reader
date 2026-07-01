@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Play,
   Pause,
@@ -46,7 +47,7 @@ export const CollapsedPlayerView: React.FC<CollapsedPlayerViewProps> = ({
       style={{ borderColor: themeColor ? setAlpha(themeColor, 0.3) : undefined }}
     >
       <img
-        src={getCoverUrl(book?.coverUrl, book?.libraryId, book?.id)}
+        src={getCoverUrl(book?.cover_url, book?.library_id, book?.id)}
         alt={book?.title}
         crossOrigin="anonymous"
         className="w-full h-full object-cover"
@@ -73,28 +74,32 @@ export const ExpandedPlayerHeader: React.FC<ExpandedPlayerHeaderProps> = ({
   bookTitle,
   onExit,
   onOpenSettings,
-}) => (
-  <div className="flex items-center justify-between w-full max-w-[520px] mx-auto pb-3">
-    <button
-      onClick={onExit}
-      className="p-2 -ml-2 rounded-full text-slate-700 dark:text-white hover:bg-white/50 dark:hover:bg-slate-800/60 transition-colors"
-      title="收起播放器"
-    >
-      <ChevronUp size={24} className="rotate-180" />
-    </button>
-    <div className="flex-1 text-center px-3 min-w-0">
-      <h2 className="text-sm sm:text-base font-bold dark:text-white text-[#4A3728] truncate">{chapterTitle}</h2>
-      <p className="text-[10px] sm:text-xs text-slate-500 truncate">{bookTitle}</p>
+}) => {
+  const { t } = useTranslation();
+
+  return (
+    <div className="flex items-center justify-between w-full max-w-[520px] mx-auto pb-3">
+      <button
+        onClick={onExit}
+        className="p-2 -ml-2 rounded-full text-slate-700 dark:text-white hover:bg-white/50 dark:hover:bg-slate-800/60 transition-colors"
+        title={t('player.collapse')}
+      >
+        <ChevronUp size={24} className="rotate-180" />
+      </button>
+      <div className="flex-1 text-center px-3 min-w-0">
+        <h2 className="text-sm sm:text-base font-bold dark:text-white text-[#4A3728] truncate">{chapterTitle}</h2>
+        <p className="text-[10px] sm:text-xs text-slate-500 truncate">{bookTitle}</p>
+      </div>
+      <button
+        onClick={onOpenSettings}
+        className="p-2 -mr-2 rounded-full text-slate-700 dark:text-white hover:bg-white/50 dark:hover:bg-slate-800/60 transition-colors"
+        title={t('player.settings')}
+      >
+        <Settings size={22} />
+      </button>
     </div>
-    <button
-      onClick={onOpenSettings}
-      className="p-2 -mr-2 rounded-full text-slate-700 dark:text-white hover:bg-white/50 dark:hover:bg-slate-800/60 transition-colors"
-      title="播放设置"
-    >
-      <Settings size={22} />
-    </button>
-  </div>
-);
+  );
+};
 
 // ─── ExpandedMainControls ──────────────────────────────────────────────────
 // 展开视图的主播控按钮组：上一章 / 播放暂停（大）/ 下一章。
@@ -164,44 +169,48 @@ export const VolumeSliderPanel: React.FC<VolumeSliderPanelProps> = ({
   className = '',
   onChangeVolume,
   onToggleMuted,
-}) => (
-  <div
-    className={`bg-white dark:bg-slate-800 rounded-full py-4 border border-slate-100 dark:border-slate-700 w-12 flex flex-col items-center gap-3 cursor-default ${className}`}
-    onClick={(e) => e.stopPropagation()}
-  >
-    <span className="text-[10px] font-bold text-slate-500 min-w-[24px] text-center select-none">
-      {Math.round(volume * 100)}
-    </span>
+}) => {
+  const { t } = useTranslation();
 
-    <div className="h-24 w-full flex items-center justify-center relative">
-      <input
-        type="range"
-        min="0"
-        max="1"
-        step="0.01"
-        value={volume}
-        onChange={(e) => {
-          const next = parseFloat(e.target.value);
-          onChangeVolume(next);
-          if (isMuted && next > 0) onToggleMuted();
-        }}
-        className="absolute w-24 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-primary-600 -rotate-90 hover:accent-primary-500"
-      />
-    </div>
-
-    <button
-      onClick={onToggleMuted}
-      className={`p-2 rounded-full transition-colors ${
-        isMuted
-          ? 'bg-primary-100 text-primary-600 dark:bg-primary-900/30'
-          : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
-      }`}
-      title={isMuted ? '取消静音' : '静音'}
+  return (
+    <div
+      className={`bg-white dark:bg-slate-800 rounded-full py-4 border border-slate-100 dark:border-slate-700 w-12 flex flex-col items-center gap-3 cursor-default ${className}`}
+      onClick={(e) => e.stopPropagation()}
     >
-      {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
-    </button>
-  </div>
-);
+      <span className="text-[10px] font-bold text-slate-500 min-w-[24px] text-center select-none">
+        {Math.round(volume * 100)}
+      </span>
+
+      <div className="h-24 w-full flex items-center justify-center relative">
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          value={volume}
+          onChange={(e) => {
+            const next = parseFloat(e.target.value);
+            onChangeVolume(next);
+            if (isMuted && next > 0) onToggleMuted();
+          }}
+          className="absolute w-24 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-primary-600 -rotate-90 hover:accent-primary-500"
+        />
+      </div>
+
+      <button
+        onClick={onToggleMuted}
+        className={`p-2 rounded-full transition-colors ${
+          isMuted
+            ? 'bg-primary-100 text-primary-600 dark:bg-primary-900/30'
+            : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
+        }`}
+        title={isMuted ? t('player.unmute') : t('player.mute')}
+      >
+        {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+      </button>
+    </div>
+  );
+};
 
 // ─── SleepTimerPopover ─────────────────────────────────────────────────────
 // 睡眠定时弹出层：按钮 + 弹出面板（预设 4 档 + 自定义输入 + 取消按钮）。
@@ -235,83 +244,87 @@ export const SleepTimerPopover: React.FC<SleepTimerPopoverProps> = ({
   onCancel,
   onClose,
   menuRef,
-}) => (
-  <div className="relative" ref={menuRef}>
-    <button
-      onClick={onToggleShow}
-      className="w-full flex flex-col items-center gap-1.5 transition-all active:scale-95 group"
-      title="睡眠定时"
-    >
-      <div className="w-10 h-10 rounded-2xl bg-white/50 dark:bg-slate-800/60 flex items-center justify-center group-hover:bg-white/70 dark:group-hover:bg-slate-800 transition-colors">
-        <Clock size={18} className={sleepTimer ? 'text-primary-600' : ''} />
-      </div>
-      <span className="text-[10px] sm:text-xs font-bold leading-none whitespace-nowrap">
-        {sleepTimer ? formatSleepTimerRemaining(sleepTimer) : '定时'}
-      </span>
-    </button>
+}) => {
+  const { t } = useTranslation();
 
-    {show && (
-      <div className="absolute bottom-full mb-4 right-0 bg-white dark:bg-slate-800 shadow-2xl rounded-2xl p-3 sm:p-4 border border-slate-100 dark:border-slate-700 min-w-[180px] sm:min-w-[200px] flex flex-col gap-2 z-[220] animate-in zoom-in-95 duration-200">
-        <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-700 mb-1 text-center">
-          睡眠定时
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        onClick={onToggleShow}
+        className="w-full flex flex-col items-center gap-1.5 transition-all active:scale-95 group"
+        title={t('player.sleepTimer')}
+      >
+        <div className="w-10 h-10 rounded-2xl bg-white/50 dark:bg-slate-800/60 flex items-center justify-center group-hover:bg-white/70 dark:group-hover:bg-slate-800 transition-colors">
+          <Clock size={18} className={sleepTimer ? 'text-primary-600' : ''} />
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          {SLEEP_TIMER_PRESET_MINUTES.map((mins) => (
-            <button
-              key={mins}
-              onClick={() => {
-                onStart(mins * 60);
-                onClose();
+        <span className="text-[10px] sm:text-xs font-bold leading-none whitespace-nowrap">
+          {sleepTimer ? formatSleepTimerRemaining(sleepTimer) : t('player.timer')}
+        </span>
+      </button>
+
+      {show && (
+        <div className="absolute bottom-full mb-4 right-0 bg-white dark:bg-slate-800 shadow-2xl rounded-2xl p-3 sm:p-4 border border-slate-100 dark:border-slate-700 min-w-[180px] sm:min-w-[200px] flex flex-col gap-2 z-[220] animate-in zoom-in-95 duration-200">
+          <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100 dark:border-slate-700 mb-1 text-center">
+            {t('player.sleepTimer')}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {SLEEP_TIMER_PRESET_MINUTES.map((mins) => (
+              <button
+                key={mins}
+                onClick={() => {
+                  onStart(mins * 60);
+                  onClose();
+                }}
+                className="px-3 py-2 text-xs sm:text-sm rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-600"
+              >
+                {t('player.minutes', { count: mins })}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-1 flex items-center gap-1 p-1 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-slate-700 focus-within:border-primary-500/50 transition-colors">
+            <input
+              type="number"
+              min="1"
+              value={customMinutes}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === '' || parseInt(val) >= 0) {
+                  onSetCustomMinutes(val);
+                }
               }}
-              className="px-3 py-2 text-xs sm:text-sm rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-600"
+              placeholder={t('player.customMinutes')}
+              className="flex-1 bg-transparent border-none outline-none px-2 py-1.5 text-xs dark:text-white placeholder:text-slate-400 w-0"
+            />
+            <button
+              onClick={() => {
+                const mins = parseInt(customMinutes);
+                if (mins > 0) {
+                  onStart(mins * 60);
+                  onClose();
+                  onSetCustomMinutes('');
+                }
+              }}
+              className="px-3 py-1.5 text-xs font-bold rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors shrink-0"
             >
-              {mins} 分钟
+              {t('player.start')}
             </button>
-          ))}
-        </div>
+          </div>
 
-        <div className="mt-1 flex items-center gap-1 p-1 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-slate-700 focus-within:border-primary-500/50 transition-colors">
-          <input
-            type="number"
-            min="1"
-            value={customMinutes}
-            onChange={(e) => {
-              const val = e.target.value;
-              if (val === '' || parseInt(val) >= 0) {
-                onSetCustomMinutes(val);
-              }
-            }}
-            placeholder="自定义分钟"
-            className="flex-1 bg-transparent border-none outline-none px-2 py-1.5 text-xs dark:text-white placeholder:text-slate-400 w-0"
-          />
           <button
             onClick={() => {
-              const mins = parseInt(customMinutes);
-              if (mins > 0) {
-                onStart(mins * 60);
-                onClose();
-                onSetCustomMinutes('');
-              }
+              onCancel();
+              onClose();
             }}
-            className="px-3 py-1.5 text-xs font-bold rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors shrink-0"
+            className="mt-2 px-4 py-2 text-xs sm:text-sm font-bold rounded-xl bg-red-50 dark:bg-red-900/20 text-red-500 transition-colors"
           >
-            开启
+            {t('player.cancelTimer')}
           </button>
         </div>
-
-        <button
-          onClick={() => {
-            onCancel();
-            onClose();
-          }}
-          className="mt-2 px-4 py-2 text-xs sm:text-sm font-bold rounded-xl bg-red-50 dark:bg-red-900/20 text-red-500 transition-colors"
-        >
-          取消定时
-        </button>
-      </div>
-    )}
-  </div>
-);
+      )}
+    </div>
+  );
+};
 
 // ─── ExpandedBottomControls ────────────────────────────────────────────────
 // 展开视图底部四宫格：倍速 / 音量 / 睡眠定时 / 选集。
@@ -362,13 +375,16 @@ export const ExpandedBottomControls: React.FC<ExpandedBottomControlsProps> = ({
   onCancelSleepTimer,
   onCloseSleepTimer,
   onOpenChapterList,
-}) => (
-  <div className="grid grid-cols-4 items-start gap-1 sm:gap-2 w-full text-slate-600 dark:text-slate-400 order-1">
-    <button
-      onClick={onCyclePlaybackSpeed}
-      className="flex flex-col items-center gap-1.5 transition-all active:scale-95 group"
-      title="播放速度"
-    >
+}) => {
+  const { t } = useTranslation();
+
+  return (
+    <div className="grid grid-cols-4 items-start gap-1 sm:gap-2 w-full text-slate-600 dark:text-slate-400 order-1">
+      <button
+        onClick={onCyclePlaybackSpeed}
+        className="flex flex-col items-center gap-1.5 transition-all active:scale-95 group"
+        title={t('player.speed')}
+      >
       <div className="w-10 h-10 rounded-2xl bg-white/50 dark:bg-slate-800/60 flex items-center justify-center group-hover:bg-white/70 dark:group-hover:bg-slate-800 transition-colors">
         <Zap size={18} className={playbackSpeed !== 1 ? 'text-primary-600' : ''} />
       </div>
@@ -382,13 +398,13 @@ export const ExpandedBottomControls: React.FC<ExpandedBottomControlsProps> = ({
           onToggleShowVolumeControl();
         }}
         className="w-full flex flex-col items-center gap-1.5 transition-all active:scale-95 group"
-        title="音量"
+        title={t('player.volume')}
       >
         <div className="w-10 h-10 rounded-2xl bg-white/50 dark:bg-slate-800/60 flex items-center justify-center group-hover:bg-white/70 dark:group-hover:bg-slate-800 transition-colors">
           {isMuted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
         </div>
         <span className="text-[10px] sm:text-xs font-bold leading-none">
-          {isMuted || volume === 0 ? '静音' : `${Math.round(volume * 100)}%`}
+          {isMuted || volume === 0 ? t('player.muted') : `${Math.round(volume * 100)}%`}
         </span>
       </button>
 
@@ -418,15 +434,16 @@ export const ExpandedBottomControls: React.FC<ExpandedBottomControlsProps> = ({
     <button
       onClick={onOpenChapterList}
       className="flex flex-col items-center gap-1.5 transition-all active:scale-95 group"
-      title="章节列表"
+      title={t('player.chapterList')}
     >
       <div className="w-10 h-10 rounded-2xl bg-white/50 dark:bg-slate-800/60 flex items-center justify-center group-hover:bg-white/70 dark:group-hover:bg-slate-800 transition-colors">
         <ListMusic size={18} />
       </div>
-      <span className="text-[10px] sm:text-xs font-bold leading-none">选集</span>
+      <span className="text-[10px] sm:text-xs font-bold leading-none">{t('player.selectChapter')}</span>
     </button>
   </div>
-);
+  );
+};
 
 // ─── MiniPlayerBookInfo ────────────────────────────────────────────────────
 // mini player 最左段：封面（点击切全屏）+ 在 ≥500 时显示书名 / 章节标题。
@@ -452,7 +469,7 @@ export const MiniPlayerBookInfo: React.FC<MiniPlayerBookInfoProps> = ({
       onClick={onCoverClick}
     >
       <img
-        src={getCoverUrl(book?.coverUrl, book?.libraryId, book?.id)}
+        src={getCoverUrl(book?.cover_url, book?.library_id, book?.id)}
         alt={book?.title}
         referrerPolicy="no-referrer"
         className="w-full h-full object-cover"
@@ -483,36 +500,40 @@ export const ExpandedCoverAndMeta: React.FC<ExpandedCoverAndMetaProps> = ({
   chapterTitle,
   expandedCoverSizeClass,
   error,
-}) => (
-  <>
-    <div className={`${expandedCoverSizeClass} rounded-[28px] sm:rounded-[36px] overflow-hidden shadow-2xl border-4 sm:border-8 border-white dark:border-slate-800 transition-all duration-500`}>
-      <img
-        src={getCoverUrl(book?.coverUrl, book?.libraryId, book?.id)}
-        alt={book?.title}
-        referrerPolicy="no-referrer"
-        className="w-full h-full object-cover"
-        onError={(e) => {
-          (e.target as HTMLImageElement).src = 'https://placehold.co/300x400?text=No+Cover';
-        }}
-      />
-    </div>
+}) => {
+  const { t } = useTranslation();
 
-    <div className="text-center w-full min-w-0">
-      <h1 className="text-xl sm:text-2xl font-black leading-snug dark:text-white text-[#4A3728] line-clamp-2">
-        {chapterTitle}
-      </h1>
-      <p className="mt-1.5 text-sm text-slate-500 truncate">
-        {book?.narrator || book?.author || book?.title || '未知作者'}
-      </p>
-    </div>
-
-    {error && (
-      <div className="w-full rounded-2xl bg-red-500/15 border border-red-200/30 px-4 py-2 text-center text-xs font-bold text-red-600 dark:text-red-200">
-        {error}
+  return (
+    <>
+      <div className={`${expandedCoverSizeClass} rounded-[28px] sm:rounded-[36px] overflow-hidden shadow-2xl border-4 sm:border-8 border-white dark:border-slate-800 transition-all duration-500`}>
+        <img
+          src={getCoverUrl(book?.cover_url, book?.library_id, book?.id)}
+          alt={book?.title}
+          referrerPolicy="no-referrer"
+          className="w-full h-full object-cover"
+          onError={(e) => {
+            (e.target as HTMLImageElement).src = 'https://placehold.co/300x400?text=No+Cover';
+          }}
+        />
       </div>
-    )}
-  </>
-);
+
+      <div className="text-center w-full min-w-0">
+        <h1 className="text-xl sm:text-2xl font-black leading-snug dark:text-white text-[#4A3728] line-clamp-2">
+          {chapterTitle}
+        </h1>
+        <p className="mt-1.5 text-sm text-slate-500 truncate">
+          {book?.narrator || book?.author || book?.title || t('player.unknownAuthor')}
+        </p>
+      </div>
+
+      {error && (
+        <div className="w-full rounded-2xl bg-red-500/15 border border-red-200/30 px-4 py-2 text-center text-xs font-bold text-red-600 dark:text-red-200">
+          {error}
+        </div>
+      )}
+    </>
+  );
+};
 // mini player 上一堆按钮共用的「灰色 / 主题色（自动按亮度选文字色）」着色规则。
 const miniThemedColor = (themeColor: string | undefined, useDarkControls: boolean) => {
   if (!themeColor || useDarkControls) return undefined;
@@ -667,6 +688,7 @@ export const MiniPlayerDesktopExtras: React.FC<MiniPlayerDesktopExtrasProps> = (
   onCollapse,
   onExpand,
 }) => {
+  const { t } = useTranslation();
   const tint = miniThemedColor(themeColor, useDarkControls);
   return (
     <div className="hidden md:flex items-center gap-4 lg:gap-6 min-w-[100px] lg:min-w-[140px] justify-end">
@@ -678,7 +700,7 @@ export const MiniPlayerDesktopExtras: React.FC<MiniPlayerDesktopExtrasProps> = (
           }}
           className={`transition-colors p-1 hover:scale-110 flex items-center gap-1 ${useDarkControls ? 'text-slate-200 hover:text-white' : 'text-slate-400 dark:text-slate-300'}`}
           style={{ color: tint }}
-          title="音量"
+          title={t('player.volume')}
         >
           {isMuted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
         </button>
@@ -710,15 +732,15 @@ export const MiniPlayerDesktopExtras: React.FC<MiniPlayerDesktopExtrasProps> = (
         onClick={onCollapse}
         className={`transition-colors p-1 hover:scale-110 ${useDarkControls ? 'text-slate-200 hover:text-white' : 'text-slate-400 dark:text-slate-300'}`}
         style={{ color: tint }}
-        title="收起播放器"
+        title={t('player.collapse')}
       >
         <ChevronLeft size={20} />
       </button>
       <button
         onClick={onExpand}
-        className={`transition-colors p-1 hover:scale-110 ${useDarkControls ? 'text-slate-200 hover:text-white' : 'text-slate-400 dark:text-slate-300'}`}
+        className={`mini-player-expand-button transition-colors p-1 hover:scale-110 ${useDarkControls ? 'text-slate-200 hover:text-white' : 'text-slate-400 dark:text-slate-300'}`}
         style={{ color: tint }}
-        title="展开播放器"
+        title={t('player.expand')}
       >
         <Maximize2 size={20} />
       </button>
@@ -763,6 +785,7 @@ export const MiniPlayerMobileControls: React.FC<MiniPlayerMobileControlsProps> =
   onSeekTo,
   onCollapse,
 }) => {
+  const { t } = useTranslation();
   const tint = miniThemedColor(themeColor, useDarkControls);
   return (
     <div className={`flex md:hidden items-center gap-2 sm:gap-3 flex-1 min-w-0 justify-end ${isWidgetMode ? 'max-[380px]:w-full max-[380px]:justify-center max-[380px]:gap-6 max-[380px]:flex-none' : ''}`}>
@@ -834,7 +857,7 @@ export const MiniPlayerMobileControls: React.FC<MiniPlayerMobileControlsProps> =
             onClick={onCollapse}
             className={`p-2 transition-colors ${useDarkControls ? 'text-slate-200 hover:text-white' : 'text-slate-400 dark:text-slate-300'}`}
             style={{ color: tint }}
-            title="收起播放器"
+            title={t('player.collapse')}
           >
             <ChevronLeft size={24} />
           </button>
@@ -867,39 +890,43 @@ export const ExpandedProgressSection: React.FC<ExpandedProgressSectionProps> = (
   onSeekStart,
   onSeekEnd,
   onSeekTo,
-}) => (
-  <div className="px-1 sm:px-2 order-2">
-    <ProgressBar
-      isSeeking={isSeeking}
-      seekTime={seekTime}
-      currentTime={currentTime}
-      duration={duration}
-      bufferedTime={bufferedTime}
-      themeColor={themeColor}
-      onSeek={onSeek}
-      onSeekStart={onSeekStart}
-      onSeekEnd={onSeekEnd}
-    />
-    <div className="mt-3 grid grid-cols-[auto_auto_1fr_auto_auto] items-center gap-3 text-xs font-bold text-slate-500 dark:text-slate-400">
-      <button
-        onClick={() => onSeekTo(currentTime - 15)}
-        className="relative w-9 h-9 rounded-full hover:bg-white/50 dark:hover:bg-slate-800/60 transition-colors text-slate-600 dark:text-slate-300"
-        title="快退 15 秒"
-      >
-        <RotateCcw size={27} strokeWidth={2.2} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" />
-        <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[46%] text-[9px] font-black leading-none tabular-nums">15</span>
-      </button>
-      <span>{formatTime(currentTime)}</span>
-      <span />
-      <span>{formatTime(duration)}</span>
-      <button
-        onClick={() => onSeekTo(currentTime + 15)}
-        className="relative w-9 h-9 rounded-full hover:bg-white/50 dark:hover:bg-slate-800/60 transition-colors text-slate-600 dark:text-slate-300"
-        title="快进 15 秒"
-      >
-        <RotateCw size={27} strokeWidth={2.2} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" />
-        <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[46%] text-[9px] font-black leading-none tabular-nums">15</span>
-      </button>
+}) => {
+  const { t } = useTranslation();
+
+  return (
+    <div className="px-1 sm:px-2 order-2">
+      <ProgressBar
+        isSeeking={isSeeking}
+        seekTime={seekTime}
+        currentTime={currentTime}
+        duration={duration}
+        bufferedTime={bufferedTime}
+        themeColor={themeColor}
+        onSeek={onSeek}
+        onSeekStart={onSeekStart}
+        onSeekEnd={onSeekEnd}
+      />
+      <div className="mt-3 grid grid-cols-[auto_auto_1fr_auto_auto] items-center gap-3 text-xs font-bold text-slate-500 dark:text-slate-400">
+        <button
+          onClick={() => onSeekTo(currentTime - 15)}
+          className="relative w-9 h-9 rounded-full hover:bg-white/50 dark:hover:bg-slate-800/60 transition-colors text-slate-600 dark:text-slate-300"
+          title={t('player.rewindSeconds', { seconds: 15 })}
+        >
+          <RotateCcw size={27} strokeWidth={2.2} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" />
+          <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[46%] text-[9px] font-black leading-none tabular-nums">15</span>
+        </button>
+        <span>{formatTime(currentTime)}</span>
+        <span />
+        <span>{formatTime(duration)}</span>
+        <button
+          onClick={() => onSeekTo(currentTime + 15)}
+          className="relative w-9 h-9 rounded-full hover:bg-white/50 dark:hover:bg-slate-800/60 transition-colors text-slate-600 dark:text-slate-300"
+          title={t('player.forwardSeconds', { seconds: 15 })}
+        >
+          <RotateCw size={27} strokeWidth={2.2} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" />
+          <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[46%] text-[9px] font-black leading-none tabular-nums">15</span>
+        </button>
+      </div>
     </div>
-  </div>
-);
+  );
+};

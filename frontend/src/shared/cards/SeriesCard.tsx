@@ -4,6 +4,7 @@ import { Layers } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { getCoverUrl } from '../../core/utils/image';
 import ExpandableTitle from '../widgets/ExpandableTitle';
+import { useTranslation } from 'react-i18next';
 
 interface SeriesCardProps {
   series: Series;
@@ -12,6 +13,7 @@ interface SeriesCardProps {
 }
 
 const SeriesCard: React.FC<SeriesCardProps> = ({ series, onClick, coverShape = 'rect' }) => {
+  const { t } = useTranslation();
   const content = (
     <>
       <div className={`relative ${coverShape === 'square' ? 'aspect-square' : 'aspect-[3/4]'} overflow-visible mb-1`}>
@@ -22,7 +24,7 @@ const SeriesCard: React.FC<SeriesCardProps> = ({ series, onClick, coverShape = '
         {/* Main cover */}
         <div className="relative h-full w-full rounded-md overflow-hidden shadow-md bg-white dark:bg-slate-800">
             <img 
-              src={getCoverUrl(series.coverUrl, series.libraryId)} 
+              src={getCoverUrl(series.cover_url, series.library_id)}
               alt={series.title}
               loading="lazy"
               referrerPolicy="no-referrer"
@@ -42,12 +44,12 @@ const SeriesCard: React.FC<SeriesCardProps> = ({ series, onClick, coverShape = '
             {/* Series badge */}
             <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-black/60 backdrop-blur-sm rounded text-[10px] text-white font-medium flex items-center gap-1">
               <Layers size={10} />
-              <span>系列</span>
+              <span>{t('shared.series')}</span>
             </div>
 
             {/* Book count badge */}
             <div className="absolute bottom-2 right-2 px-1.5 py-0.5 bg-primary-600/90 backdrop-blur-sm rounded text-[10px] text-white font-medium shadow-sm">
-               {series.books?.length || 0} 本书
+               {t('shared.seriesBookCount', { count: series.books?.length || 0 })}
             </div>
         </div>
       </div>
@@ -60,7 +62,7 @@ const SeriesCard: React.FC<SeriesCardProps> = ({ series, onClick, coverShape = '
         />
         <div className="mt-1 flex flex-col gap-0.5">
           <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-            <span className="line-clamp-1">{series.author || '未知作者'}</span>
+            <span className="line-clamp-1">{series.author || t('shared.unknownAuthor')}</span>
           </div>
         </div>
       </div>

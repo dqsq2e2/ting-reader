@@ -112,7 +112,7 @@ async fn authenticate_ws_token(
 
 /// Handle an established WebSocket connection
 async fn handle_ws_connection(socket: WebSocket, state: AppState, user_id: String) {
-    debug!("WebSocket 连接已建立: user={}", &user_id);
+    debug!("WebSocket connection established: user={}", &user_id);
     let (mut sender, mut receiver) = socket.split();
     let ws_manager = state.ws_manager.clone();
 
@@ -169,7 +169,7 @@ async fn handle_ws_connection(socket: WebSocket, state: AppState, user_id: Strin
         _ = recv_task => {},
     }
 
-    debug!("WebSocket 连接已断开: user={}", &user_id);
+    debug!("WebSocket connection closed: user={}", &user_id);
 }
 
 /// Process an incoming message from the client
@@ -211,7 +211,7 @@ async fn handle_client_message(
             };
 
             debug!(
-                "WS 收到进度: user={} book={} ch={} pos={}s",
+                "WS received progress: user={} book={} ch={} pos={}s",
                 &user_id,
                 &book_id,
                 chapter_id.as_deref().unwrap_or("-"),
@@ -219,7 +219,16 @@ async fn handle_client_message(
             );
 
             if let Err(e) = state.progress_repo.upsert(&progress).await {
-                warn!("WS 进度保存失败: user={} err={}", &user_id, e);
+                warn!(
+                    user_id = %user_id,
+                    error = %e,
+                    message_key = "websocket.progress_save_failed",
+                    message_params = %serde_json::json!({
+                        "user_id": user_id.to_string(),
+                        "error": e.to_string(),
+                    }),
+                    "WebSocket progress save failed"
+                );
                 return;
             }
 

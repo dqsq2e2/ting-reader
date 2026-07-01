@@ -28,7 +28,7 @@ export const useBookshelfCoverShape = (enabled = true) => {
 
     apiClient.get('/api/settings')
       .then(res => {
-        const nextCoverShape = normalizeCoverShape(res.data.settingsJson?.bookshelfCoverShape);
+        const nextCoverShape = normalizeCoverShape(res.data.settings_json?.bookshelf_cover_shape);
         cachedCoverShape = nextCoverShape;
         if (!cancelled) setCoverShape(nextCoverShape);
       })

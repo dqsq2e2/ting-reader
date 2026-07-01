@@ -99,6 +99,7 @@ jobs:
       - name: Prepare App Directory
         run: |
           mkdir -p .github/ting-reader-fpk-native/app/server
+          mkdir -p .github/ting-reader-fpk-native/app/server/preinstalled-plugins
           echo "Listing target directory:"
           find backend/target -type f | grep "ting_reader" || true
           find backend/target -type f | grep "ting-reader" || true
@@ -117,6 +118,9 @@ jobs:
           
           cp backend/config.toml .github/ting-reader-fpk-native/app/server/
           cp -r frontend/dist .github/ting-reader-fpk-native/app/server/static
+          PLUGIN_STORE_VERSION="1.0.0"
+          curl -fL "https://github.com/dqsq2e2/ting-reader-plugin-store/releases/download/v${PLUGIN_STORE_VERSION}/ting-reader-plugin-store-${PLUGIN_STORE_VERSION}.tr" \
+            -o .github/ting-reader-fpk-native/app/server/preinstalled-plugins/ting-reader-plugin-store.tr
           chmod +x .github/ting-reader-fpk-native/app/server/ting-reader
           chmod +x .github/ting-reader-fpk-native/cmd/*
 

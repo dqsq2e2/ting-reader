@@ -13,6 +13,10 @@ use axum::{
 };
 use uuid::Uuid;
 
+fn is_http_url(value: &str) -> bool {
+    value.starts_with("http://") || value.starts_with("https://")
+}
+
 /// Handler for GET /api/libraries - Get all libraries
 pub async fn list_libraries(
     State(state): State<AppState>,
@@ -37,11 +41,15 @@ pub async fn create_library(
 ) -> Result<impl IntoResponse> {
     require_admin(&user)?;
 
-    let url = if req.library_type == "local" {
-        req.path.unwrap_or_default()
-    } else {
-        req.webdav_url.unwrap_or_default()
-    };
+    let library_type = req.library_type.trim().to_ascii_lowercase();
+    let url = match library_type.as_str() {
+        "local" => req.path.unwrap_or_default(),
+        "webdav" => req.webdav_url.unwrap_or_default(),
+        "rss" => req.rss_feed_url.unwrap_or_default(),
+        _ => String::new(),
+    }
+    .trim()
+    .to_string();
 
     let name_trimmed = req.name.trim();
     if name_trimmed.is_empty() {
@@ -50,14 +58,14 @@ pub async fn create_library(
         ));
     }
 
-    if req.library_type != "local" && req.library_type != "webdav" {
+    if library_type != "local" && library_type != "webdav" && library_type != "rss" {
         return Err(TingError::ValidationError(format!(
-            "Invalid library type '{}'. Must be 'local' or 'webdav'",
+            "Invalid library type '{}'. Must be 'local', 'webdav' or 'rss'",
             req.library_type
         )));
     }
 
-    if req.library_type == "local" {
+    if library_type == "local" {
         let config = state.config.read().await;
         let storage_root = config.storage.local_storage_root.clone();
         drop(config);
@@ -81,20 +89,32 @@ pub async fn create_library(
         }
     }
 
-    if req.library_type == "webdav" {
-        if !url.starts_with("http://") && !url.starts_with("https://") {
+    if library_type == "webdav" {
+        if !is_http_url(&url) {
             return Err(TingError::ValidationError(
                 "WebDAV URL must start with http:// or https://".to_string(),
             ));
         }
     }
 
-    let encrypted_password = if let Some(ref password) = req.webdav_password {
-        if !password.is_empty() {
-            Some(crate::core::crypto::encrypt(
-                password,
-                &state.encryption_key,
-            )?)
+    if library_type == "rss" {
+        if !is_http_url(&url) {
+            return Err(TingError::ValidationError(
+                "RSS feed URL must start with http:// or https://".to_string(),
+            ));
+        }
+    }
+
+    let encrypted_password = if library_type == "webdav" {
+        if let Some(ref password) = req.webdav_password {
+            if !password.is_empty() {
+                Some(crate::core::crypto::encrypt(
+                    password,
+                    &state.encryption_key,
+                )?)
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -102,16 +122,28 @@ pub async fn create_library(
         None
     };
 
-    let root_path = req.root_path.unwrap_or_else(|| "/".to_string());
+    let root_path = if library_type == "rss" {
+        "/".to_string()
+    } else {
+        req.root_path.unwrap_or_else(|| "/".to_string())
+    };
 
-    let scraper_config = req.scraper_config.map(|v| v.to_string());
+    let scraper_config = if library_type == "rss" {
+        None
+    } else {
+        req.scraper_config.map(|v| v.to_string())
+    };
 
     let library = crate::db::models::Library {
         id: Uuid::new_v4().to_string(),
         name: name_trimmed.to_string(),
-        library_type: req.library_type.clone(),
+        library_type: library_type.clone(),
         url,
-        username: req.webdav_username,
+        username: if library_type == "webdav" {
+            req.webdav_username
+        } else {
+            None
+        },
         password: encrypted_password,
         root_path,
         last_scanned_at: None,
@@ -123,14 +155,28 @@ pub async fn create_library(
 
     tracing::info!(
         target: "audit::library",
-        "管理员 '{}' 创建了存储库 '{}' (路径/URL: {})",
-        user.username,
-        library.name,
-        library.url
+        message_key = "library.created",
+        message_params = %serde_json::json!({
+            "actor": user.username.as_str(),
+            "library_id": library.id.as_str(),
+            "library_name": library.name.as_str(),
+            "library_type": library.library_type.as_str(),
+            "url": library.url.as_str(),
+            "root_path": library.root_path.as_str(),
+        }),
+        actor_id = %user.id,
+        actor = %user.username,
+        library_id = %library.id,
+        library_name = %library.name,
+        library_type = %library.library_type,
+        url = %library.url,
+        root_path = %library.root_path,
+        "Library created"
     );
 
-    crate::core::notifications::dispatch_notification_event(
+    crate::core::notifications::dispatch_application_event(
         state.notification_repo.clone(),
+        state.plugin_manager.clone(),
         crate::core::notifications::NotificationEventPayload::new(
             "library.created",
             "新增媒体库",
@@ -174,7 +220,16 @@ pub async fn create_library(
     );
 
     if let Err(e) = state.task_queue.submit(task).await {
-        tracing::error!(library_id = %library.id, error = %e, "队列初始扫描任务失败");
+        tracing::error!(
+            library_id = %library.id,
+            error = %e,
+            message_key = "library.initial_scan.enqueue_failed",
+            message_params = %serde_json::json!({
+                "library_id": library.id,
+                "error": e.to_string(),
+            }),
+            "Failed to enqueue initial library scan task"
+        );
     }
 
     // Start watching the library if it's local
@@ -191,7 +246,16 @@ pub async fn create_library(
                 .watch_library(&library.id, &library_path)
                 .await
             {
-                tracing::warn!("开始监视新库 {} 失败: {}", library.id, e);
+                tracing::warn!(
+                    library_id = %library.id,
+                    error = %e,
+                    message_key = "library.watcher.watch_failed",
+                    message_params = %serde_json::json!({
+                        "library_id": library.id,
+                        "error": e.to_string(),
+                    }),
+                    "Failed to watch new library"
+                );
             }
         }
     }
@@ -219,9 +283,10 @@ pub async fn update_library(
     }
 
     if let Some(library_type) = req.library_type {
-        if library_type != "local" && library_type != "webdav" {
+        let library_type = library_type.trim().to_ascii_lowercase();
+        if library_type != "local" && library_type != "webdav" && library_type != "rss" {
             return Err(TingError::ValidationError(format!(
-                "Invalid library type '{}'. Must be 'local' or 'webdav'",
+                "Invalid library type '{}'. Must be 'local', 'webdav' or 'rss'",
                 library_type
             )));
         }
@@ -243,26 +308,56 @@ pub async fn update_library(
             }
             library.url = path;
         }
-    } else {
+    } else if library.library_type == "webdav" {
         if let Some(webdav_url) = req.webdav_url {
+            let webdav_url = webdav_url.trim().to_string();
+            if !is_http_url(&webdav_url) {
+                return Err(TingError::ValidationError(
+                    "WebDAV URL must start with http:// or https://".to_string(),
+                ));
+            }
             library.url = webdav_url;
+        }
+    } else if library.library_type == "rss" {
+        if let Some(rss_feed_url) = req.rss_feed_url {
+            let rss_feed_url = rss_feed_url.trim().to_string();
+            if !is_http_url(&rss_feed_url) {
+                return Err(TingError::ValidationError(
+                    "RSS feed URL must start with http:// or https://".to_string(),
+                ));
+            }
+            library.url = rss_feed_url;
+        }
+        if !is_http_url(&library.url) {
+            return Err(TingError::ValidationError(
+                "RSS feed URL must start with http:// or https://".to_string(),
+            ));
+        }
+        library.username = None;
+        library.password = None;
+        library.root_path = "/".to_string();
+    }
+
+    if library.library_type == "webdav" {
+        if let Some(username) = req.webdav_username {
+            library.username = Some(username);
+        }
+
+        if let Some(password) = req.webdav_password {
+            let encrypted = crate::core::crypto::encrypt(&password, &state.encryption_key)?;
+            library.password = Some(encrypted);
         }
     }
 
-    if let Some(username) = req.webdav_username {
-        library.username = Some(username);
+    if library.library_type == "webdav" || library.library_type == "local" {
+        if let Some(root_path) = req.root_path {
+            library.root_path = root_path;
+        }
     }
 
-    if let Some(password) = req.webdav_password {
-        let encrypted = crate::core::crypto::encrypt(&password, &state.encryption_key)?;
-        library.password = Some(encrypted);
-    }
-
-    if let Some(root_path) = req.root_path {
-        library.root_path = root_path;
-    }
-
-    if let Some(config) = req.scraper_config {
+    if library.library_type == "rss" {
+        library.scraper_config = None;
+    } else if let Some(config) = req.scraper_config {
         library.scraper_config = Some(config.to_string());
     }
 
@@ -290,7 +385,16 @@ pub async fn update_library(
                 .watch_library(&library.id, &library_path)
                 .await
             {
-                tracing::warn!("更新库 {} 的监视器失败: {}", library.id, e);
+                tracing::warn!(
+                    library_id = %library.id,
+                    error = %e,
+                    message_key = "library.watcher.update_failed",
+                    message_params = %serde_json::json!({
+                        "library_id": library.id,
+                        "error": e.to_string(),
+                    }),
+                    "Failed to update library watcher"
+                );
             }
         }
     }
@@ -314,7 +418,16 @@ pub async fn delete_library(
 
     // Cancel any running tasks for this library first
     if let Err(e) = state.task_queue.cancel_library_tasks(&library_id).await {
-        tracing::error!(library_id = %library_id, error = %e, "取消库任务失败");
+        tracing::error!(
+            library_id = %library_id,
+            error = %e,
+            message_key = "library.tasks.cancel_failed",
+            message_params = %serde_json::json!({
+                "library_id": library_id,
+                "error": e.to_string(),
+            }),
+            "Failed to cancel library tasks"
+        );
         // Continue with deletion even if cancellation fails
     }
 
@@ -335,7 +448,16 @@ pub async fn delete_library(
     // Cleanup any orphan books that might have been created during the deletion process
     // (e.g. by a race condition with a running scanner task)
     if let Err(e) = state.book_repo.cleanup_orphans().await {
-        tracing::error!(library_id = %library_id, error = %e, "清理孤立书籍失败");
+        tracing::error!(
+            library_id = %library_id,
+            error = %e,
+            message_key = "library.orphan_books.cleanup_failed",
+            message_params = %serde_json::json!({
+                "library_id": library_id,
+                "error": e.to_string(),
+            }),
+            "Failed to clean up orphan books"
+        );
     }
 
     // Cleanup cached covers for WebDAV libraries
@@ -348,9 +470,18 @@ pub async fn delete_library(
         if path_str.contains("/temp/covers/") || path_str.contains("/storage/cache/covers/") {
             if path.exists() {
                 if let Err(e) = std::fs::remove_file(path) {
-                    tracing::warn!("删除封面缓存 {} 失败: {}", cover_path, e);
+                    tracing::warn!(
+                        path = %cover_path,
+                        error = %e,
+                        message_key = "library.cover_cache.delete_failed",
+                        message_params = %serde_json::json!({
+                            "path": cover_path,
+                            "error": e.to_string(),
+                        }),
+                        "Failed to delete cover cache"
+                    );
                 } else {
-                    tracing::info!("已删除孤立的封面缓存: {}", cover_path);
+                    tracing::info!("Deleted orphan cover cache: {}", cover_path);
                 }
             }
         }
@@ -360,14 +491,28 @@ pub async fn delete_library(
 
     tracing::info!(
         target: "audit::library",
-        "管理员 '{}' 删除了存储库 '{}' (ID: {})",
-        user.username,
-        library.name,
-        library.id
+        message_key = "library.deleted",
+        message_params = %serde_json::json!({
+            "actor": user.username.as_str(),
+            "library_id": library.id.as_str(),
+            "library_name": library.name.as_str(),
+            "library_type": library.library_type.as_str(),
+            "url": library.url.as_str(),
+            "root_path": library.root_path.as_str(),
+        }),
+        actor_id = %user.id,
+        actor = %user.username,
+        library_id = %library.id,
+        library_name = %library.name,
+        library_type = %library.library_type,
+        url = %library.url,
+        root_path = %library.root_path,
+        "Library deleted"
     );
 
-    crate::core::notifications::dispatch_notification_event(
+    crate::core::notifications::dispatch_application_event(
         state.notification_repo.clone(),
+        state.plugin_manager.clone(),
         crate::core::notifications::NotificationEventPayload::new(
             "library.deleted",
             "删除媒体库",

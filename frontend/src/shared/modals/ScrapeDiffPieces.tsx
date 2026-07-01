@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
   Check,
@@ -21,11 +22,13 @@ import {
   formatCurrentValue,
   formatFieldValue,
   getDraftBookFieldValue,
+  getFieldLabel,
   getItemFieldValue,
   getResultExternalId,
   getResultFields,
   getResultKey,
   getSearchFields,
+  getSearchFieldLabel,
   getSearchInputType,
   hasFieldValue,
   type CoverFrameProps,
@@ -34,12 +37,12 @@ import {
 } from './scrapeDiffHelpers';
 
 // ─── CoverFrame ─────────────────────────────────────────────────────────────
-// 通用封面框：value 是 URL（可能是 cover_url 字段），出错时退化为 ImageIcon 占位。
+// Shared cover frame: value is a URL and falls back to an icon when loading fails.
 
 export const CoverFrame: React.FC<CoverFrameProps> = ({ value, alt, book, className = '' }) => {
   const [failedSrc, setFailedSrc] = useState('');
   const rawValue = typeof value === 'string' ? value.trim() : '';
-  const src = rawValue ? getCoverUrl(rawValue, book?.libraryId, book?.id) : '';
+  const src = rawValue ? getCoverUrl(rawValue, book?.library_id, book?.id) : '';
   const failed = src === failedSrc;
 
   return (
@@ -62,7 +65,7 @@ export const CoverFrame: React.FC<CoverFrameProps> = ({ value, alt, book, classN
 };
 
 // ─── SearchStep ─────────────────────────────────────────────────────────────
-// 步骤 1：选源 + 填搜索参数 + 当前书籍预览。
+// Step 1: select sources, fill search fields, and preview the current book.
 
 interface SearchStepProps {
   book: Book;
@@ -96,15 +99,19 @@ export const SearchStep: React.FC<SearchStepProps> = ({
   onToggleSourceEnabled,
   onActiveSourceChange,
   onUpdateSearchValue,
-}) => (
+}) => {
+  const { t } = useTranslation();
+  const booleanLabels = { trueLabel: t('scrapeDiff.yes'), falseLabel: t('scrapeDiff.no') };
+
+  return (
   <div className="h-full overflow-y-auto p-4 sm:p-5">
     <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
           <div>
             <div className="mb-2 flex items-center justify-between gap-3">
-              <label className="block text-xs font-bold uppercase text-slate-400">本次启用插件</label>
-              <span className="text-xs font-bold text-primary-600">{enabledSearchSources.length} 个</span>
+              <label className="block text-xs font-bold uppercase text-slate-400">{t('scrapeDiff.enabledPlugins')}</label>
+              <span className="text-xs font-bold text-primary-600">{t('scrapeDiff.pluginCount', { count: enabledSearchSources.length })}</span>
             </div>
             <div className="space-y-2">
               {sources.map((source) => {
@@ -126,7 +133,7 @@ export const SearchStep: React.FC<SearchStepProps> = ({
                         className={`flex h-6 w-10 shrink-0 items-center rounded-full p-0.5 transition-colors ${
                           enabled ? 'bg-primary-600' : 'bg-slate-300 dark:bg-slate-700'
                         }`}
-                        title={enabled ? '本次搜索启用' : '本次搜索停用'}
+                        title={enabled ? t('scrapeDiff.searchEnabled') : t('scrapeDiff.searchDisabled')}
                       >
                         <span className={`h-5 w-5 rounded-full bg-white shadow transition-transform ${
                           enabled ? 'translate-x-4' : ''
@@ -140,7 +147,7 @@ export const SearchStep: React.FC<SearchStepProps> = ({
                           {source.name}
                         </div>
                         <div className="mt-0.5 truncate text-[11px] text-slate-400">
-                          {getSearchFields(source).map((field) => field.label).join(' / ')}
+                          {getSearchFields(source).map((field) => getSearchFieldLabel(field, t)).join(' / ')}
                         </div>
                       </button>
                     </div>
@@ -153,8 +160,8 @@ export const SearchStep: React.FC<SearchStepProps> = ({
           <div className="min-w-0">
             <div className="mb-3 flex items-start justify-between gap-3">
               <div>
-                <div className="text-xs font-bold uppercase text-slate-400">搜索参数</div>
-                <h3 className="mt-1 font-bold text-slate-950 dark:text-white">{activeSource?.name || '未选择插件'}</h3>
+                <div className="text-xs font-bold uppercase text-slate-400">{t('scrapeDiff.searchParams')}</div>
+                <h3 className="mt-1 font-bold text-slate-950 dark:text-white">{activeSource?.name || t('scrapeDiff.noPluginSelected')}</h3>
               </div>
               {activeSource ? (
                 <button
@@ -165,7 +172,7 @@ export const SearchStep: React.FC<SearchStepProps> = ({
                       : 'bg-slate-100 text-slate-500 dark:bg-slate-950 dark:text-slate-300'
                   }`}
                 >
-                  {enabledSourceIds.has(activeSource.id) ? '已启用' : '未启用'}
+                  {enabledSourceIds.has(activeSource.id) ? t('scrapeDiff.enabled') : t('scrapeDiff.disabled')}
                 </button>
               ) : null}
             </div>
@@ -174,7 +181,7 @@ export const SearchStep: React.FC<SearchStepProps> = ({
               {searchFields.map((field) => (
                 <div key={field.key} className={field.key === 'title' || field.required ? 'sm:col-span-2' : ''}>
                   <label className="mb-1.5 block text-xs font-bold text-slate-500 dark:text-slate-400">
-                    {field.label}{field.required ? <span className="ml-1 text-red-500">*</span> : null}
+                    {getSearchFieldLabel(field, t)}{field.required ? <span className="ml-1 text-red-500">*</span> : null}
                   </label>
                   <input
                     type={getSearchInputType(field)}
@@ -203,24 +210,24 @@ export const SearchStep: React.FC<SearchStepProps> = ({
             <CoverFrame
               value={getDraftBookFieldValue(book, selectedFields, 'cover_url')}
               book={book}
-              alt={book.title || '当前封面'}
+              alt={book.title || t('scrapeDiff.currentCover')}
               className="h-28 w-20 shrink-0"
             />
             <div className="min-w-0 flex-1">
-              <div className="text-xs font-bold uppercase text-slate-400">当前书籍</div>
+              <div className="text-xs font-bold uppercase text-slate-400">{t('scrapeDiff.currentBook')}</div>
               <h3 className="mt-1 line-clamp-2 font-bold text-slate-950 dark:text-white">
-                {formatCurrentValue(getDraftBookFieldValue(book, selectedFields, 'title'))}
+                {formatCurrentValue(getDraftBookFieldValue(book, selectedFields, 'title'), t('scrapeDiff.unknown'), booleanLabels)}
               </h3>
               <div className="mt-2 space-y-1 text-xs text-slate-500 dark:text-slate-400">
-                <div className="truncate">作者：{formatCurrentValue(getDraftBookFieldValue(book, selectedFields, 'author'))}</div>
-                <div className="truncate">演播：{formatCurrentValue(getDraftBookFieldValue(book, selectedFields, 'narrator'))}</div>
+                <div className="truncate">{t('scrapeDiff.authorLine', { value: formatCurrentValue(getDraftBookFieldValue(book, selectedFields, 'author'), t('scrapeDiff.unknown'), booleanLabels) })}</div>
+                <div className="truncate">{t('scrapeDiff.narratorLine', { value: formatCurrentValue(getDraftBookFieldValue(book, selectedFields, 'narrator'), t('scrapeDiff.unknown'), booleanLabels) })}</div>
               </div>
             </div>
           </div>
         </section>
 
         <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="mb-3 text-xs font-bold uppercase text-slate-400">当前插件返回字段</div>
+          <div className="mb-3 text-xs font-bold uppercase text-slate-400">{t('scrapeDiff.currentResultFields')}</div>
           <div className="flex flex-wrap gap-2">
             {activeResultFields.map((fieldKey) => (
               <span
@@ -228,7 +235,7 @@ export const SearchStep: React.FC<SearchStepProps> = ({
                 className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-bold text-slate-600 dark:bg-slate-950 dark:text-slate-300"
               >
                 <span className="text-slate-400">{FIELD_DEFINITIONS[fieldKey].icon}</span>
-                {FIELD_DEFINITIONS[fieldKey].label}
+                {getFieldLabel(fieldKey, t, activeSource)}
               </span>
             ))}
           </div>
@@ -236,10 +243,11 @@ export const SearchStep: React.FC<SearchStepProps> = ({
       </aside>
     </div>
   </div>
-);
+  );
+};
 
 // ─── ResultsStep ────────────────────────────────────────────────────────────
-// 步骤 2：列表/详情两态，挑字段。
+// Step 2: choose fields from list or detail views.
 
 interface ResultsStepProps {
   book: Book;
@@ -294,6 +302,9 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
   onOpenResultDetail,
   onBackToSearch,
 }) => {
+  const { t } = useTranslation();
+  const booleanLabels = { trueLabel: t('scrapeDiff.yes'), falseLabel: t('scrapeDiff.no') };
+
   if (resultView === 'detail' && selectedResult && selectedResultItem && selectedResultSource) {
     return (
       <div className="h-full overflow-y-auto p-3 sm:p-5">
@@ -303,14 +314,14 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
             className="inline-flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm font-bold text-slate-600 shadow-sm ring-1 ring-slate-200 transition-colors hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-800 dark:hover:bg-slate-800"
           >
             <ArrowLeft size={17} />
-            返回搜索结果
+            {t('scrapeDiff.backToResults')}
           </button>
 
           <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
               <CoverFrame
                 value={getItemFieldValue(selectedResultItem, 'cover_url')}
-                alt={selectedResultItem.title || '搜索结果封面'}
+                alt={selectedResultItem.title || t('scrapeDiff.resultCover')}
                 className="h-40 w-28 shrink-0 self-center sm:self-start"
               />
               <div className="min-w-0 flex-1 text-center sm:text-left">
@@ -329,7 +340,7 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white transition-opacity hover:opacity-90 dark:bg-white dark:text-slate-950"
               >
                 <Check size={16} />
-                采用全部
+                {t('scrapeDiff.useAll')}
               </button>
             </div>
           </section>
@@ -356,7 +367,7 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
                   <div className="mb-3 flex items-start justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-2 font-bold text-slate-800 dark:text-slate-100">
                       <span className="shrink-0 text-slate-400">{definition.icon}</span>
-                      <span className="truncate">{definition.label}</span>
+                      <span className="truncate">{getFieldLabel(fieldKey, t, selectedResultSource)}</span>
                     </div>
                     <button
                       onClick={() => onSelectField(selectedResult, fieldKey)}
@@ -370,42 +381,42 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
                       }`}
                     >
                       {selected ? <Check size={14} /> : <Plus size={14} />}
-                      {selected ? '已采用' : selectedFields[fieldKey] ? '替换' : '采用'}
+                      {selected ? t('scrapeDiff.selected') : selectedFields[fieldKey] ? t('scrapeDiff.replace') : t('scrapeDiff.use')}
                     </button>
                   </div>
 
                   {definition.cover ? (
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <div className="mb-1 text-xs font-bold text-slate-400">当前</div>
-                        <CoverFrame value={currentValue} book={book} alt="当前封面" className={coverAspectClass} />
+                        <div className="mb-1 text-xs font-bold text-slate-400">{t('scrapeDiff.current')}</div>
+                        <CoverFrame value={currentValue} book={book} alt={t('scrapeDiff.currentCover')} className={coverAspectClass} />
                       </div>
                       <div>
-                        <div className="mb-1 text-xs font-bold text-primary-500">应用</div>
-                        <CoverFrame value={value} alt="待应用封面" className={coverAspectClass} />
+                        <div className="mb-1 text-xs font-bold text-primary-500">{t('scrapeDiff.applyValue')}</div>
+                        <CoverFrame value={value} alt={t('scrapeDiff.pendingCover')} className={coverAspectClass} />
                       </div>
                     </div>
                   ) : (
                     <div className="space-y-3">
                       <div>
-                        <div className="mb-1 text-xs font-bold text-slate-400">当前</div>
+                        <div className="mb-1 text-xs font-bold text-slate-400">{t('scrapeDiff.current')}</div>
                         <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm leading-relaxed text-slate-500 dark:bg-slate-950 dark:text-slate-400">
-                          {formatCurrentValue(currentValue)}
+                          {formatCurrentValue(currentValue, t('scrapeDiff.unknown'), booleanLabels)}
                         </div>
                       </div>
                       <div>
-                        <div className="mb-1 text-xs font-bold text-primary-500">应用</div>
+                        <div className="mb-1 text-xs font-bold text-primary-500">{t('scrapeDiff.applyValue')}</div>
                         <div className={`rounded-lg bg-primary-50 px-3 py-2 text-sm font-semibold leading-relaxed text-slate-950 dark:bg-primary-950/25 dark:text-white ${
                           isDescription && !expanded ? 'line-clamp-5' : ''
                         }`}>
-                          {formatFieldValue(value)}
+                          {formatFieldValue(value, t('scrapeDiff.notReturned'), booleanLabels)}
                         </div>
                         {isDescription && hasValue ? (
                           <button
                             onClick={() => onToggleDescription(expandedKey)}
                             className="mt-1.5 text-xs font-bold text-primary-600 hover:text-primary-700"
                           >
-                            {expanded ? '收起' : '展开'}
+                            {expanded ? t('scrapeDiff.collapse') : t('scrapeDiff.expand')}
                           </button>
                         ) : null}
                       </div>
@@ -425,9 +436,9 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
       <div className="mx-auto max-w-6xl space-y-4">
         <section className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-lg font-bold text-slate-950 dark:text-white">搜索结果</h3>
+            <h3 className="text-lg font-bold text-slate-950 dark:text-white">{t('scrapeDiff.searchResults')}</h3>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              {enabledSearchSources.length} 个插件 · {results.length} 条结果 · 已选择 {selectedCount} 个字段
+              {t('scrapeDiff.resultsSummary', { plugins: enabledSearchSources.length, results: results.length, selected: selectedCount })}
             </p>
           </div>
           <button
@@ -435,7 +446,7 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-bold text-slate-600 transition-colors hover:bg-slate-200 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
           >
             <ArrowLeft size={16} />
-            修改搜索
+            {t('scrapeDiff.editSearch')}
           </button>
         </section>
 
@@ -443,19 +454,19 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
           <div className="flex h-64 items-center justify-center rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
             <Loader2 className="animate-spin text-primary-600" size={32} />
           </div>
-        ) : error === '搜索失败' && results.length === 0 ? (
+        ) : error === t('scrapeDiff.searchFailed') && results.length === 0 ? (
           <div className="flex h-64 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white text-sm font-bold text-red-500 dark:border-slate-800 dark:bg-slate-900">
-            搜索失败
+            {t('scrapeDiff.searchFailed')}
           </div>
         ) : results.length === 0 ? (
           <div className="flex h-64 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white text-sm font-bold text-slate-400 dark:border-slate-800 dark:bg-slate-900">
-            {resultErrorCount > 0 ? '没有可展示结果，部分插件搜索失败' : '暂无搜索结果'}
+            {resultErrorCount > 0 ? t('scrapeDiff.noDisplayResultsPartialFail') : t('scrapeDiff.noSearchResults')}
           </div>
         ) : (
           <>
             {resultErrorCount > 0 ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300">
-                {resultErrorCount} 个插件搜索失败，其余结果已展示
+                {t('scrapeDiff.partialPluginFailures', { count: resultErrorCount })}
               </div>
             ) : null}
 
@@ -477,7 +488,7 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
                     className="group rounded-xl border border-slate-200 bg-white p-3 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:hover:border-primary-900"
                   >
                     <div className="flex gap-3">
-                      <CoverFrame value={cover} alt={item.title || '搜索结果封面'} className={`${compactCoverClass} shrink-0 rounded-lg`} />
+                      <CoverFrame value={cover} alt={item.title || t('scrapeDiff.resultCover')} className={`${compactCoverClass} shrink-0 rounded-lg`} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
                           <span className="inline-flex max-w-[10rem] rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-300">
@@ -489,12 +500,12 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
                           {item.title || getResultExternalId(result)}
                         </div>
                         <div className="mt-1 line-clamp-1 text-xs text-slate-500 dark:text-slate-400">
-                          {formatFieldValue(item.author || item.narrator)}
+                          {formatFieldValue(item.author || item.narrator, t('scrapeDiff.notReturned'), booleanLabels)}
                         </div>
                         <div className="mt-2 flex flex-wrap gap-1">
                           {availableFields.slice(0, 4).map((fieldKey) => (
                             <span key={fieldKey} className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-300">
-                              {FIELD_DEFINITIONS[fieldKey].label}
+                              {getFieldLabel(fieldKey, t, source)}
                             </span>
                           ))}
                           {availableFields.length > 4 ? (
@@ -507,7 +518,7 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
                           <div className="mt-2 flex flex-wrap gap-1">
                             {selectedFromThisResult.slice(0, 3).map((selection) => (
                               <span key={selection.key} className="rounded-md bg-primary-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                                {selection.label}
+                                {selection.label || getFieldLabel(selection.key, t, source)}
                               </span>
                             ))}
                             {selectedFromThisResult.length > 3 ? (
@@ -531,7 +542,7 @@ export const ResultsStep: React.FC<ResultsStepProps> = ({
 };
 
 // ─── ReviewStep ─────────────────────────────────────────────────────────────
-// 步骤 3：审阅已选字段，允许手改、清空、删除单项。
+// Step 3: review, edit, clear, or remove selected fields.
 
 interface ReviewStepProps {
   selectedFieldList: SelectedField[];
@@ -549,14 +560,17 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
   onClearSelectedFields,
   onRemoveSelectedField,
   onUpdateSelectedFieldValue,
-}) => (
+}) => {
+  const { t } = useTranslation();
+
+  return (
   <div className="h-full overflow-y-auto p-3 sm:p-5">
     <div className="mx-auto max-w-5xl space-y-4">
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-lg font-bold text-slate-950 dark:text-white">待应用字段</h3>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{selectedCount} 个字段</p>
+            <h3 className="text-lg font-bold text-slate-950 dark:text-white">{t('scrapeDiff.reviewTitle')}</h3>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('scrapeDiff.fieldCount', { count: selectedCount })}</p>
           </div>
           {selectedCount > 0 ? (
             <button
@@ -564,7 +578,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-bold text-slate-600 transition-colors hover:bg-slate-200 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <Trash2 size={16} />
-              清空
+              {t('scrapeDiff.clear')}
             </button>
           ) : null}
         </div>
@@ -572,7 +586,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
 
       {selectedFieldList.length === 0 ? (
         <div className="flex h-72 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white text-sm font-bold text-slate-400 dark:border-slate-800 dark:bg-slate-900">
-          未选择字段
+          {t('scrapeDiff.noSelectedFields')}
         </div>
       ) : (
         selectedFieldList.map((selection) => {
@@ -587,7 +601,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
                 <div>
                   <div className="flex items-center gap-2 font-bold text-slate-950 dark:text-white">
                     <span className="text-slate-400">{definition.icon}</span>
-                    {selection.label}
+                    {selection.label || getFieldLabel(selection.key, t)}
                   </div>
                   <div className="mt-1 text-xs text-slate-400">
                     {selection.sourceName} · {selection.resultTitle}
@@ -603,9 +617,9 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
 
               {definition.cover ? (
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-[10rem_1fr]">
-                  <CoverFrame value={selection.value} alt="待应用封面" className={`${coverAspectClass} w-40 max-w-full`} />
+                  <CoverFrame value={selection.value} alt={t('scrapeDiff.pendingCover')} className={`${coverAspectClass} w-40 max-w-full`} />
                   <div>
-                    <label className="mb-1.5 block text-xs font-bold text-primary-500">封面 URL</label>
+                    <label className="mb-1.5 block text-xs font-bold text-primary-500">{t('scrapeDiff.coverUrl')}</label>
                     <input
                       type="url"
                       value={editorValue}
@@ -618,7 +632,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
               ) : (
                 <div>
                   <label className="mb-1.5 block text-xs font-bold text-primary-500">
-                    {selection.key === 'tags' ? '应用值（逗号分隔）' : '应用值'}
+                    {selection.key === 'tags' ? t('scrapeDiff.appliedTagsValue') : t('scrapeDiff.appliedValue')}
                   </label>
                   {isBooleanField ? (
                     <select
@@ -626,8 +640,8 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
                       onChange={(event) => onUpdateSelectedFieldValue(selection.key, event.target.value)}
                       className="w-full rounded-xl border border-slate-200 bg-primary-50 px-3 py-3 text-sm font-medium text-slate-950 outline-none transition focus:ring-2 focus:ring-primary-500 dark:border-slate-800 dark:bg-primary-950/25 dark:text-white"
                     >
-                      <option value="true">是</option>
-                      <option value="false">否</option>
+                      <option value="true">{t('scrapeDiff.yes')}</option>
+                      <option value="false">{t('scrapeDiff.no')}</option>
                     </select>
                   ) : isLongText ? (
                     <textarea
@@ -652,4 +666,5 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
       )}
     </div>
   </div>
-);
+  );
+};

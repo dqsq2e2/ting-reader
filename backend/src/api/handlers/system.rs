@@ -77,6 +77,8 @@ pub async fn list_tasks(
             status: record.status,
             payload: record.payload,
             message: record.message,
+            message_key: record.message_key,
+            message_params: record.message_params,
             error: record.error,
             retries: record.retries,
             max_retries: record.max_retries,
@@ -121,6 +123,8 @@ pub async fn get_task(
         status: task_record.status,
         payload,
         message: task_record.message,
+        message_key: task_record.message_key,
+        message_params: task_record.message_params,
         result,
         error: task_record.error,
         retries: task_record.retries,
@@ -1055,7 +1059,12 @@ pub async fn update_config(
     }
 
     new_config.validate().map_err(|e| {
-        tracing::error!(error = %e, "配置验证失败");
+        tracing::error!(
+            error = %e,
+            message_key = "config.validation_failed",
+            message_params = %serde_json::json!({ "error": e.to_string() }),
+            "Configuration validation failed"
+        );
         TingError::InvalidRequest(format!("Invalid configuration: {}", e))
     })?;
 

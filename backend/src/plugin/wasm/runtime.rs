@@ -7,6 +7,7 @@ use super::plugin::{PluginState, StoreLimits, WasmExports, WasmPlugin, WasmPlugi
 use super::sandbox::{Permission, ResourceLimits, Sandbox};
 use crate::core::error::{Result, TingError};
 use crate::plugin::types::{PluginId, PluginMetadata};
+use crate::plugin::PluginHostGatewayHandle;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
@@ -88,15 +89,23 @@ impl WasmRuntime {
         module: Module,
         metadata: &PluginMetadata,
     ) -> Result<WasmPlugin> {
+        self.instantiate_with_host_gateway(module, metadata, None)
+            .await
+    }
+
+    pub async fn instantiate_with_host_gateway(
+        &self,
+        module: Module,
+        metadata: &PluginMetadata,
+        host_gateway: Option<PluginHostGatewayHandle>,
+    ) -> Result<WasmPlugin> {
         // Create sandbox with permissions from metadata
         let sandbox = Sandbox::new(metadata.permissions.clone(), ResourceLimits::default());
 
-        // Create WASI context with network support
+        // Create WASI context. Network access must go through Ting host functions
+        // so manifest permissions can be enforced consistently.
         let mut wasi_builder = wasmtime_wasi::preview2::WasiCtxBuilder::new();
-        wasi_builder
-            .inherit_stdio()
-            .inherit_network()
-            .allow_ip_name_lookup(true);
+        wasi_builder.inherit_stdio();
 
         let wasi = wasi_builder.build();
         let table = ResourceTable::new();
@@ -108,6 +117,12 @@ impl WasmRuntime {
             table,
             adapter,
             http_responses: HashMap::new(),
+            host_responses: HashMap::new(),
+            allowed_domains: sandbox.get_allowed_domains().to_vec(),
+            plugin_id: metadata.instance_id(),
+            permissions: metadata.permissions.clone(),
+            host_gateway,
+            current_user: None,
             limiter: StoreLimits::default(),
         };
 
@@ -146,7 +161,7 @@ impl WasmRuntime {
         let exports = WasmExports::from_instance(&instance, &mut store)?;
 
         // Store sandbox for this plugin
-        let plugin_id = metadata.name.clone();
+        let plugin_id = metadata.instance_id();
         self.sandboxes
             .write()
             .unwrap()

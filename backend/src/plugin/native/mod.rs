@@ -1,5 +1,6 @@
 //! Native dynamic library plugin subsystem
 
+pub mod host_api;
 pub mod loader;
 pub mod plugin;
 

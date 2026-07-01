@@ -173,6 +173,14 @@ pub struct BookItem {
     #[serde(default)]
     pub duration: Option<u64>,
 
+    /// Optional chapter title template selected by metadata provider.
+    #[serde(default)]
+    pub chapter_title_template: Option<String>,
+
+    /// Optional cleaned chapter titles in the same order as scanned files.
+    #[serde(default)]
+    pub chapter_titles: Vec<String>,
+
     /// Additional plugin-specific metadata fields.
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
@@ -254,6 +262,14 @@ pub struct BookDetail {
     /// Total duration in seconds (optional)
     #[serde(default)]
     pub duration: Option<u64>,
+
+    /// Optional chapter title template selected by metadata provider.
+    #[serde(default)]
+    pub chapter_title_template: Option<String>,
+
+    /// Optional cleaned chapter titles in the same order as scanned files.
+    #[serde(default)]
+    pub chapter_titles: Vec<String>,
 }
 
 /// Chapter information
@@ -310,6 +326,8 @@ mod tests {
                 abridged: None,
                 tags: vec![],
                 duration: None,
+                chapter_title_template: None,
+                chapter_titles: vec![],
                 extra: HashMap::new(),
             }],
             total: 100,
@@ -347,6 +365,8 @@ mod tests {
             genre: None,
             chapter_count: 50,
             duration: Some(36000),
+            chapter_title_template: None,
+            chapter_titles: vec!["Chapter 1".to_string(), "Chapter 2".to_string()],
         };
 
         let json = serde_json::to_string(&detail).unwrap();
@@ -355,6 +375,7 @@ mod tests {
         assert_eq!(deserialized.id, "456");
         assert_eq!(deserialized.chapter_count, 50);
         assert_eq!(deserialized.tags.len(), 2);
+        assert_eq!(deserialized.chapter_titles.len(), 2);
     }
 
     #[test]

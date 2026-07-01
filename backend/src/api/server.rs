@@ -21,9 +21,11 @@ use axum::{extract::Request, middleware, middleware::Next, response::Json, routi
 use serde_json::{json, Value};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::signal;
 use tower::ServiceBuilder;
 use tower_http::{
+    classify::ServerErrorsFailureClass,
     cors::CorsLayer,
     services::{ServeDir, ServeFile},
     trace::TraceLayer,
@@ -42,11 +44,14 @@ impl ApiServer {
         config: Config,
         db: Arc<DatabaseManager>,
         plugin_manager: Arc<crate::plugin::manager::PluginManager>,
+        config_manager: Arc<crate::plugin::config::PluginConfigManager>,
+        encryption_key: [u8; 32],
     ) -> anyhow::Result<Self> {
         let server_config = config.server.clone();
 
         // Build the router with all routes and middleware
-        let router = Self::build_router(config, db, plugin_manager)?;
+        let router =
+            Self::build_router(config, db, plugin_manager, config_manager, encryption_key)?;
 
         Ok(Self {
             router,
@@ -59,6 +64,8 @@ impl ApiServer {
         config: Config,
         db: Arc<DatabaseManager>,
         plugin_manager: Arc<crate::plugin::manager::PluginManager>,
+        config_manager: Arc<crate::plugin::config::PluginConfigManager>,
+        encryption_key: [u8; 32],
     ) -> anyhow::Result<Router> {
         // Create API key configuration for authentication
         let api_key = ApiKey::new(config.security.enable_auth, config.security.api_key.clone());
@@ -83,26 +90,27 @@ impl ApiServer {
             crate::db::repository::NotificationWebhookRepository::new(db.clone()),
         );
 
-        // 自动派生主密钥（基于机器特征，无需用户配置）
-        let encryption_key =
-            crate::core::master_key::MasterKeyManager::derive_master_key(&config.database.path)
-                .map_err(|e| anyhow::anyhow!("Failed to derive master key: {}", e))?;
-
-        tracing::info!("主密钥已自动派生，基于机器特征和数据库路径");
-
         // Initialize JWT key manager (auto-generates and rotates keys)
         let jwt_key_manager = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 match crate::auth::JwtKeyManager::new(db.get_pool(), encryption_key).await {
                     Ok(manager) => {
-                        tracing::info!("JWT 密钥管理器初始化成功，密钥已加密存储，启用自动轮换");
+                        tracing::info!(
+                            message_key = "system.jwt_key.initialized",
+                            "JWT key manager initialized"
+                        );
                         let manager_arc = Arc::new(manager);
                         // 启动后台轮换任务
                         manager_arc.clone().start_rotation_task();
                         Some(manager_arc)
                     }
                     Err(e) => {
-                        tracing::warn!("JWT 密钥管理器初始化失败，使用配置文件密钥: {}", e);
+                        tracing::warn!(
+                            error = %e,
+                            message_key = "system.jwt_key.init_failed",
+                            message_params = %serde_json::json!({ "error": e.to_string() }),
+                            "JWT key manager initialization failed; using configured secret"
+                        );
                         None
                     }
                 }
@@ -112,14 +120,7 @@ impl ApiServer {
         // Get JWT secret from config (fallback)
         let jwt_secret = Arc::new(config.security.jwt_secret.clone());
 
-        // Create plugin config manager
-        let config_dir = config.plugins.plugin_dir.join("configs");
-        let config_manager = Arc::new(
-            crate::plugin::config::PluginConfigManager::new(config_dir, encryption_key)
-                .map_err(|e| anyhow::anyhow!("Failed to create config manager: {}", e))?,
-        );
-
-        // Wire config manager into plugin manager so plugins receive real config at init
+        // Keep API state and plugin lifecycle on the same config manager instance.
         plugin_manager.set_config_manager(config_manager.clone());
 
         // Create services
@@ -187,7 +188,12 @@ impl ApiServer {
         let task_queue_clone = task_queue.clone();
         tokio::spawn(async move {
             if let Err(e) = task_queue_clone.recover_tasks().await {
-                tracing::error!("恢复任务失败: {}", e);
+                tracing::error!(
+                    error = %e,
+                    message_key = "task.recovery.failed",
+                    message_params = %serde_json::json!({ "error": e.to_string() }),
+                    "Task recovery failed"
+                );
             }
             task_queue_clone.start().await;
         });
@@ -200,6 +206,20 @@ impl ApiServer {
             crate::cache::CacheManager::new(config.storage.temp_dir.clone())
                 .map_err(|e| anyhow::anyhow!("Failed to create cache manager: {}", e))?,
         );
+        let plugin_cache = Arc::new(
+            crate::plugin::PluginCache::new(config.storage.data_dir.join("plugin-cache"))
+                .map_err(|e| anyhow::anyhow!("Failed to create plugin cache: {}", e))?,
+        );
+        let plugin_host_gateway = Arc::new(crate::plugin::PluginHostGateway::new(
+            book_repo.clone(),
+            library_repo.clone(),
+            chapter_repo.clone(),
+            progress_repo.clone(),
+            task_queue.clone(),
+            plugin_manager.clone(),
+            plugin_cache.clone(),
+        ));
+        plugin_manager.set_host_gateway(&plugin_host_gateway);
 
         // Create library watcher
         let library_watcher = Arc::new(crate::core::library_watcher::LibraryWatcher::new(
@@ -212,7 +232,12 @@ impl ApiServer {
         let watcher_clone = library_watcher.clone();
         tokio::spawn(async move {
             if let Err(e) = watcher_clone.start_all().await {
-                tracing::warn!("启动库监听器失败: {}", e);
+                tracing::warn!(
+                    error = %e,
+                    message_key = "library.watcher.start_failed",
+                    message_params = %serde_json::json!({ "error": e.to_string() }),
+                    "Library watcher failed to start"
+                );
             }
         });
 
@@ -252,6 +277,8 @@ impl ApiServer {
             book_service,
             scraper_service,
             plugin_manager,
+            plugin_cache,
+            plugin_host_gateway,
             config_manager,
             task_queue,
             config: config_arc,
@@ -264,7 +291,6 @@ impl ApiServer {
             audio_streamer,
             merge_service,
             nfo_manager,
-            plugin_cache: Arc::new(crate::plugin::store::PluginCache::new()),
             active_preload_tasks: Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
@@ -340,7 +366,40 @@ impl ApiServer {
                 // Add trace ID middleware for request tracking
                 .layer(middleware::from_fn(trace_id_middleware))
                 // Add tracing for all requests
-                .layer(TraceLayer::new_for_http())
+                .layer(TraceLayer::new_for_http().on_failure(
+                    |classification: ServerErrorsFailureClass,
+                     latency: Duration,
+                     span: &tracing::Span| {
+                        let latency_ms = u64::try_from(latency.as_millis()).unwrap_or(u64::MAX);
+                        match classification {
+                            ServerErrorsFailureClass::StatusCode(status_code) => {
+                                tracing::error!(
+                                    parent: span,
+                                    status_code = status_code.as_u16(),
+                                    latency_ms = latency_ms,
+                                    message_key = "http.response.status_failed",
+                                    message_params = %serde_json::json!({
+                                        "status_code": status_code.as_u16(),
+                                        "latency_ms": latency_ms,
+                                    }),
+                                    "HTTP response returned failure status"
+                                );
+                            }
+                            ServerErrorsFailureClass::Error(error) => {
+                                tracing::error!(
+                                    parent: span,
+                                    error = %error,
+                                    latency_ms = latency_ms,
+                                    message_key = "http.response.service_failed",
+                                    message_params = %serde_json::json!({
+                                        "latency_ms": latency_ms,
+                                    }),
+                                    "HTTP service failed"
+                                );
+                            }
+                        }
+                    },
+                ))
                 // Add CORS support
                 .layer(Self::build_cors_layer(&config.security.allowed_origins)),
         );
@@ -384,13 +443,25 @@ impl ApiServer {
             port = self.config.port,
             max_connections = self.config.max_connections,
             request_timeout = self.config.request_timeout,
-            "正在启动 HTTP 服务器"
+            message_key = "system.http.starting",
+            message_params = %serde_json::json!({
+                "host": self.config.host,
+                "port": self.config.port,
+                "max_connections": self.config.max_connections,
+                "request_timeout": self.config.request_timeout,
+            }),
+            "Starting HTTP server"
         );
 
         // Create TCP listener
         let listener = tokio::net::TcpListener::bind(socket_addr).await?;
 
-        info!(addr = %socket_addr, "HTTP 服务器正在监听");
+        info!(
+            addr = %socket_addr,
+            message_key = "system.http.listening",
+            message_params = %serde_json::json!({ "addr": socket_addr.to_string() }),
+            "HTTP server listening"
+        );
 
         // Serve with graceful shutdown
         axum::serve(

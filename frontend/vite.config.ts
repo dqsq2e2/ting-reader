@@ -2,10 +2,18 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import legacy from '@vitejs/plugin-legacy'
+import { readFileSync } from 'node:fs'
 import { cspSafeLegacyPlugin } from './build/cspSafeLegacyPlugin'
+
+const packageJson = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf-8'),
+) as { version?: string }
 
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(packageJson.version ?? 'unknown'),
+  },
   plugins: [
     react(),
     legacy({
@@ -166,7 +174,7 @@ export default defineConfig({
     }
   },
   server: {
-    port: 3000,
+    port: 5173,
     host: true,
   },
   optimizeDeps: {

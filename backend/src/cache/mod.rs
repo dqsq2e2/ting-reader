@@ -151,7 +151,16 @@ impl CacheManager {
             let ext = path.extension().and_then(|s| s.to_str());
             if ext == Some("cache") || ext == Some("enc") {
                 if let Err(e) = tokio::fs::remove_file(&path).await {
-                    tracing::warn!("删除文件 {} 失败: {}", path.display(), e);
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %e,
+                        message_key = "cache.file.delete_failed",
+                        message_params = %serde_json::json!({
+                            "path": path.display().to_string(),
+                            "error": e.to_string(),
+                        }),
+                        "Failed to delete cache file"
+                    );
                 } else {
                     count += 1;
                 }
@@ -180,7 +189,16 @@ impl CacheManager {
                     && (ext == Some("cache") || ext == Some("enc"))
                 {
                     if let Err(e) = tokio::fs::remove_file(&path).await {
-                        tracing::warn!("删除孤立文件 {} 失败: {}", path.display(), e);
+                        tracing::warn!(
+                            path = %path.display(),
+                            error = %e,
+                            message_key = "cache.orphan.delete_failed",
+                            message_params = %serde_json::json!({
+                                "path": path.display().to_string(),
+                                "error": e.to_string(),
+                            }),
+                            "Failed to delete orphaned cache file"
+                        );
                     } else {
                         count += 1;
                     }
@@ -224,7 +242,16 @@ impl CacheManager {
 
             // Remove file
             if let Err(e) = tokio::fs::remove_file(&file.file_path).await {
-                tracing::warn!("删除缓存文件 {} 失败: {}", file.file_path.display(), e);
+                tracing::warn!(
+                    path = %file.file_path.display(),
+                    error = %e,
+                    message_key = "cache.file.delete_failed",
+                    message_params = %serde_json::json!({
+                        "path": file.file_path.display().to_string(),
+                        "error": e.to_string(),
+                    }),
+                    "Failed to delete cache file"
+                );
                 continue;
             }
 
@@ -233,13 +260,18 @@ impl CacheManager {
             removed_count += 1;
 
             tracing::debug!(
-                "已移除旧缓存文件: {:?} (大小: {})",
+                "Removed old cache file: {:?} (size: {})",
                 file.file_path,
                 file.file_size
             );
         }
 
-        tracing::info!("缓存清理完成。移除了 {} 个文件。", removed_count);
+        tracing::info!(
+            removed_count = removed_count,
+            message_key = "cache.cleanup.completed",
+            message_params = %serde_json::json!({ "removed_count": removed_count }),
+            "Cache cleanup completed"
+        );
         Ok(removed_count)
     }
 }

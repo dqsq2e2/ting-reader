@@ -7,8 +7,10 @@ import { Link } from 'react-router-dom';
 import { usePlayerStore } from '../../core/stores/playerStore';
 import BackButton from '../../shared/widgets/BackButton';
 import LoadingSpinner from '../../shared/ui/LoadingSpinner';
+import { useTranslation } from 'react-i18next';
 
 const FavoritesPage: React.FC = () => {
+  const { t } = useTranslation();
   const currentChapter = usePlayerStore((state) => state.currentChapter);
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,12 +35,12 @@ const FavoritesPage: React.FC = () => {
     const loadSettings = async () => {
       try {
         const settingsRes = await apiClient.get('/api/settings');
-        const settings = settingsRes.data.settingsJson || {};
-        if (settings.bookshelfCoverShape) {
-          setCoverShape(settings.bookshelfCoverShape);
+        const settings = settingsRes.data.settings_json || {};
+        if (settings.bookshelf_cover_shape) {
+          setCoverShape(settings.bookshelf_cover_shape);
         }
-        if (settings.bookshelfIconSize) {
-          setIconSize(settings.bookshelfIconSize);
+        if (settings.bookshelf_icon_size) {
+          setIconSize(settings.bookshelf_icon_size);
         }
       } catch (err) {
         console.error('加载设置失败', err);
@@ -72,9 +74,9 @@ const FavoritesPage: React.FC = () => {
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
             <Heart className="text-red-500" fill="currentColor" />
-            我的收藏
+            {t('favoritesPage.title')}
           </h1>
-          <p className="text-sm md:text-base text-slate-500 dark:text-slate-400 mt-1">您最喜爱的 {books.length} 部作品</p>
+          <p className="text-sm md:text-base text-slate-500 dark:text-slate-400 mt-1">{t('favoritesPage.subtitle', { count: books.length })}</p>
         </div>
 
       {books.length > 0 ? (
@@ -88,13 +90,13 @@ const FavoritesPage: React.FC = () => {
           <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-red-50 dark:bg-red-900/10 text-red-400 mb-6">
             <Heart size={40} />
           </div>
-          <h3 className="text-xl font-bold dark:text-white">您的收藏夹还是空的</h3>
-          <p className="text-sm text-slate-500 mt-2 mb-8">点击书籍详情页的爱心图标，即可收藏您喜欢的作品</p>
+          <h3 className="text-xl font-bold dark:text-white">{t('favoritesPage.emptyTitle')}</h3>
+          <p className="text-sm text-slate-500 mt-2 mb-8">{t('favoritesPage.emptyHint')}</p>
           <Link 
             to="/bookshelf" 
             className="px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-bold rounded-xl shadow-lg shadow-primary-500/30 transition-all"
           >
-            去书架看看
+            {t('favoritesPage.goBookshelf')}
           </Link>
         </div>
       )}

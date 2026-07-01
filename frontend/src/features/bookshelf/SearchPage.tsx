@@ -5,8 +5,10 @@ import BookCard from '../../shared/cards/BookCard';
 import { Search as SearchIcon, Loader2, BookX, ChevronLeft, ChevronRight, SlidersHorizontal, ChevronUp, ChevronDown } from 'lucide-react';
 import { usePlayerStore } from '../../core/stores/playerStore';
 import BackButton from '../../shared/widgets/BackButton';
+import { useTranslation } from 'react-i18next';
 
 const SearchPage: React.FC = () => {
+  const { t } = useTranslation();
   const [query, setQuery] = useState('');
   
   // Filter states
@@ -70,13 +72,13 @@ const SearchPage: React.FC = () => {
     const loadSettings = async () => {
       try {
         const res = await apiClient.get('/api/settings');
-        const settings = res.data.settingsJson || {};
+        const settings = res.data.settings_json || {};
         
-        if (settings.bookshelfCoverShape) {
-          setCoverShape(settings.bookshelfCoverShape);
+        if (settings.bookshelf_cover_shape) {
+          setCoverShape(settings.bookshelf_cover_shape);
         }
-        if (settings.bookshelfIconSize) {
-          setIconSize(settings.bookshelfIconSize);
+        if (settings.bookshelf_icon_size) {
+          setIconSize(settings.bookshelf_icon_size);
         }
       } catch (err) {
         console.error('加载设置失败', err);
@@ -156,7 +158,7 @@ const SearchPage: React.FC = () => {
         const params: Record<string, any> = {};
         if (debouncedQuery.trim()) params.search = debouncedQuery;
         if (selectedTag) params.tag = selectedTag;
-        if (selectedLibraryId) params.libraryId = selectedLibraryId;
+        if (selectedLibraryId) params.library_id = selectedLibraryId;
         
         const response = await apiClient.get('/api/books', { params });
         let filtered = response.data as Book[];
@@ -262,7 +264,7 @@ const SearchPage: React.FC = () => {
                   : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
               }`}
             >
-              全部
+              {t('searchPage.all')}
             </button>
             {items.map((item) => {
               const value = typeof item === 'string' ? item : item.id;
@@ -304,15 +306,15 @@ const SearchPage: React.FC = () => {
       <BackButton fallback="/bookshelf" />
 
       <div className="text-center space-y-4">
-        <h1 className="text-3xl md:text-4xl font-bold dark:text-white">发现精彩内容</h1>
-        <p className="text-sm md:text-base text-slate-500">搜索书名、作者、演播者或简介</p>
+        <h1 className="text-3xl md:text-4xl font-bold dark:text-white">{t('searchPage.title')}</h1>
+        <p className="text-sm md:text-base text-slate-500">{t('searchPage.subtitle')}</p>
         
         {/* Main Search Input */}
         <div className="w-full max-w-md sm:max-w-xl md:max-w-3xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto relative mt-8">
           <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
           <input 
             type="text"
-            placeholder="输入关键词搜索..."
+            placeholder={t('searchPage.placeholder')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="w-full pl-12 pr-12 py-3 md:py-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-lg focus:ring-2 focus:ring-primary-500 outline-none text-base md:text-lg transition-all dark:text-white"
@@ -345,7 +347,7 @@ const SearchPage: React.FC = () => {
             }`}
           >
             <SlidersHorizontal size={16} />
-            {showFilters ? '收起筛选' : '展开筛选'}
+            {t(showFilters ? 'searchPage.hideFilters' : 'searchPage.showFilters')}
             {hasActiveFilters && !showFilters && <div className="w-2 h-2 rounded-full bg-primary-500 ml-1" />}
             {showFilters ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </button>
@@ -355,52 +357,52 @@ const SearchPage: React.FC = () => {
         {showFilters && (
           <div className="w-full max-w-7xl mx-auto mt-6 p-4 sm:p-6 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm animate-in slide-in-from-top-4 duration-300">
             <div className="space-y-4 divide-y divide-slate-50 dark:divide-slate-800/50">
-              <FilterRow 
-                label="媒体库" 
-                items={libraries} 
-                selected={selectedLibraryId} 
-                onSelect={setSelectedLibraryId} 
+              <FilterRow
+                label={t('searchPage.library')}
+                items={libraries}
+                selected={selectedLibraryId}
+                onSelect={setSelectedLibraryId}
                 scrollRef={filterRowRefs.libraries}
               />
-              <FilterRow 
-                label="系列" 
-                items={allSeries.map(s => ({ id: s.id, name: s.title }))} 
-                selected={selectedSeries} 
-                onSelect={setSelectedSeries} 
+              <FilterRow
+                label={t('searchPage.series')}
+                items={allSeries.map(s => ({ id: s.id, name: s.title }))}
+                selected={selectedSeries}
+                onSelect={setSelectedSeries}
                 scrollRef={filterRowRefs.series}
               />
-              <FilterRow 
-                label="标签" 
-                items={allTags} 
-                selected={selectedTag} 
-                onSelect={setSelectedTag} 
+              <FilterRow
+                label={t('searchPage.tags')}
+                items={allTags}
+                selected={selectedTag}
+                onSelect={setSelectedTag}
                 scrollRef={filterRowRefs.tags}
               />
-              <FilterRow 
-                label="流派" 
-                items={allGenres} 
-                selected={selectedGenre} 
-                onSelect={setSelectedGenre} 
+              <FilterRow
+                label={t('searchPage.genre')}
+                items={allGenres}
+                selected={selectedGenre}
+                onSelect={setSelectedGenre}
                 scrollRef={filterRowRefs.genres}
               />
-              <FilterRow 
-                label="年份" 
-                items={allYears} 
-                selected={selectedYear} 
-                onSelect={setSelectedYear} 
+              <FilterRow
+                label={t('searchPage.year')}
+                items={allYears}
+                selected={selectedYear}
+                onSelect={setSelectedYear}
                 scrollRef={filterRowRefs.years}
               />
-              <FilterRow 
-                label="作者" 
-                items={allAuthors} 
-                selected={selectedAuthor} 
-                onSelect={setSelectedAuthor} 
+              <FilterRow
+                label={t('searchPage.author')}
+                items={allAuthors}
+                selected={selectedAuthor}
+                onSelect={setSelectedAuthor}
                 scrollRef={filterRowRefs.authors}
               />
-              <FilterRow 
-                label="演播者" 
-                items={allNarrators} 
-                selected={selectedNarrator} 
+              <FilterRow
+                label={t('searchPage.narrator')}
+                items={allNarrators}
+                selected={selectedNarrator}
                 onSelect={setSelectedNarrator} 
                 scrollRef={filterRowRefs.narrators}
               />
@@ -420,12 +422,12 @@ const SearchPage: React.FC = () => {
           <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-slate-100 dark:bg-slate-900 text-slate-400 mb-4">
             <BookX size={40} />
           </div>
-          <h3 className="text-xl font-medium dark:text-white">未找到相关结果</h3>
-          <p className="text-slate-500 mt-2">尝试调整筛选条件或搜索关键词</p>
+          <h3 className="text-xl font-medium dark:text-white">{t('searchPage.noResults')}</h3>
+          <p className="text-slate-500 mt-2">{t('searchPage.noResultsHint')}</p>
         </div>
       ) : !debouncedQuery && !hasActiveFilters && (
         <div className="py-20 text-center text-slate-400">
-          <p>输入关键词或使用上方筛选器开始探索</p>
+          <p>{t('searchPage.emptyHint')}</p>
         </div>
       )}
 

@@ -1,3 +1,7 @@
+use super::super::shared::{
+    apply_chapter_title_template, chapter_title_template_preserves_raw,
+    clean_or_preserve_chapter_title,
+};
 use super::super::{LibraryScanner, MetadataSource, ScanStatus};
 use crate::core::error::Result;
 use crate::core::nfo_manager::BookMetadata;
@@ -18,6 +22,7 @@ impl LibraryScanner {
         _task_id: Option<&str>,
         scraper_config: &crate::db::models::ScraperConfig,
         existing_info: Option<(String, i32, Option<String>)>,
+        fallback_title_override: Option<&str>,
     ) -> Result<(String, ScanStatus)> {
         // Derive title from directory name
         // Decode URL to handle percent-encoded characters (e.g. Chinese)
@@ -62,6 +67,8 @@ impl LibraryScanner {
         let mut abridged: bool = false;
         let mut json_tags: Vec<String> = Vec::new();
         let mut json_series: Vec<String> = Vec::new();
+        let mut chapter_title_template: Option<String> = None;
+        let mut ai_chapter_titles: Vec<String> = Vec::new();
         let is_cloud_mode = scraper_config.cloud_mode;
 
         // Extract metadata from WebDAV files (try multiple files if needed)
@@ -98,9 +105,9 @@ impl LibraryScanner {
                     .await;
 
                 if index == 0 {
-                    tracing::debug!("从第一个 WebDAV 文件提取元数据");
+                    tracing::debug!("Extracting metadata from the first WebDAV file");
                 } else {
-                    tracing::debug!("从第 {} 个 WebDAV 文件补充元数据", index + 1);
+                    tracing::debug!("Supplementing metadata from WebDAV file #{}", index + 1);
                 }
 
                 // 只在第一个文件或缺失时提取基本元数据
@@ -133,7 +140,7 @@ impl LibraryScanner {
                     if c.is_some() {
                         cover_url = c;
                         if index > 0 {
-                            tracing::info!("从第 {} 个 WebDAV 文件中找到封面", index + 1);
+                            tracing::info!("Found cover in WebDAV file #{}", index + 1);
                         }
                     }
                 }
@@ -144,7 +151,7 @@ impl LibraryScanner {
                     !scraper_config.extract_audio_cover || cover_url.is_some();
 
                 if has_basic_metadata && has_cover_if_needed {
-                    tracing::debug!("已找到完整 WebDAV 元数据，停止尝试其他文件");
+                    tracing::debug!("Complete WebDAV metadata found; stopping file attempts");
                     break;
                 }
             }
@@ -291,7 +298,10 @@ impl LibraryScanner {
 
         // Title Selection Logic: Priority Local Metadata > ID3 > Fallback
         if scraper_config.use_filename_as_title {
-            book_title = cleaned_dir_name.clone();
+            book_title = fallback_title_override
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(&cleaned_dir_name)
+                .to_string();
             source = MetadataSource::Fallback;
         } else if !meta_album.trim().is_empty() && !meta_album.to_lowercase().starts_with("track") {
             // Priority 1/2: metadata.json or ID3 (already merged above)
@@ -299,7 +309,10 @@ impl LibraryScanner {
             book_title = meta_album.clone();
             source = MetadataSource::FileMetadata;
         } else {
-            book_title = cleaned_dir_name.clone();
+            book_title = fallback_title_override
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(&cleaned_dir_name)
+                .to_string();
             source = MetadataSource::Fallback;
         }
 
@@ -355,8 +368,51 @@ impl LibraryScanner {
         // Run scraper if enabled and NOT manual corrected
         if !manual_corrected {
             if let Some(scraper_service) = &self.scraper_service {
+                let chapter_candidates = file_urls
+                    .iter()
+                    .enumerate()
+                    .map(|(index, file_url)| {
+                        let decoded_file_url = self.decode_url_path(file_url);
+                        let filename = decoded_file_url
+                            .split('/')
+                            .last()
+                            .unwrap_or("chapter")
+                            .to_string();
+                        let title = filename
+                            .rsplit_once('.')
+                            .map(|(stem, _)| stem)
+                            .filter(|stem| !stem.is_empty())
+                            .unwrap_or(&filename)
+                            .to_string();
+
+                        serde_json::json!({
+                            "index": index + 1,
+                            "filename": filename,
+                            "title": title,
+                            "path": file_url,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let scrape_context = serde_json::json!({
+                    "library_type": "webdav",
+                    "directory": dir_url,
+                    "directory_name": dir_name_title,
+                    "chapters": chapter_candidates,
+                    "current_metadata": {
+                        "title": book.title,
+                        "author": book.author,
+                        "narrator": book.narrator,
+                        "cover_url": book.cover_url,
+                        "description": book.description,
+                        "tags": book.tags,
+                    },
+                });
                 match scraper_service
-                    .scrape_book_metadata(&book_title, scraper_config)
+                    .scrape_book_metadata_with_context(
+                        &book_title,
+                        scraper_config,
+                        Some(scrape_context),
+                    )
                     .await
                 {
                     Ok(detail) => {
@@ -429,6 +485,10 @@ impl LibraryScanner {
                         }
                         if detail.abridged {
                             abridged = true;
+                        }
+                        chapter_title_template = detail.chapter_title_template;
+                        if !detail.chapter_titles.is_empty() {
+                            ai_chapter_titles = detail.chapter_titles;
                         }
                     }
                     Err(e) => {
@@ -532,6 +592,8 @@ impl LibraryScanner {
         } else {
             false
         };
+        let preserve_raw_chapter_titles =
+            chapter_title_template_preserves_raw(chapter_title_template.as_deref());
 
         for (index, file_url) in file_urls.iter().enumerate() {
             // Decode filename for title
@@ -541,6 +603,10 @@ impl LibraryScanner {
                 .last()
                 .unwrap_or("chapter")
                 .to_string();
+            let ai_chapter_title = ai_chapter_titles
+                .get(index)
+                .map(|title| title.trim())
+                .filter(|title| !title.is_empty());
 
             // Regex extraction
             let mut regex_idx = None;
@@ -633,9 +699,18 @@ impl LibraryScanner {
                 (filename, true)
             };
 
-            let (final_title, is_extra) = if should_clean_title {
-                self.text_cleaner
-                    .clean_chapter_title(&raw_title, book.title.as_deref())
+            let (final_title, is_extra) = if let Some(ai_title) = ai_chapter_title {
+                let (_, is_extra) = self
+                    .text_cleaner
+                    .clean_chapter_title(ai_title, book.title.as_deref());
+                (ai_title.to_string(), is_extra)
+            } else if should_clean_title {
+                clean_or_preserve_chapter_title(
+                    self.text_cleaner.as_ref(),
+                    &raw_title,
+                    book.title.as_deref(),
+                    preserve_raw_chapter_titles,
+                )
             } else {
                 let (_, is_extra) = self
                     .text_cleaner
@@ -652,6 +727,12 @@ impl LibraryScanner {
             };
 
             let chapter_idx = regex_idx.unwrap_or(counter_idx);
+            let final_title = apply_chapter_title_template(
+                chapter_title_template.as_deref(),
+                book.title.as_deref(),
+                chapter_idx,
+                &final_title,
+            );
 
             let chapter = crate::db::models::Chapter {
                 id: Uuid::new_v4().to_string(),

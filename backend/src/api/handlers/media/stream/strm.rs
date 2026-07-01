@@ -29,13 +29,26 @@ pub(super) async fn handle_strm_stream(
             .map_err(|e| TingError::IoError(e))?
             .trim()
             .to_string()
-    } else {
+    } else if library.library_type == "webdav" {
         // WebDAV library
         let (mut reader, _) = state
             .storage_service
             .get_webdav_reader(&library, &chapter.path, None, state.encryption_key.as_ref())
             .await
             .map_err(|e| TingError::NotFound(format!("Failed to read strm file: {}", e)))?;
+
+        let mut content = String::new();
+        reader
+            .read_to_string(&mut content)
+            .await
+            .map_err(|e| TingError::IoError(e))?;
+        content.trim().to_string()
+    } else {
+        let (mut reader, _) = state
+            .storage_service
+            .get_http_reader(&chapter.path, None)
+            .await
+            .map_err(|e| TingError::NotFound(format!("Failed to read strm URL: {}", e)))?;
 
         let mut content = String::new();
         reader
@@ -52,7 +65,7 @@ pub(super) async fn handle_strm_stream(
         )));
     }
 
-    tracing::info!("处理 strm 文件: {}", url);
+    tracing::info!("Handling strm file: {}", url);
 
     // Handle Transcoding Request for .strm files
     // Frontend will request transcoding via &transcode=mp3 when playback fails
@@ -60,7 +73,7 @@ pub(super) async fn handle_strm_stream(
     if let Some(format) = &params.transcode {
         // HLS transcoding for strm files is handled by the general HLS handler
         if format == "hls" {
-            tracing::info!("strm 文件请求 HLS 转码，转交 HLS handler");
+            tracing::info!("strm file requested HLS transcoding; delegating to HLS handler");
             return handle_hls_request(
                 state,
                 chapter,
@@ -72,7 +85,7 @@ pub(super) async fn handle_strm_stream(
             .await;
         }
 
-        tracing::info!("对 strm URL 进行转码: {} -> {}", url, format);
+        tracing::info!("Transcoding strm URL: {} -> {}", url, format);
 
         let content_type = match format.as_str() {
             "mp3" => "audio/mpeg",
@@ -84,40 +97,21 @@ pub(super) async fn handle_strm_stream(
             }
         };
 
-        // Get FFmpeg path and derive FFprobe path (same directory)
-        let ffmpeg_path = state
+        let ffmpeg_tools = state
             .plugin_manager
-            .get_ffmpeg_path()
+            .get_ffmpeg_tool_paths()
             .await
             .ok_or_else(|| {
                 TingError::IoError(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    "FFmpeg plugin binary not found",
+                    "FFmpeg plugin binaries not found",
                 ))
             })?;
-
-        let ffprobe_path = {
-            let ffmpeg_dir = std::path::Path::new(&ffmpeg_path).parent().ok_or_else(|| {
-                TingError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Cannot determine FFmpeg directory",
-                ))
-            })?;
-
-            // ⭐ 跨平台：Windows 使用 ffprobe.exe，Linux/Mac 使用 ffprobe
-            let ffprobe_name = if cfg!(target_os = "windows") {
-                "ffprobe.exe"
-            } else {
-                "ffprobe"
-            };
-
-            ffmpeg_dir.join(ffprobe_name).to_string_lossy().to_string()
-        };
 
         // 优先使用数据库中的时长，避免重复调用 FFprobe
         let duration_seconds = if let Some(db_duration) = chapter.duration {
             if db_duration > 0 {
-                tracing::debug!("使用数据库中的时长: {} 秒", db_duration);
+                tracing::debug!("Using database duration: {} seconds", db_duration);
                 Some(db_duration as f64)
             } else {
                 None
@@ -128,12 +122,12 @@ pub(super) async fn handle_strm_stream(
 
         // 只有在数据库中没有时长时才使用 FFprobe
         let duration_seconds = if duration_seconds.is_none() {
-            tracing::info!("数据库中无时长信息，使用 FFprobe 获取音频时长...");
+            tracing::info!("No duration in database; using FFprobe to get audio duration...");
 
             // Add delay to avoid overwhelming the server
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
-            let duration_output = Command::new(&ffprobe_path)
+            let duration_output = Command::new(&ffmpeg_tools.ffprobe)
                 .arg("-v")
                 .arg("error")
                 .arg("-show_entries")
@@ -150,14 +144,17 @@ pub(super) async fn handle_strm_stream(
                     let dur = duration_str.trim().parse::<f64>().ok();
 
                     if let Some(d) = dur {
-                        tracing::info!("FFprobe 获取到时长: {:.2} 秒", d);
+                        tracing::info!("FFprobe detected duration: {:.2} seconds", d);
 
                         // 更新数据库中的时长
                         if let Ok(Some(mut chapter_record)) =
                             state.chapter_repo.find_by_id(&chapter_id).await
                         {
                             let new_duration = d.round() as i32;
-                            tracing::info!("更新章节时长到数据库: {} 秒", new_duration);
+                            tracing::info!(
+                                "Updated chapter duration in database: {} seconds",
+                                new_duration
+                            );
                             chapter_record.duration = Some(new_duration);
                             let _ = state.chapter_repo.update(&chapter_record).await;
                         }
@@ -165,31 +162,37 @@ pub(super) async fn handle_strm_stream(
 
                     dur
                 } else {
+                    let error = String::from_utf8_lossy(&output.stderr);
                     tracing::warn!(
-                        "FFprobe 获取时长失败: {}",
-                        String::from_utf8_lossy(&output.stderr)
+                        message_key = "ffprobe.duration_failed",
+                        message_params = %serde_json::json!({ "error": error.to_string() }),
+                        error = %error,
+                        "FFprobe duration detection failed"
                     );
                     None
                 }
             } else {
-                tracing::warn!("无法运行 FFprobe");
+                tracing::warn!(message_key = "ffprobe.run_failed", "Failed to run FFprobe");
                 None
             }
         } else {
             duration_seconds
         };
 
-        tracing::info!("使用 FFmpeg 直接从 URL 读取: {}", ffmpeg_path);
+        tracing::info!(
+            "Using FFmpeg to read directly from URL: {}",
+            ffmpeg_tools.ffmpeg
+        );
 
         // Build FFmpeg command to transcode directly from URL
         // This allows seeking support
-        let mut cmd = Command::new(&ffmpeg_path);
+        let mut cmd = Command::new(&ffmpeg_tools.ffmpeg);
         cmd.arg("-y").arg("-loglevel").arg("warning");
 
         // Add seek parameter if present (must be before -i for input seeking)
         if let Some(seek_time) = &params.seek {
             cmd.arg("-ss").arg(seek_time);
-            tracing::info!("Seek 到位置: {}", seek_time);
+            tracing::info!("Seeking to position: {}", seek_time);
         }
 
         // Use URL as input directly (FFmpeg will handle HTTP/HTTPS)
@@ -223,7 +226,7 @@ pub(super) async fn handle_strm_stream(
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
-        tracing::info!("启动 FFmpeg 进程（直接从 URL 读取）...");
+        tracing::info!("Starting FFmpeg process reading directly from URL...");
 
         // Spawn FFmpeg process
         let mut child = cmd.spawn().map_err(|e| TingError::IoError(e))?;
@@ -331,10 +334,10 @@ pub(super) async fn handle_strm_stream(
             })
             .unwrap_or(false);
         if !supports_range {
-            tracing::info!("上游不支持 Range，Safari/iOS 走代理");
+            tracing::info!("Upstream does not support Range; Safari/iOS will use proxy");
             true
         } else {
-            tracing::info!("上游支持 Range，Safari/iOS 走 302");
+            tracing::info!("Upstream supports Range; Safari/iOS will use 302 redirect");
             false
         }
     } else {
@@ -345,7 +348,7 @@ pub(super) async fn handle_strm_stream(
         // Proxy the request through our server:
         // - Auth URLs: strip credentials from URL, avoid CORS issues
         // - Safari/iOS + no Range: forward Range headers, add Accept-Ranges for seeking
-        tracing::info!("代理 strm URL");
+        tracing::info!("Proxying strm URL");
 
         let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
 
@@ -469,7 +472,7 @@ pub(super) async fn handle_strm_stream(
         }
     } else {
         // 302 redirect (zero bandwidth cost)
-        tracing::info!("重定向到 strm URL");
+        tracing::info!("Redirecting to strm URL");
         return Ok((StatusCode::FOUND, [(header::LOCATION, url)], Body::empty()).into_response());
     }
 }

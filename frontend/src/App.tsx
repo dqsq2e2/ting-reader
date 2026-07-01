@@ -8,6 +8,7 @@ import BookDetailPage from './features/bookshelf/BookDetailPage';
 import SeriesDetailPage from './features/bookshelf/SeriesDetailPage';
 import SearchPage from './features/bookshelf/SearchPage';
 import MyPage from './features/mine/MyPage';
+import AboutPage from './features/mine/AboutPage';
 import FavoritesPage from './features/mine/FavoritesPage';
 import HistoryPage from './features/mine/HistoryPage';
 import PersonalizationPage from './features/mine/PersonalizationPage';
@@ -64,7 +65,7 @@ function App() {
               <NotificationSettingsPage />
             </AdminRoute>
           } />
-          <Route path="about" element={<Navigate to="/mine" replace />} />
+          <Route path="about" element={<AboutPage />} />
           <Route path="settings" element={<Navigate to="/personalization" replace />} />
           <Route path="downloads" element={<DownloadsPage />} />
           <Route path="statistics" element={

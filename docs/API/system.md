@@ -286,7 +286,7 @@
 ```json
 {
   "version": "v1.4.4",
-  "downloadUrl": "https://...",
+  "download_url": "https://...",
   "size": "string",
   "date": "RFC3339"
 }

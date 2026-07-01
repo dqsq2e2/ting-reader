@@ -1,11 +1,11 @@
 mod chapters;
 mod metadata;
 
-use super::{LibraryScanner, ScanResult, ScanStatus};
+use super::{LibraryScanner, MetadataSource, ScanResult, ScanStatus};
 use crate::core::error::Result;
 use crate::core::library_scanner::shared::{
-    infer_series_directories, parse_chapter_range_dir_name, select_mergeable_range_group,
-    ChapterRangeDir, SeriesDirectoryCandidate,
+    infer_series_directories, parse_chapter_range_dir_name, select_mergeable_range_groups,
+    ChapterRangeDir, CoalescedRangeDirs, SeriesDirectoryCandidate,
 };
 use crate::core::nfo_manager::BookMetadata;
 use crate::db::repository::Repository;
@@ -29,7 +29,7 @@ impl LibraryScanner {
         let mut scan_result = ScanResult::default();
         scan_result.start_time = Some(std::time::Instant::now());
 
-        self.update_progress(task_id, "正在扫描本地目录...".to_string())
+        self.update_progress_key(task_id, "scan.local.scanning", serde_json::json!({}))
             .await;
 
         // Get all supported extensions dynamically
@@ -38,7 +38,29 @@ impl LibraryScanner {
         // 1. Recursively find all audio files and group them by directory
         let mut dir_groups: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
 
-        for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+        let mut walk_errors = 0usize;
+        for entry in WalkDir::new(path).follow_links(true).into_iter() {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(e) => {
+                    walk_errors += 1;
+                    let error_path = e
+                        .path()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|| path.display().to_string());
+                    warn!(
+                        path = %error_path,
+                        error = %e,
+                        "Failed to read local library path during scan"
+                    );
+                    if scan_result.errors.len() < 20 {
+                        scan_result
+                            .errors
+                            .push(format!("Failed to read {}: {}", error_path, e));
+                    }
+                    continue;
+                }
+            };
             let entry_path = entry.path();
             if entry_path.is_file() {
                 if let Some(ext) = entry_path.extension() {
@@ -54,10 +76,12 @@ impl LibraryScanner {
                 }
             }
         }
+        scan_result.failed_count += walk_errors;
 
-        self.update_progress(
+        self.update_progress_key(
             task_id,
-            format!("找到 {} 个包含音频文件的目录", dir_groups.len()),
+            "scan.audio_dirs.found",
+            serde_json::json!({ "count": dir_groups.len() }),
         )
         .await;
 
@@ -111,12 +135,14 @@ impl LibraryScanner {
                 .and_then(|n| n.to_str())
                 .unwrap_or("Unknown");
 
-            self.update_progress(
+            self.update_progress_key(
                 task_id,
-                format!(
-                    "处理中 ({}/{}): {}",
-                    processed_count, total_groups, dir_name
-                ),
+                "scan.item.processing",
+                serde_json::json!({
+                    "current": processed_count,
+                    "total": total_groups,
+                    "name": dir_name,
+                }),
             )
             .await;
 
@@ -136,7 +162,7 @@ impl LibraryScanner {
 
             if existing_info.is_none() {
                 if let Some(child_dirs) = coalesced_range_dirs.get(&dir) {
-                    for child_dir in child_dirs {
+                    for child_dir in &child_dirs.child_dirs {
                         if let Some(info) = book_path_map.get(child_dir).cloned() {
                             existing_info = Some(info);
                             break;
@@ -155,6 +181,9 @@ impl LibraryScanner {
                     scraper_config,
                     &manual_corrected_patterns,
                     existing_info,
+                    coalesced_range_dirs
+                        .get(&dir)
+                        .and_then(|range_dirs| range_dirs.title_override.as_deref()),
                 )
                 .await
             {
@@ -180,7 +209,7 @@ impl LibraryScanner {
                         }
                     }
                     if let Some(child_dirs) = coalesced_range_dirs.get(&dir) {
-                        for child_dir in child_dirs {
+                        for child_dir in &child_dirs.child_dirs {
                             if let Some((child_book_id, manual_corrected, _)) =
                                 book_path_map.get(child_dir)
                             {
@@ -281,6 +310,7 @@ impl LibraryScanner {
         scraper_config: &crate::db::models::ScraperConfig,
         manual_corrected_patterns: &[(String, String)],
         existing_info: Option<(String, i32, Option<String>)>,
+        fallback_title_override: Option<&str>,
     ) -> Result<(String, ScanStatus)> {
         // Log scraper config for debugging
         debug!(
@@ -306,6 +336,8 @@ impl LibraryScanner {
                                 task_id,
                                 scraper_config.use_filename_as_title,
                                 scraper_config.cloud_mode,
+                                None,
+                                None,
                                 None,
                             )
                             .await?;
@@ -367,6 +399,8 @@ impl LibraryScanner {
                     task_id,
                     scraper_config.use_filename_as_title,
                     scraper_config.cloud_mode,
+                    None,
+                    None,
                     None,
                 )
                 .await?;
@@ -479,13 +513,21 @@ impl LibraryScanner {
         }
 
         // 3. Extract Metadata
-        let (scanned_meta, _source) = self
-            .extract_final_metadata(dir, files, scraper_config)
+        let (scanned_meta, source) = self
+            .extract_final_metadata(dir, files, scraper_config, fallback_title_override)
             .await;
 
-        let mut title = scanned_meta
-            .title
-            .unwrap_or_else(|| "Unknown Book".to_string());
+        let mut title = scanned_meta.title.unwrap_or_else(|| {
+            fallback_title_override
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("Unknown Book")
+                .to_string()
+        });
+        if let Some(fallback_title) = fallback_title_override {
+            if !fallback_title.trim().is_empty() && source == MetadataSource::Fallback {
+                title = fallback_title.to_string();
+            }
+        }
         let mut author = scanned_meta.author;
         let mut narrator = scanned_meta.narrator;
         let mut description = scanned_meta.description;
@@ -506,6 +548,8 @@ impl LibraryScanner {
         let json_tags = scanned_meta.json_tags;
         let json_series = scanned_meta.json_series;
         let json_chapters = scanned_meta.json_chapters;
+        let chapter_title_template = scanned_meta.chapter_title_template;
+        let chapter_titles = scanned_meta.chapter_titles;
 
         if author.is_none() {
             author = Some("Unknown".to_string());
@@ -635,6 +679,12 @@ impl LibraryScanner {
                 scraper_config.use_filename_as_title,
                 scraper_config.cloud_mode,
                 json_chapters,
+                chapter_title_template.as_deref(),
+                if chapter_titles.is_empty() {
+                    None
+                } else {
+                    Some(chapter_titles.as_slice())
+                },
             )
             .await?;
 
@@ -829,7 +879,17 @@ impl LibraryScanner {
                 series_titles,
             );
             if let Err(e) = crate::core::metadata_writer::write_metadata_json(dir, &metadata_json) {
-                warn!(target: "audit::metadata", "写入 metadata.json 失败 (目录: {:?}): {}", dir, e);
+                warn!(
+                    target: "audit::metadata",
+                    path = %dir.display(),
+                    error = %e,
+                    message_key = "metadata.json.write_failed",
+                    message_params = %serde_json::json!({
+                        "path": dir.display().to_string(),
+                        "error": e.to_string(),
+                    }),
+                    "Failed to write metadata.json"
+                );
             } else {
                 debug!("Successfully wrote metadata.json to: {:?}", dir);
             }
@@ -894,7 +954,7 @@ fn coalesce_local_range_directory_groups(
     mut dir_groups: HashMap<PathBuf, Vec<PathBuf>>,
 ) -> (
     HashMap<PathBuf, Vec<PathBuf>>,
-    HashMap<PathBuf, Vec<PathBuf>>,
+    HashMap<PathBuf, CoalescedRangeDirs<PathBuf>>,
 ) {
     let mut candidates: HashMap<PathBuf, Vec<(PathBuf, ChapterRangeDir)>> = HashMap::new();
 
@@ -925,32 +985,49 @@ fn coalesce_local_range_directory_groups(
             .unwrap_or("");
 
         let ranges: Vec<ChapterRangeDir> = entries.iter().map(|(_, range)| range.clone()).collect();
-        let Some(indices) = select_mergeable_range_group(parent_name, &ranges) else {
-            continue;
-        };
 
-        let mut selected: Vec<(PathBuf, ChapterRangeDir)> = indices
-            .into_iter()
-            .map(|index| entries[index].clone())
-            .collect();
-        selected.sort_by_key(|(_, range)| (range.start, range.end));
+        for group in select_mergeable_range_groups(parent_name, &ranges) {
+            let mut selected: Vec<(PathBuf, ChapterRangeDir)> = group
+                .indices
+                .into_iter()
+                .map(|index| entries[index].clone())
+                .collect();
+            selected.sort_by_key(|(_, range)| (range.start, range.end));
 
-        let child_dirs: Vec<PathBuf> = selected
-            .iter()
-            .map(|(child_dir, _)| child_dir.clone())
-            .collect();
+            let Some(first_child_dir) = selected.first().map(|(child_dir, _)| child_dir.clone())
+            else {
+                continue;
+            };
 
-        for child_dir in &child_dirs {
-            if let Some(mut child_files) = dir_groups.remove(child_dir) {
-                dir_groups
-                    .entry(parent.clone())
-                    .or_default()
-                    .append(&mut child_files);
+            let target_dir = if group.merge_into_parent {
+                parent.clone()
+            } else {
+                first_child_dir
+            };
+
+            let child_dirs: Vec<PathBuf> = selected
+                .iter()
+                .map(|(child_dir, _)| child_dir.clone())
+                .collect();
+
+            for child_dir in &child_dirs {
+                if let Some(mut child_files) = dir_groups.remove(child_dir) {
+                    dir_groups
+                        .entry(target_dir.clone())
+                        .or_default()
+                        .append(&mut child_files);
+                }
             }
-        }
 
-        if !child_dirs.is_empty() {
-            coalesced_range_dirs.insert(parent, child_dirs);
+            if !child_dirs.is_empty() {
+                coalesced_range_dirs.insert(
+                    target_dir,
+                    CoalescedRangeDirs {
+                        child_dirs,
+                        title_override: group.title,
+                    },
+                );
+            }
         }
     }
 

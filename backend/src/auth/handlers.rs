@@ -44,18 +44,25 @@ fn record_login_success(
 ) {
     tracing::info!(
         target: "audit::login",
+        message_key = "auth.login.success",
+        message_params = %serde_json::json!({
+            "username": user.username,
+            "method": login_method,
+            "device": request_info.device,
+            "real_ip": request_info.real_ip,
+        }),
         user_id = %user.id,
         username = %user.username,
         real_ip = %request_info.real_ip,
         user_agent = %request_info.user_agent,
         device = %request_info.device,
         login_method = %login_method,
-        "用户 '{}' 登录成功",
-        user.username
+        "User login succeeded"
     );
 
-    crate::core::notifications::dispatch_notification_event(
+    crate::core::notifications::dispatch_application_event(
         state.notification_repo.clone(),
+        state.plugin_manager.clone(),
         crate::core::notifications::NotificationEventPayload::new(
             "user.login",
             "用户登录",
@@ -116,12 +123,19 @@ async fn user_from_token(
         Err(error) => {
             tracing::warn!(
                 target: "audit::login",
+                message_key = "auth.login.failed.invalid_token",
+                message_params = %serde_json::json!({
+                    "method": login_method,
+                    "device": request_info.device,
+                    "real_ip": request_info.real_ip,
+                    "error": error.to_string(),
+                }),
                 real_ip = %request_info.real_ip,
                 user_agent = %request_info.user_agent,
                 device = %request_info.device,
                 login_method = %login_method,
                 error = %error,
-                "JWT Token 登录失败：令牌验证失败"
+                "JWT token login failed: token validation failed"
             );
             return Err(error);
         }
@@ -132,12 +146,19 @@ async fn user_from_token(
         None => {
             tracing::warn!(
                 target: "audit::login",
+                message_key = "auth.login.failed.user_missing",
+                message_params = %serde_json::json!({
+                    "user_id": claims.user_id,
+                    "method": login_method,
+                    "device": request_info.device,
+                    "real_ip": request_info.real_ip,
+                }),
                 user_id = %claims.user_id,
                 real_ip = %request_info.real_ip,
                 user_agent = %request_info.user_agent,
                 device = %request_info.device,
                 login_method = %login_method,
-                "JWT Token 登录失败：用户不存在"
+                "JWT token login failed: user does not exist"
             );
             Err(TingError::AuthenticationError("用户不存在".to_string()))
         }
@@ -180,7 +201,7 @@ pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
 ) -> Result<impl IntoResponse> {
-    tracing::debug!(username = %req.username, "尝试注册新用户");
+    tracing::debug!(username = %req.username, "Registering user");
 
     // Check if this is the first user (will be admin)
     let user_count = state.user_repo.count().await?;
@@ -206,12 +227,29 @@ pub async fn register(
         Ok(_) => {
             tracing::info!(
                 target: "audit::login",
-                "用户 '{}' 注册成功, 角色: {}", req.username, role
+                message_key = "auth.register.success",
+                message_params = %serde_json::json!({
+                    "username": req.username,
+                    "role": role,
+                }),
+                username = %req.username,
+                role = %role,
+                "User registered"
             );
             Ok((StatusCode::CREATED, Json(SuccessResponse { success: true })))
         }
         Err(e) => {
-            tracing::warn!(target: "audit::login", "用户 '{}' 注册失败: {}", req.username, e);
+            tracing::warn!(
+                target: "audit::login",
+                message_key = "auth.register.failed",
+                message_params = %serde_json::json!({
+                    "username": req.username,
+                    "error": e.to_string(),
+                }),
+                username = %req.username,
+                error = %e,
+                "User registration failed"
+            );
             Err(TingError::InvalidRequest("用户名已存在".to_string()))
         }
     }
@@ -226,7 +264,7 @@ pub async fn login(
 ) -> Result<impl IntoResponse> {
     let peer_addr = connect_info.map(|ConnectInfo(addr)| addr);
     let request_info = request_info_from_headers(&headers, peer_addr);
-    tracing::debug!(username = %req.username, "尝试登录");
+    tracing::debug!(username = %req.username, "Attempting login");
 
     // Find user by username
     let user = match state.user_repo.find_by_username(&req.username).await? {
@@ -234,12 +272,17 @@ pub async fn login(
         None => {
             tracing::warn!(
                 target: "audit::login",
+                message_key = "auth.login.failed.user_not_found",
+                message_params = %serde_json::json!({
+                    "username": req.username,
+                    "device": request_info.device,
+                    "real_ip": request_info.real_ip,
+                }),
                 username = %req.username,
                 real_ip = %request_info.real_ip,
                 user_agent = %request_info.user_agent,
                 device = %request_info.device,
-                "用户 '{}' 登录失败：用户不存在",
-                req.username
+                "User login failed: user not found"
             );
             return Err(TingError::AuthenticationError(
                 "用户名或密码错误".to_string(),
@@ -252,13 +295,18 @@ pub async fn login(
     if !is_valid {
         tracing::warn!(
             target: "audit::login",
+            message_key = "auth.login.failed.bad_password",
+            message_params = %serde_json::json!({
+                "username": req.username,
+                "device": request_info.device,
+                "real_ip": request_info.real_ip,
+            }),
             user_id = %user.id,
             username = %req.username,
             real_ip = %request_info.real_ip,
             user_agent = %request_info.user_agent,
             device = %request_info.device,
-            "用户 '{}' 登录失败：密码错误",
-            req.username
+            "User login failed: bad password"
         );
         return Err(TingError::AuthenticationError(
             "用户名或密码错误".to_string(),
@@ -297,11 +345,16 @@ pub async fn token_login(
     if token.is_empty() {
         tracing::warn!(
             target: "audit::login",
+            message_key = "auth.login.failed.empty_token",
+            message_params = %serde_json::json!({
+                "device": request_info.device,
+                "real_ip": request_info.real_ip,
+            }),
             real_ip = %request_info.real_ip,
             user_agent = %request_info.user_agent,
             device = %request_info.device,
             login_method = "jwt_token",
-            "JWT Token 登录失败：令牌为空"
+            "JWT token login failed: token is empty"
         );
         return Err(TingError::AuthenticationError(
             "JWT Token 不能为空".to_string(),
@@ -344,10 +397,14 @@ pub async fn session_restore(
     } else {
         tracing::debug!(
             target: "audit::login",
+            message_key = "auth.login.session_restore.duplicate_skipped",
+            message_params = %serde_json::json!({
+                "username": user.username,
+            }),
             user_id = %user.id,
             username = %user.username,
             login_method = "session_restore",
-            "跳过重复的浏览器会话恢复登录日志"
+            "Skipped duplicate browser session restore login log"
         );
     }
 
@@ -362,7 +419,7 @@ pub async fn get_me(
     State(state): State<AppState>,
     user: crate::auth::middleware::AuthUser,
 ) -> Result<Json<UserInfo>> {
-    tracing::debug!(user_id = %user.id, username = %user.username, "获取当前用户信息");
+    tracing::debug!(user_id = %user.id, username = %user.username, "Fetching current user");
 
     // Fetch full user info from database
     let db_user = state
@@ -384,7 +441,7 @@ pub async fn update_me(
     user: crate::auth::middleware::AuthUser,
     Json(req): Json<UpdateUserRequest>,
 ) -> Result<Json<UserInfo>> {
-    tracing::info!(user_id = %user.id, username = %user.username, "更新当前用户信息");
+    tracing::info!(user_id = %user.id, username = %user.username, "Updating current user");
 
     // Fetch current user
     let mut db_user = state
@@ -410,7 +467,7 @@ pub async fn update_me(
     // Save updated user
     state.user_repo.update(&db_user).await?;
 
-    tracing::info!(user_id = %user.id, "用户信息更新成功");
+    tracing::info!(user_id = %user.id, "User info updated");
 
     Ok(Json(UserInfo {
         id: db_user.id,

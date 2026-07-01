@@ -31,7 +31,10 @@ impl MasterKeyManager {
 
         // 2. 机器标识符（支持环境变量覆盖）
         let machine_id = if let Ok(env_machine_id) = std::env::var("TING_MACHINE_ID") {
-            tracing::info!("使用环境变量中的机器 ID");
+            tracing::info!(
+                message_key = "security.machine_id.env",
+                "Using machine ID from environment"
+            );
             env_machine_id.into_bytes()
         } else {
             Self::get_machine_id()?
@@ -48,7 +51,10 @@ impl MasterKeyManager {
         let mut key = [0u8; 32];
         key.copy_from_slice(&result);
 
-        tracing::info!("主密钥已基于机器特征自动派生（版本无关）");
+        tracing::info!(
+            message_key = "security.master_key.derived",
+            "Master key derived from machine features"
+        );
         Ok(key)
     }
 
@@ -62,7 +68,10 @@ impl MasterKeyManager {
     fn get_machine_id() -> Result<Vec<u8>> {
         // 方法 1: 环境变量（容器部署推荐）
         if let Ok(env_id) = std::env::var("TING_MACHINE_ID") {
-            tracing::info!("使用环境变量中的机器 ID");
+            tracing::info!(
+                message_key = "security.machine_id.env",
+                "Using machine ID from environment"
+            );
             return Ok(env_id.into_bytes());
         }
 
@@ -178,7 +187,14 @@ impl MasterKeyManager {
                 if let Ok(content) = std::fs::read_to_string(path) {
                     let id = content.trim();
                     if !id.is_empty() {
-                        tracing::info!("使用现有机器 ID: {}", path.display());
+                        tracing::info!(
+                            path = %path.display(),
+                            message_key = "security.machine_id.existing",
+                            message_params = %serde_json::json!({
+                                "path": path.display().to_string(),
+                            }),
+                            "Using existing machine ID"
+                        );
                         return Ok(id.as_bytes().to_vec());
                     }
                 }
@@ -193,8 +209,12 @@ impl MasterKeyManager {
             if std::fs::create_dir_all(parent).is_ok() {
                 if std::fs::write(&data_machine_id_path, &machine_id).is_ok() {
                     tracing::info!(
-                        "已创建新的机器 ID（数据目录）: {}",
-                        data_machine_id_path.display()
+                        path = %data_machine_id_path.display(),
+                        message_key = "security.machine_id.created_data",
+                        message_params = %serde_json::json!({
+                            "path": data_machine_id_path.display().to_string(),
+                        }),
+                        "Created new machine ID in data directory"
                     );
                     return Ok(machine_id.as_bytes().to_vec());
                 }
@@ -206,7 +226,14 @@ impl MasterKeyManager {
             if let Some(parent) = user_path.parent() {
                 if std::fs::create_dir_all(parent).is_ok() {
                     if std::fs::write(&user_path, &machine_id).is_ok() {
-                        tracing::info!("已创建新的机器 ID（用户目录）: {}", user_path.display());
+                        tracing::info!(
+                            path = %user_path.display(),
+                            message_key = "security.machine_id.created_user",
+                            message_params = %serde_json::json!({
+                                "path": user_path.display().to_string(),
+                            }),
+                            "Created new machine ID in user directory"
+                        );
                         return Ok(machine_id.as_bytes().to_vec());
                     }
                 }
@@ -214,7 +241,10 @@ impl MasterKeyManager {
         }
 
         // 如果都失败了，返回基于UUID的临时ID（不推荐，但至少能工作）
-        tracing::warn!("无法持久化机器 ID，使用临时标识符");
+        tracing::warn!(
+            message_key = "security.machine_id.temporary",
+            "Could not persist machine ID; using temporary identifier"
+        );
         Ok(machine_id.as_bytes().to_vec())
     }
 
@@ -253,7 +283,10 @@ impl MasterKeyManager {
         hasher.update(&std::process::id().to_le_bytes());
 
         let result = hasher.finalize();
-        tracing::warn!("使用系统信息组合生成机器标识（不够稳定）");
+        tracing::warn!(
+            message_key = "security.machine_id.system_fallback",
+            "Using system information fallback for machine ID"
+        );
         Ok(result.to_vec())
     }
 

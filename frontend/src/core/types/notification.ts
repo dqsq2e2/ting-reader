@@ -12,7 +12,7 @@ export interface NotificationWebhook {
   events: string[];
   secret?: string;
   headers: Record<string, string>;
-  bodyTemplate: string;
-  createdAt: string;
-  updatedAt: string;
+  body_template: string;
+  created_at: string;
+  updated_at: string;
 }

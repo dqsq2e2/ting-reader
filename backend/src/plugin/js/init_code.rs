@@ -108,8 +108,8 @@ pub fn generate_init_code(
 
             // Configuration access
             getConfig: (key) => {{
-                const config = {config_json};
-                return config[key] || null;
+                const config = globalThis.Ting?.config || {{}};
+                return config[key] ?? null;
             }},
 
             // Event bus (placeholder)
@@ -123,7 +123,58 @@ pub fn generate_init_code(
                     return `sub_{plugin_name}_${{eventType}}`;
                 }},
             }},
+
+            // Host context access. Server-side JS plugins receive a per-invocation
+            // context when the caller goes through capability/plugin-route bridges.
+            host: {{
+                getContext: () => globalThis._ting_context || null,
+                invoke: async (method, params = {{}}) => {{
+                    if (!method || typeof method !== 'string') {{
+                        throw new Error("Ting.host.invoke requires a method string");
+                    }}
+                    return await Deno.core.ops.op_host_invoke(method, params ?? {{}});
+                }},
+            }},
+
+            npm: {{
+                require: (name) => globalThis.require(name),
+            }},
         }};
+
+        const __tingModuleCache = new Map();
+        function __tingRequire(request, parentPath) {{
+            if (!request || typeof request !== 'string') {{
+                throw new Error("require() needs a module name");
+            }}
+            const moduleInfo = Deno.core.ops.op_require_module(request, parentPath || "");
+            if (__tingModuleCache.has(moduleInfo.id)) {{
+                return __tingModuleCache.get(moduleInfo.id).exports;
+            }}
+
+            const module = {{
+                id: moduleInfo.id,
+                filename: moduleInfo.filename,
+                exports: {{}},
+                loaded: false,
+            }};
+            __tingModuleCache.set(moduleInfo.id, module);
+
+            const localRequire = (childRequest) => __tingRequire(childRequest, moduleInfo.filename);
+            localRequire.cache = __tingModuleCache;
+
+            const wrapped = new Function(
+                "exports",
+                "require",
+                "module",
+                "__filename",
+                "__dirname",
+                moduleInfo.code + "\n//# sourceURL=" + moduleInfo.filename
+            );
+            wrapped(module.exports, localRequire, module, moduleInfo.filename, moduleInfo.dirname);
+            module.loaded = true;
+            return module.exports;
+        }}
+        globalThis.require = (request) => __tingRequire(request, "");
 
         // Override fetch to enforce network access control
         globalThis.fetch = async function(url, options) {{
@@ -132,13 +183,12 @@ pub fn generate_init_code(
 
             // Check if URL is allowed
             const allowedDomains = Ting.sandbox.allowedDomains;
-            if (allowedDomains.length > 0) {{
-                const domain = extractDomain(urlStr);
-                const isAllowed = allowedDomains.some(pattern => domainMatches(domain, pattern));
+            const domain = extractDomain(urlStr);
+            const isAllowed = allowedDomains.length > 0 &&
+                allowedDomains.some(pattern => domainMatches(domain, pattern));
 
-                if (!isAllowed) {{
-                    throw new Error(`Network access denied: ${{urlStr}}`);
-                }}
+            if (!isAllowed) {{
+                throw new Error(`Network access denied: ${{urlStr}}`);
             }}
 
             try {{
@@ -167,7 +217,9 @@ pub fn generate_init_code(
 
         // Helper function to check if domain matches pattern (supports wildcards)
         function domainMatches(domain, pattern) {{
-            if (pattern.startsWith('*.')) {{
+            if (pattern === '*') {{
+                return true;
+            }} else if (pattern.startsWith('*.')) {{
                 const base = pattern.substring(2);
                 return domain.endsWith(base) || domain === base;
             }} else {{
@@ -181,6 +233,7 @@ pub fn generate_init_code(
                 globalThis._ting_status = 'pending';
                 globalThis._ting_result = undefined;
                 globalThis._ting_error = undefined;
+                globalThis._ting_context = args && typeof args === 'object' ? (args._context || null) : null;
 
                 const func = globalThis[funcName];
                 if (typeof func !== 'function') {{
@@ -193,6 +246,8 @@ pub fn generate_init_code(
             }} catch (e) {{
                 globalThis._ting_error = e.toString();
                 globalThis._ting_status = 'error';
+            }} finally {{
+                globalThis._ting_context = undefined;
             }}
         }};
         "#,
@@ -201,4 +256,34 @@ pub fn generate_init_code(
         paths_json = paths_json,
         domains_json = domains_json,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_fetch_denies_network_when_no_domains_are_allowed() {
+        let code = generate_init_code("test-plugin", &serde_json::json!({}), &[], &[]);
+
+        assert!(code.contains("const isAllowed = allowedDomains.length > 0 &&"));
+        assert!(code.contains("Network access denied"));
+    }
+
+    #[test]
+    fn generated_ting_host_get_context_is_scoped_to_invocation_args() {
+        let code = generate_init_code("test-plugin", &serde_json::json!({}), &[], &[]);
+
+        assert!(code.contains("getContext: () => globalThis._ting_context || null"));
+        assert!(code.contains("args._context || null"));
+        assert!(code.contains("globalThis._ting_context = undefined"));
+    }
+
+    #[test]
+    fn generated_ting_host_invoke_calls_host_op() {
+        let code = generate_init_code("test-plugin", &serde_json::json!({}), &[], &[]);
+
+        assert!(code.contains("op_host_invoke(method, params ?? {})"));
+        assert!(code.contains("Ting.host.invoke requires a method string"));
+    }
 }

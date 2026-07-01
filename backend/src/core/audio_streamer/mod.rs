@@ -157,14 +157,32 @@ impl AudioStreamer {
             .map_err(|e| {
                 let error_msg = e.to_string();
                 if error_msg.contains("probe limit") || error_msg.contains("unsupported format") {
-                    tracing::warn!("音频格式探测失败: {:?}, 错误: {}", file_path, error_msg);
+                    tracing::warn!(
+                        path = %file_path.display(),
+                        error = %error_msg,
+                        message_key = "audio.format.probe_failed",
+                        message_params = %serde_json::json!({
+                            "path": file_path.display().to_string(),
+                            "error": error_msg,
+                        }),
+                        "Audio format probe failed"
+                    );
                     TingError::InvalidRequest(format!(
-                        "音频文件格式探测失败（文件可能损坏或格式不支持）: {}",
+                        "Audio format probe failed; the file may be damaged or unsupported: {}",
                         error_msg
                     ))
                 } else {
-                    tracing::warn!("音频格式探测失败: {:?}, 错误: {}", file_path, error_msg);
-                    TingError::InvalidRequest(format!("音频格式探测失败: {}", error_msg))
+                    tracing::warn!(
+                        path = %file_path.display(),
+                        error = %error_msg,
+                        message_key = "audio.format.probe_failed",
+                        message_params = %serde_json::json!({
+                            "path": file_path.display().to_string(),
+                            "error": error_msg,
+                        }),
+                        "Audio format probe failed"
+                    );
+                    TingError::InvalidRequest(format!("Audio format probe failed: {}", error_msg))
                 }
             })?;
 

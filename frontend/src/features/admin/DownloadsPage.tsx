@@ -3,8 +3,10 @@ import apiClient from '../../core/api/client';
 import { Trash2, HardDrive, Download, Database, ChevronDown, ChevronRight } from 'lucide-react';
 import { getCoverAspectClass, useBookshelfCoverShape } from '../../core/hooks/useBookshelfCoverShape';
 // import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
 const DownloadsPage: React.FC = () => {
+  const { t, i18n } = useTranslation();
   const coverShape = useBookshelfCoverShape();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [cachedFiles, setCachedFiles] = useState<any[]>([]);
@@ -28,7 +30,7 @@ const DownloadsPage: React.FC = () => {
   };
 
   const handleClearAll = async () => {
-    if (!confirm('确定要清空所有服务端缓存吗？这将删除所有已缓存的文件。')) return;
+    if (!confirm(t('downloadsPage.clearAllConfirm'))) return;
     
     try {
       await apiClient.delete('/api/cache');
@@ -39,11 +41,11 @@ const DownloadsPage: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('确定要删除此缓存文件吗？')) return;
+    if (!confirm(t('downloadsPage.deleteFileConfirm'))) return;
     
     try {
       await apiClient.delete(`/api/cache/${id}`);
-      setCachedFiles(prev => prev.filter(f => f.chapterId !== id));
+      setCachedFiles(prev => prev.filter(f => f.chapter_id !== id));
     } catch (err) {
       console.error('删除缓存失败:', err);
     }
@@ -59,26 +61,26 @@ const DownloadsPage: React.FC = () => {
 
   // Group files by book
   const bookGroups = React.useMemo(() => {
-    const groups: Record<string, { title: string, count: number, size: number, coverUrl?: string, files: typeof cachedFiles }> = {};
+    const groups: Record<string, { title: string, count: number, size: number, cover_url?: string, files: typeof cachedFiles }> = {};
     
     cachedFiles.forEach(file => {
-      const bookTitle = file.bookTitle || '未知书籍';
+      const bookTitle = file.book_title || t('downloadsPage.unknownBook');
       if (!groups[bookTitle]) {
         groups[bookTitle] = {
           title: bookTitle,
           count: 0,
           size: 0,
-          coverUrl: file.coverUrl,
+          cover_url: file.cover_url,
           files: []
         };
       }
       groups[bookTitle].count++;
-      groups[bookTitle].size += (file.fileSize || 0);
+      groups[bookTitle].size += (file.file_size || 0);
       groups[bookTitle].files.push(file);
     });
     
     return Object.values(groups);
-  }, [cachedFiles]);
+  }, [cachedFiles, t]);
 
   const toggleExpand = (title: string) => {
     if (expandedBookTitle === title) {
@@ -90,19 +92,19 @@ const DownloadsPage: React.FC = () => {
 
   const handleDeleteBook = async (bookTitle: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const filesToDelete = cachedFiles.filter(f => (f.bookTitle || '未知书籍') === bookTitle);
+    const filesToDelete = cachedFiles.filter(f => (f.book_title || t('downloadsPage.unknownBook')) === bookTitle);
     
-    if (!confirm(`确定要删除《${bookTitle}》的所有缓存吗？(${filesToDelete.length} 章)`)) return;
+    if (!confirm(t('downloadsPage.deleteBookConfirm', { title: bookTitle, count: filesToDelete.length }))) return;
 
     for (const file of filesToDelete) {
       try {
-        await apiClient.delete(`/api/cache/${file.chapterId}`);
+        await apiClient.delete(`/api/cache/${file.chapter_id}`);
       } catch (err) {
-        console.error(`删除缓存失败 ${file.chapterId}`, err);
+        console.error(`删除缓存失败 ${file.chapter_id}`, err);
       }
     }
     
-    setCachedFiles(prev => prev.filter(f => (f.bookTitle || '未知书籍') !== bookTitle));
+    setCachedFiles(prev => prev.filter(f => (f.book_title || t('downloadsPage.unknownBook')) !== bookTitle));
   };
 
   return (
@@ -112,11 +114,11 @@ const DownloadsPage: React.FC = () => {
             <div className="flex items-center gap-3">
                 <h1 className="text-2xl md:text-3xl font-bold dark:text-white flex items-center gap-3">
                     <Download size={28} className="text-primary-600 md:w-8 md:h-8" />
-                    缓存管理
+                    {t('downloadsPage.title')}
                 </h1>
             </div>
             <p className="text-sm md:text-base text-slate-500 mt-1 ml-10">
-                管理服务端缓存文件（WebDAV 等非本地资源）。开启自动缓存后，播放时将自动缓存文件以加速访问。
+                {t('downloadsPage.subtitle')}
             </p>
         </div>
         <div className="flex gap-2">
@@ -126,7 +128,7 @@ const DownloadsPage: React.FC = () => {
                     className="flex items-center gap-2 bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 px-4 py-2 rounded-xl transition-colors font-medium text-sm"
                 >
                     <Trash2 size={18} />
-                    清空缓存
+                    {t('downloadsPage.clearAll')}
                 </button>
             )}
         </div>
@@ -142,8 +144,8 @@ const DownloadsPage: React.FC = () => {
                 <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-50 dark:bg-slate-800 text-slate-400 mb-4">
                     <Database size={32} />
                 </div>
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1">暂无缓存文件</h3>
-                <p className="text-slate-500 text-sm max-w-xs mx-auto">当用户播放或预加载音频时，服务端会自动缓存文件以提高访问速度。</p>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1">{t('downloadsPage.emptyTitle')}</h3>
+                <p className="text-slate-500 text-sm max-w-xs mx-auto">{t('downloadsPage.emptyHint')}</p>
             </div>
         ) : (
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -159,8 +161,8 @@ const DownloadsPage: React.FC = () => {
                             </div>
 
                             <div className={`w-10 ${getCoverAspectClass(coverShape)} bg-slate-200 dark:bg-slate-700 rounded-md shrink-0 flex items-center justify-center overflow-hidden`}>
-                                {group.coverUrl ? (
-                                    <img src={group.coverUrl} alt={group.title} className="w-full h-full object-cover" />
+                                {group.cover_url ? (
+                                    <img src={group.cover_url} alt={group.title} className="w-full h-full object-cover" />
                                 ) : (
                                     <Download size={20} className="text-slate-400" />
                                 )}
@@ -169,7 +171,7 @@ const DownloadsPage: React.FC = () => {
                             <div className="flex-1 min-w-0">
                                 <h3 className="font-bold text-slate-900 dark:text-white truncate">{group.title}</h3>
                                 <div className="flex items-center gap-2 text-sm text-slate-500 mt-1">
-                                    <span>{group.count} 章</span>
+                                    <span>{t('downloadsPage.chapterCount', { count: group.count })}</span>
                                     <span>•</span>
                                     <span>{formatSize(group.size)}</span>
                                 </div>
@@ -178,7 +180,7 @@ const DownloadsPage: React.FC = () => {
                             <button
                                 onClick={(e) => handleDeleteBook(group.title, e)}
                                 className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
-                                title="删除整书缓存"
+                                title={t('downloadsPage.deleteBookCache')}
                             >
                                 <Trash2 size={18} />
                             </button>
@@ -188,7 +190,7 @@ const DownloadsPage: React.FC = () => {
                         {expandedBookTitle === group.title && (
                             <div className="bg-slate-50/50 dark:bg-slate-800/20 border-t border-slate-100 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 pl-4 sm:pl-12">
                                 {group.files.map(file => (
-                                    <div key={file.chapterId} className="p-3 pl-4 hover:bg-slate-100/50 dark:hover:bg-slate-800/50 transition-colors flex items-center gap-4 group/item">
+                                    <div key={file.chapter_id} className="p-3 pl-4 hover:bg-slate-100/50 dark:hover:bg-slate-800/50 transition-colors flex items-center gap-4 group/item">
                                         {/* Icon Status */}
                                         <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-blue-50 text-blue-500 dark:bg-blue-900/20">
                                             <HardDrive size={16} />
@@ -197,21 +199,27 @@ const DownloadsPage: React.FC = () => {
                                         {/* Content */}
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2">
-                                                <h4 className="font-medium text-slate-900 dark:text-white truncate text-sm">{file.chapterTitle || `Chapter ${file.chapterIndex || ''}`}</h4>
+                                                <h4 className="font-medium text-slate-900 dark:text-white truncate text-sm">{file.chapter_title || `Chapter ${file.chapter_index || ''}`}</h4>
                                                 <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded-full text-slate-500">
-                                                    {formatSize(file.fileSize || 0)}
+                                                    {formatSize(file.file_size || 0)}
                                                 </span>
                                             </div>
                                             <div className="flex items-center gap-3 text-[10px] text-slate-400 mt-0.5">
-                                                <span>缓存时间: {file.createdAt ? new Date(file.createdAt).toLocaleString() : '未知'}</span>
+                                                <span>
+                                                    {t('downloadsPage.cachedAt', {
+                                                        time: file.created_at
+                                                            ? new Date(file.created_at).toLocaleString(i18n.language?.startsWith('en') ? 'en-US' : 'zh-CN')
+                                                            : t('downloadsPage.unknownTime'),
+                                                    })}
+                                                </span>
                                             </div>
                                         </div>
 
                                         {/* Actions */}
                                         <button 
-                                            onClick={(e) => { e.stopPropagation(); handleDelete(file.chapterId); }}
+                                            onClick={(e) => { e.stopPropagation(); handleDelete(file.chapter_id); }}
                                             className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all opacity-0 group-hover/item:opacity-100 focus:opacity-100"
-                                            title="删除缓存"
+                                            title={t('downloadsPage.deleteCache')}
                                         >
                                             <Trash2 size={16} />
                                         </button>

@@ -1,6 +1,6 @@
 [package]
 name = "ting_reader"
-version = "1.4.7"
+version = "1.4.8"
 edition = "2021"
 rust-version = "1.70"
 
@@ -24,6 +24,7 @@ r2d2_sqlite = "0.24"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_yaml = "0.9"
 
 # Logging and Tracing
 tracing = "0.1"
@@ -90,13 +91,15 @@ notify = "6.1.1"
 
 # Cryptography
 sha2 = "0.10"
+ed25519-dalek = "2.2"
 
 # Authentication
 bcrypt = "0.15"
 jsonwebtoken = "9.2"
 rand = "0.8"
 futures = "0.3.31"
-zip = "1.1.4"
+tar = "0.4"
+zstd = "0.13"
 image = { version = "0.25.6", default-features = false, features = ["jpeg", "png", "webp"] }
 color-thief = "0.2.2"
 urlencoding = "2.1"

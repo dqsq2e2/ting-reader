@@ -14,6 +14,7 @@ busy_timeout = 30000  # milliseconds (30 seconds, increased from 5 seconds)
 
 [plugins]
 plugin_dir = "./plugins"
+preinstalled_dir = "./preinstalled-plugins"
 enable_hot_reload = true
 max_memory_per_plugin = 536870912  # 512 MB
 max_execution_time = 300  # seconds

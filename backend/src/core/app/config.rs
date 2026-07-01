@@ -73,6 +73,7 @@ impl Config {
             .set_default("database.connection_pool_size", 10)?
             .set_default("database.busy_timeout", 5000)?
             .set_default("plugins.plugin_dir", "./plugins")?
+            .set_default("plugins.preinstalled_dir", "./preinstalled-plugins")?
             .set_default("plugins.enable_hot_reload", true)?
             .set_default("plugins.max_memory_per_plugin", 536870912)? // 512 MB
             .set_default("plugins.max_execution_time", 300)?
@@ -179,6 +180,7 @@ impl Config {
             .set_default("database.connection_pool_size", 10)?
             .set_default("database.busy_timeout", 5000)?
             .set_default("plugins.plugin_dir", "./plugins")?
+            .set_default("plugins.preinstalled_dir", "./preinstalled-plugins")?
             .set_default("plugins.enable_hot_reload", true)?
             .set_default("plugins.max_memory_per_plugin", 536870912)?
             .set_default("plugins.max_execution_time", 300)?
@@ -340,6 +342,7 @@ impl DatabaseConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct PluginConfig {
     pub plugin_dir: PathBuf,
+    pub preinstalled_dir: PathBuf,
     pub enable_hot_reload: bool,
     pub max_memory_per_plugin: usize, // bytes
     pub max_execution_time: u64,      // seconds

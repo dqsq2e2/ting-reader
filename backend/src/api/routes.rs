@@ -8,6 +8,8 @@ use crate::api::handlers::{
     batch_update_chapters,
     // Cache management
     cache_chapter,
+    call_plugin_route,
+    call_public_plugin_route,
     cancel_task,
     check_update,
     clear_all_caches,
@@ -31,6 +33,10 @@ use crate::api::handlers::{
     delete_task,
     delete_user,
     export_system_logs,
+    find_content_processors,
+    find_event_handlers,
+    find_task_handlers,
+    find_tool_providers,
     generate_regex,
     get_admin_statistics,
     get_book,
@@ -42,6 +48,7 @@ use crate::api::handlers::{
     get_favorites,
     get_metrics,
     get_playlist,
+    get_plugin_asset,
     get_plugin_config,
     get_plugin_detail,
     // Progress management
@@ -60,12 +67,15 @@ use crate::api::handlers::{
     health_check,
     install_plugin,
     install_store_plugin,
+    invoke_plugin_capability,
+    invoke_plugin_host,
     list_books,
-    // Library management
     list_libraries,
     list_notification_events,
     list_notification_webhooks,
     list_playlists,
+    // Library management
+    list_plugin_capabilities,
     list_plugins,
     // Series management
     list_series,
@@ -83,6 +93,7 @@ use crate::api::handlers::{
     scraper_search,
     search_books,
     // Audio streaming
+    sign_plugin_route,
     stream_chapter,
     test_notification_webhook,
     test_webdav_connection,
@@ -105,7 +116,7 @@ use crate::auth::handlers::{get_me, update_me};
 use crate::auth::middleware::authenticate;
 use axum::{
     middleware,
-    routing::{get, patch, post, put},
+    routing::{any, get, patch, post, put},
     Router,
 };
 
@@ -128,6 +139,17 @@ pub fn build_api_routes(state: AppState) -> Router {
     let mut public_routes = Router::new();
     api_route!(public_routes, "/stats", get(get_stats));
     api_route!(public_routes, "/health", get(health_check));
+    public_routes = public_routes
+        .route("/api/v1/plugin-assets/:id/*path", get(get_plugin_asset))
+        .route("/api/plugin-assets/:id/*path", get(get_plugin_asset))
+        .route(
+            "/api/v1/public/plugin-routes/*path",
+            any(call_public_plugin_route),
+        )
+        .route(
+            "/api/public/plugin-routes/*path",
+            any(call_public_plugin_route),
+        );
 
     // HLS streaming endpoints (public - session ID provides security)
     public_routes = public_routes
@@ -242,6 +264,30 @@ pub fn build_api_routes(state: AppState) -> Router {
             "/api/v1/plugins/:id/config",
             get(get_plugin_config).put(update_plugin_config),
         )
+        .route(
+            "/api/v1/plugins/:id/capabilities/:capabilityId/invoke",
+            post(invoke_plugin_capability),
+        )
+        .route("/api/v1/plugin-host/invoke", post(invoke_plugin_host))
+        .route("/api/v1/plugin-capabilities", get(list_plugin_capabilities))
+        .route(
+            "/api/v1/plugin-capabilities/content-processors",
+            get(find_content_processors),
+        )
+        .route(
+            "/api/v1/plugin-capabilities/tools",
+            get(find_tool_providers),
+        )
+        .route(
+            "/api/v1/plugin-capabilities/task-handlers",
+            get(find_task_handlers),
+        )
+        .route(
+            "/api/v1/plugin-capabilities/event-handlers",
+            get(find_event_handlers),
+        )
+        .route("/api/v1/plugin-route-signatures", post(sign_plugin_route))
+        .route("/api/v1/plugin-routes/*path", any(call_plugin_route))
         // Plugin store endpoints
         .route("/api/v1/store/plugins", get(get_store_plugins))
         .route("/api/v1/store/install", post(install_store_plugin))
@@ -323,6 +369,27 @@ pub fn build_api_routes(state: AppState) -> Router {
             "/api/plugins/:id/config",
             get(get_plugin_config).put(update_plugin_config),
         )
+        .route(
+            "/api/plugins/:id/capabilities/:capabilityId/invoke",
+            post(invoke_plugin_capability),
+        )
+        .route("/api/plugin-host/invoke", post(invoke_plugin_host))
+        .route("/api/plugin-capabilities", get(list_plugin_capabilities))
+        .route(
+            "/api/plugin-capabilities/content-processors",
+            get(find_content_processors),
+        )
+        .route("/api/plugin-capabilities/tools", get(find_tool_providers))
+        .route(
+            "/api/plugin-capabilities/task-handlers",
+            get(find_task_handlers),
+        )
+        .route(
+            "/api/plugin-capabilities/event-handlers",
+            get(find_event_handlers),
+        )
+        .route("/api/plugin-route-signatures", post(sign_plugin_route))
+        .route("/api/plugin-routes/*path", any(call_plugin_route))
         // Plugin store endpoints (without /v1)
         .route("/api/store/plugins", get(get_store_plugins))
         .route("/api/store/install", post(install_store_plugin))

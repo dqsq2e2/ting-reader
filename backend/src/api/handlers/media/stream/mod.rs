@@ -66,6 +66,35 @@ fn is_download_query(params: &StreamQuery) -> bool {
     )
 }
 
+async fn get_remote_media_reader(
+    state: &AppState,
+    library: &Library,
+    path: &str,
+    range: Option<(u64, u64)>,
+) -> Result<(Box<dyn tokio::io::AsyncRead + Send + Unpin>, u64)> {
+    if library.library_type == "webdav" {
+        return state
+            .storage_service
+            .get_webdav_reader(library, path, range, state.encryption_key.as_ref())
+            .await
+            .map_err(|e| TingError::NotFound(format!("Remote WebDAV media not found: {}", e)));
+    }
+
+    if library.library_type == "rss" || path.starts_with("http://") || path.starts_with("https://")
+    {
+        return state
+            .storage_service
+            .get_http_reader(path, range)
+            .await
+            .map_err(|e| TingError::NotFound(format!("Remote media not found: {}", e)));
+    }
+
+    Err(TingError::ValidationError(format!(
+        "Unsupported remote library type '{}'",
+        library.library_type
+    )))
+}
+
 async fn transcode_plugin_stream(
     state: &AppState,
     chapter: &Chapter,
@@ -119,7 +148,7 @@ async fn transcode_plugin_stream(
         chapter_id = %chapter.id,
         plugin = %plugin.name,
         format = %format,
-        "使用格式插件解码后转码输出"
+        "Using format plugin decoded stream for transcoded output"
     );
 
     let mut child = cmd.spawn().map_err(TingError::IoError)?;
@@ -139,12 +168,20 @@ async fn transcode_plugin_stream(
             match chunk {
                 Ok(bytes) => {
                     if let Err(error) = stdin.write_all(&bytes).await {
-                        tracing::debug!("插件解码流写入 FFmpeg 中断: {}", error);
+                        tracing::debug!(
+                            "Plugin decoded stream write to FFmpeg interrupted: {}",
+                            error
+                        );
                         break;
                     }
                 }
                 Err(error) => {
-                    tracing::error!("插件解码流读取失败: {}", error);
+                    tracing::error!(
+                        error = %error,
+                        message_key = "media.plugin_stream.read_failed",
+                        message_params = %serde_json::json!({ "error": error.to_string() }),
+                        "Plugin decode stream read failed"
+                    );
                     break;
                 }
             }
@@ -245,7 +282,7 @@ pub async fn stream_chapter(
     // Handle HLS Transcoding Request
     if let Some(format) = &params.transcode {
         if format == "hls" {
-            tracing::info!("请求 HLS 转码: {}", chapter.path);
+            tracing::info!("Requested HLS transcoding: {}", chapter.path);
             return handle_hls_request(
                 state,
                 chapter,
@@ -260,7 +297,7 @@ pub async fn stream_chapter(
 
     // Handle Transcoding Request
     if let Some(format) = &params.transcode {
-        tracing::info!("请求转码: {} -> {}", chapter.path, format);
+        tracing::info!("Requested transcoding: {} -> {}", chapter.path, format);
 
         let content_type = match format.as_str() {
             "mp3" => "audio/mpeg",
@@ -345,44 +382,25 @@ pub async fn stream_chapter(
 
             let webdav_url_str = webdav_url.to_string();
 
-            tracing::info!("使用直接 URL 转码: {}", webdav_url_str);
+            tracing::info!("Transcoding from direct URL: {}", webdav_url_str);
 
-            // Get FFmpeg path and derive FFprobe path (same directory)
-            let ffmpeg_path = state
+            let ffmpeg_tools = state
                 .plugin_manager
-                .get_ffmpeg_path()
+                .get_ffmpeg_tool_paths()
                 .await
                 .ok_or_else(|| {
                     TingError::IoError(std::io::Error::new(
                         std::io::ErrorKind::NotFound,
-                        "FFmpeg plugin binary not found",
+                        "FFmpeg plugin binaries not found",
                     ))
                 })?;
-
-            let ffprobe_path = {
-                let ffmpeg_dir = std::path::Path::new(&ffmpeg_path).parent().ok_or_else(|| {
-                    TingError::IoError(std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        "Cannot determine FFmpeg directory",
-                    ))
-                })?;
-
-                // ⭐ 跨平台：Windows 使用 ffprobe.exe，Linux/Mac 使用 ffprobe
-                let ffprobe_name = if cfg!(target_os = "windows") {
-                    "ffprobe.exe"
-                } else {
-                    "ffprobe"
-                };
-
-                ffmpeg_dir.join(ffprobe_name).to_string_lossy().to_string()
-            };
 
             // Get duration using FFprobe
 
             // Add delay to avoid overwhelming the server
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
-            let duration_output = Command::new(&ffprobe_path)
+            let duration_output = Command::new(&ffmpeg_tools.ffprobe)
                 .arg("-v")
                 .arg("error")
                 .arg("-show_entries")
@@ -405,7 +423,7 @@ pub async fn stream_chapter(
             };
 
             if let Some(dur) = duration_seconds {
-                tracing::info!("音频时长: {:.2} 秒", dur);
+                tracing::info!("Audio duration: {:.2} seconds", dur);
 
                 // Update chapter duration in database if significantly different
                 if let Ok(Some(mut chapter_record)) =
@@ -414,7 +432,11 @@ pub async fn stream_chapter(
                     let db_duration = chapter_record.duration.unwrap_or(0);
                     let new_duration = dur.round() as i32;
                     if (db_duration - new_duration).abs() > 2 {
-                        tracing::info!("更新章节时长: {} -> {} 秒", db_duration, new_duration);
+                        tracing::info!(
+                            "Updated chapter duration: {} -> {} seconds",
+                            db_duration,
+                            new_duration
+                        );
                         chapter_record.duration = Some(new_duration);
                         let _ = state.chapter_repo.update(&chapter_record).await;
                     }
@@ -422,13 +444,13 @@ pub async fn stream_chapter(
             }
 
             // Build FFmpeg command to transcode directly from URL
-            let mut cmd = Command::new(&ffmpeg_path);
+            let mut cmd = Command::new(&ffmpeg_tools.ffmpeg);
             cmd.arg("-y").arg("-loglevel").arg("warning");
 
             // Add seek parameter if present (must be before -i for input seeking)
             if let Some(seek_time) = &params.seek {
                 cmd.arg("-ss").arg(seek_time);
-                tracing::info!("Seek 到位置: {}", seek_time);
+                tracing::info!("Seeking to position: {}", seek_time);
             }
 
             // Use URL as input directly (FFmpeg will handle HTTP/HTTPS)
@@ -462,7 +484,7 @@ pub async fn stream_chapter(
             cmd.stdout(Stdio::piped());
             cmd.stderr(Stdio::piped());
 
-            tracing::info!("启动 FFmpeg 进程（直接从 URL 读取）...");
+            tracing::info!("Starting FFmpeg process reading directly from URL...");
 
             // Spawn FFmpeg process
             let mut child = cmd.spawn().map_err(|e| TingError::IoError(e))?;
@@ -554,7 +576,10 @@ pub async fn stream_chapter(
                         .collect();
                     if !cmd_vec.is_empty() {
                         plugin_command = Some(cmd_vec);
-                        tracing::info!("对 {} 使用插件提供的转码命令", chapter.path);
+                        tracing::info!(
+                            "Using plugin-provided transcode command for {}",
+                            chapter.path
+                        );
                     }
                 }
             }
@@ -580,22 +605,17 @@ pub async fn stream_chapter(
             if use_pipe && child.stdin.is_some() {
                 if let Some(mut stdin) = child.stdin.take() {
                     // Get reader
-                    let (mut reader, _) = state
-                        .storage_service
-                        .get_webdav_reader(
-                            &library,
-                            &chapter.path,
-                            None,
-                            state.encryption_key.as_ref(),
-                        )
-                        .await
-                        .map_err(|e| {
-                            TingError::NotFound(format!("WebDAV file not found: {}", e))
-                        })?;
+                    let (mut reader, _) =
+                        get_remote_media_reader(&state, &library, &chapter.path, None).await?;
 
                     tokio::spawn(async move {
                         if let Err(e) = tokio::io::copy(&mut reader, &mut stdin).await {
-                            tracing::error!("无法将输入通过管道传输到 ffmpeg: {}", e);
+                            tracing::error!(
+                                error = %e,
+                                message_key = "media.ffmpeg.pipe_failed",
+                                message_params = %serde_json::json!({ "error": e.to_string() }),
+                                "Failed to pipe input to FFmpeg"
+                            );
                         }
                     });
                 }
@@ -689,22 +709,17 @@ pub async fn stream_chapter(
             if use_pipe && child.stdin.is_some() {
                 if let Some(mut stdin) = child.stdin.take() {
                     // Get reader
-                    let (mut reader, _) = state
-                        .storage_service
-                        .get_webdav_reader(
-                            &library,
-                            &chapter.path,
-                            None,
-                            state.encryption_key.as_ref(),
-                        )
-                        .await
-                        .map_err(|e| {
-                            TingError::NotFound(format!("WebDAV file not found: {}", e))
-                        })?;
+                    let (mut reader, _) =
+                        get_remote_media_reader(&state, &library, &chapter.path, None).await?;
 
                     tokio::spawn(async move {
                         if let Err(e) = tokio::io::copy(&mut reader, &mut stdin).await {
-                            tracing::error!("无法将输入通过管道传输到 ffmpeg: {}", e);
+                            tracing::error!(
+                                error = %e,
+                                message_key = "media.ffmpeg.pipe_failed",
+                                message_params = %serde_json::json!({ "error": e.to_string() }),
+                                "Failed to pipe input to FFmpeg"
+                            );
                         }
                     });
                 }
@@ -754,12 +769,12 @@ pub async fn stream_chapter(
                 // The current preload implementation stores raw bytes.
                 // TODO: Implement decrypted preload cache or handle decryption here.
                 // For now, skip preload cache for plugin-handled files to avoid sending encrypted data to client.
-                tracing::info!(chapter_id = %chapter_id, "跳过插件处理文件的预加载缓存");
+                tracing::info!(chapter_id = %chapter_id, "Skipping preload cache for plugin-processed file");
             } else {
                 // Update access time to implement LRU (keep frequently accessed chapters in memory)
                 *last_access = std::time::Instant::now();
 
-                tracing::debug!(target: "media", chapter_id = %chapter_id, "从预加载缓存 (内存) 提供服务");
+                tracing::debug!(target: "media", chapter_id = %chapter_id, "Serving from preload cache (memory)");
                 let data = data.clone(); // Clone bytes (cheap reference count increment)
                                          // Drop write lock early
                 drop(cache);
@@ -824,7 +839,7 @@ pub async fn stream_chapter(
     // 2. Check Disk Cache
     let cache_path = state.cache_manager.get_cache_path(&chapter_id);
     if cache_path.exists() {
-        tracing::debug!(target: "media", chapter_id = %chapter_id, "从磁盘缓存提供服务");
+        tracing::debug!(target: "media", chapter_id = %chapter_id, "Serving from disk cache");
 
         // Check if we need to use a format plugin even for cached files (source file is cached)
         let plugin_info = state
@@ -835,7 +850,7 @@ pub async fn stream_chapter(
         if let Some(plugin) = plugin_info {
             // If a plugin handles this format, we use the cached file as the source for the plugin logic
             // instead of serving it directly.
-            tracing::info!(chapter_id = %chapter_id, plugin = %plugin.name, "缓存文件需要格式插件处理");
+            tracing::info!(chapter_id = %chapter_id, plugin = %plugin.name, "Cached file requires format plugin processing");
 
             // Fall through to the plugin handling logic below
             // We need to make sure the logic below knows to use the cache_path as source
@@ -900,7 +915,7 @@ pub async fn stream_chapter(
     }
 
     // 3. Not cached. Fetch from source.
-    tracing::debug!(target: "media", chapter_id = %chapter_id, "从源 (流) 提供服务");
+    tracing::debug!(target: "media", chapter_id = %chapter_id, "Serving from source stream");
 
     // Determine if we need to use a format plugin
     // Instead of hardcoding extensions, we ask the plugin manager if any loaded plugin supports this extension
@@ -910,7 +925,7 @@ pub async fn stream_chapter(
         .await;
 
     if let Some(plugin) = plugin_info {
-        tracing::info!(chapter_id = %chapter_id, plugin = %plugin.name, "使用格式插件处理文件");
+        tracing::info!(chapter_id = %chapter_id, plugin = %plugin.name, "Processing file with format plugin");
 
         let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
         let (stream, mime_type, output_extension, content_length, start, end, logic_size) =
@@ -1027,16 +1042,7 @@ pub async fn stream_chapter(
             size,
         )
     } else {
-        state
-            .storage_service
-            .get_webdav_reader(
-                &library,
-                &chapter.path,
-                range,
-                state.encryption_key.as_ref(),
-            )
-            .await
-            .map_err(|e| TingError::NotFound(format!("WebDAV file not found: {}", e)))?
+        get_remote_media_reader(&state, &library, &chapter.path, range).await?
     };
 
     // Calculate actual content length and range for response headers

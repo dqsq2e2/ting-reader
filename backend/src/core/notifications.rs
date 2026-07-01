@@ -1,6 +1,7 @@
 use crate::core::error::{Result, TingError};
 use crate::db::models::NotificationWebhook;
 use crate::db::repository::NotificationWebhookRepository;
+use crate::plugin::manager::PluginManager;
 use lazy_static::lazy_static;
 use regex::{Captures, Regex};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
@@ -141,13 +142,77 @@ pub fn dispatch_notification_event(
     repo: Arc<NotificationWebhookRepository>,
     payload: NotificationEventPayload,
 ) {
+    let event = payload.event.clone();
     tokio::spawn(async move {
         if let Err(error) = dispatch_notification_event_inner(repo, payload).await {
             tracing::warn!(
                 target: "audit::notification",
+                message_key = "notification.webhook.dispatch_failed",
+                message_params = %serde_json::json!({
+                    "event": event.as_str(),
+                    "error": error.to_string(),
+                }),
+                event = %event,
                 error = %error,
-                "发送 webhook 通知失败"
+                "Webhook notification dispatch failed"
             );
+        }
+    });
+}
+
+pub fn dispatch_application_event(
+    repo: Arc<NotificationWebhookRepository>,
+    plugin_manager: Arc<PluginManager>,
+    payload: NotificationEventPayload,
+) {
+    dispatch_notification_event(repo, payload.clone());
+    dispatch_plugin_event_handlers(plugin_manager, payload);
+}
+
+pub fn dispatch_plugin_event_handlers(
+    plugin_manager: Arc<PluginManager>,
+    payload: NotificationEventPayload,
+) {
+    let event = payload.event.clone();
+    tokio::spawn(async move {
+        let handlers = plugin_manager.find_event_handlers(Some(&event)).await;
+        for handler in handlers {
+            let invoke_method = handler
+                .registration
+                .capability
+                .invoke
+                .clone()
+                .unwrap_or_else(|| handler.registration.capability.id.clone());
+            let params = serde_json::json!({
+                "event": payload.event,
+                "title": payload.title,
+                "message": payload.message,
+                "data": payload.data,
+                "occurred_at": payload.occurred_at,
+                "capability_id": handler.registration.capability.id,
+                "plugin_id": handler.registration.plugin_id,
+            });
+
+            if let Err(error) = plugin_manager
+                .invoke_plugin(&handler.registration.plugin_id, &invoke_method, params)
+                .await
+            {
+                tracing::warn!(
+                    target: "audit::plugin",
+                    message_key = "plugin.event_handler.failed",
+                    message_params = %serde_json::json!({
+                        "event": event.as_str(),
+                        "plugin_id": handler.registration.plugin_id.as_str(),
+                        "capability_id": handler.registration.capability.id.as_str(),
+                        "error": error.to_string(),
+                    }),
+                    event = %event,
+                    plugin_id = %handler.registration.plugin_id,
+                    capability_id = %handler.registration.capability.id,
+                    error = %error,
+                    "Plugin event handler failed"
+                );
+            }
         }
     });
 }
@@ -168,32 +233,55 @@ async fn dispatch_notification_event_inner(
             Ok(result) if result.success => {
                 tracing::info!(
                     target: "audit::notification",
+                    message_key = "notification.webhook.sent",
+                    message_params = %serde_json::json!({
+                        "webhook_id": webhook.id.as_str(),
+                        "webhook_name": webhook.name.as_str(),
+                        "event": payload.event.as_str(),
+                        "status": result.status,
+                    }),
                     webhook_id = %webhook.id,
                     webhook_name = %webhook.name,
                     event = %payload.event,
                     status = result.status,
-                    "Webhook 通知已发送"
+                    "Webhook notification sent"
                 );
             }
             Ok(result) => {
+                let error_text = result.error.as_deref().unwrap_or("Unknown webhook error");
                 tracing::warn!(
                     target: "audit::notification",
+                    message_key = "notification.webhook.status_failed",
+                    message_params = %serde_json::json!({
+                        "webhook_id": webhook.id.as_str(),
+                        "webhook_name": webhook.name.as_str(),
+                        "event": payload.event.as_str(),
+                        "status": result.status,
+                        "error": error_text,
+                    }),
                     webhook_id = %webhook.id,
                     webhook_name = %webhook.name,
                     event = %payload.event,
                     status = result.status,
-                    error = result.error.as_deref().unwrap_or("Unknown webhook error"),
-                    "Webhook 通知返回失败"
+                    error = error_text,
+                    "Webhook notification returned failure"
                 );
             }
             Err(error) => {
                 tracing::warn!(
                     target: "audit::notification",
+                    message_key = "notification.webhook.request_failed",
+                    message_params = %serde_json::json!({
+                        "webhook_id": webhook.id.as_str(),
+                        "webhook_name": webhook.name.as_str(),
+                        "event": payload.event.as_str(),
+                        "error": error.to_string(),
+                    }),
                     webhook_id = %webhook.id,
                     webhook_name = %webhook.name,
                     event = %payload.event,
                     error = %error,
-                    "Webhook 通知请求失败"
+                    "Webhook notification request failed"
                 );
             }
         }

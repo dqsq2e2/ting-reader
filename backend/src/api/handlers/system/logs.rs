@@ -37,6 +37,17 @@ pub struct LogsResponse {
     pub page_size: usize,
 }
 
+fn parse_message_params(fields: &serde_json::Value) -> Option<serde_json::Value> {
+    let value = fields.get("message_params")?;
+    if value.is_object() {
+        return Some(value.clone());
+    }
+    value
+        .as_str()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+        .filter(|parsed| parsed.is_object())
+}
+
 fn parse_log_file(path: &StdPath, logs: &mut Vec<LogEntry>) {
     let file = match File::open(path) {
         Ok(f) => f,
@@ -62,19 +73,29 @@ fn parse_log_file(path: &StdPath, logs: &mut Vec<LogEntry>) {
                 .unwrap_or("")
                 .to_string();
 
-            let message = if let Some(fields) = json.get("fields") {
-                fields
-                    .get("message")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string()
-            } else {
-                String::new()
-            };
+            let (message, raw_message, message_key, message_params) =
+                if let Some(fields) = json.get("fields") {
+                    let raw_message = fields.get("message").and_then(|v| v.as_str()).unwrap_or("");
+                    let message_key = fields
+                        .get("message_key")
+                        .and_then(|v| v.as_str())
+                        .map(ToOwned::to_owned);
+                    let message_params = parse_message_params(fields);
+                    (
+                        raw_message.to_string(),
+                        Some(raw_message.to_string()).filter(|value| !value.is_empty()),
+                        message_key,
+                        message_params,
+                    )
+                } else {
+                    (String::new(), None, None, None)
+                };
             let fields = json.get("fields").and_then(|value| {
                 value.as_object().and_then(|fields| {
                     let mut map = fields.clone();
                     map.remove("message");
+                    map.remove("message_key");
+                    map.remove("message_params");
                     if map.is_empty() {
                         None
                     } else {
@@ -88,6 +109,9 @@ fn parse_log_file(path: &StdPath, logs: &mut Vec<LogEntry>) {
                 level,
                 module,
                 message,
+                raw_message,
+                message_key,
+                message_params,
                 fields,
                 task_id: None,
                 task_status: None,
@@ -208,19 +232,42 @@ pub async fn get_system_logs(
             };
 
             if level_match && module_match {
-                let message = if let Some(msg) = task.message {
-                    if !msg.is_empty() {
-                        msg
+                let (message, raw_message, message_key, message_params) =
+                    if let Some(key) = task.message_key {
+                        let message_params = task
+                            .message_params
+                            .and_then(|params| serde_json::from_str(&params).ok());
+                        (
+                            task.message.clone().unwrap_or_default(),
+                            task.message.filter(|value| !value.is_empty()),
+                            Some(key),
+                            message_params,
+                        )
+                    } else if let Some(msg) = task.message {
+                        if !msg.is_empty() {
+                            (msg.clone(), Some(msg), None, None)
+                        } else if let Some(payload) = task.payload {
+                            let params = serde_json::json!({ "payload": payload });
+                            (
+                                String::new(),
+                                None,
+                                Some("task.execute_with_payload".to_string()),
+                                Some(params),
+                            )
+                        } else {
+                            (String::new(), None, Some("task.execute".to_string()), None)
+                        }
                     } else if let Some(payload) = task.payload {
-                        format!("执行任务: {}", payload)
+                        let params = serde_json::json!({ "payload": payload });
+                        (
+                            String::new(),
+                            None,
+                            Some("task.execute_with_payload".to_string()),
+                            Some(params),
+                        )
                     } else {
-                        format!("执行任务")
-                    }
-                } else if let Some(payload) = task.payload {
-                    format!("执行任务: {}", payload)
-                } else {
-                    format!("执行任务")
-                };
+                        (String::new(), None, Some("task.execute".to_string()), None)
+                    };
 
                 let timestamp = if task.status == "running" {
                     // Update running tasks to "now" so they appear at the top, or use updated_at
@@ -234,6 +281,9 @@ pub async fn get_system_logs(
                     level: level.to_string(),
                     module: module.to_string(),
                     message,
+                    raw_message,
+                    message_key,
+                    message_params,
                     fields: Some(serde_json::json!({
                         "task_id": task.id.clone(),
                         "task_status": task.status.clone(),
@@ -324,7 +374,11 @@ pub async fn export_system_logs(
     }
 
     let timestamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
-    let filename = if query.level.as_deref() == Some("error") {
+    let filename = if query
+        .level
+        .as_deref()
+        .is_some_and(|level| level.eq_ignore_ascii_case("error"))
+    {
         format!("error_logs_{}.txt", timestamp)
     } else {
         format!("system_logs_{}.txt", timestamp)

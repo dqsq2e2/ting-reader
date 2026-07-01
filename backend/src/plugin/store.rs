@@ -5,9 +5,12 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::info;
 
+use super::types::{LocalizedText, PluginCapability};
+
 /// Cache entry for store plugins
 #[derive(Debug, Clone)]
 struct CacheEntry {
+    key: String,
     plugins: Vec<StorePlugin>,
     timestamp: Instant,
 }
@@ -26,21 +29,26 @@ impl PluginCache {
         }
     }
 
-    pub async fn get(&self) -> Option<Vec<StorePlugin>> {
+    pub async fn get(&self, key: &str) -> Option<Vec<StorePlugin>> {
         let cache = self.cache.read().await;
         if let Some(entry) = cache.as_ref() {
+            if entry.key != key {
+                info!("Plugin cache miss for key {}", key);
+                return None;
+            }
             if entry.timestamp.elapsed() < self.ttl {
-                info!("Plugin cache hit");
+                info!("Plugin cache hit for key {}", key);
                 return Some(entry.plugins.clone());
             }
-            info!("Plugin cache expired");
+            info!("Plugin cache expired for key {}", key);
         }
         None
     }
 
-    pub async fn set(&self, plugins: Vec<StorePlugin>) {
+    pub async fn set(&self, key: String, plugins: Vec<StorePlugin>) {
         let mut cache = self.cache.write().await;
         *cache = Some(CacheEntry {
+            key,
             plugins,
             timestamp: Instant::now(),
         });
@@ -66,13 +74,10 @@ pub struct StorePlugin {
     pub id: String,
     pub name: String,
     pub description: String,
-    #[serde(rename = "longDescription")]
     pub long_description: Option<String>,
     pub icon: Option<String>,
     pub repo: Option<String>,
-    pub plugin_type: String,
     pub version: String,
-    #[serde(rename = "downloadUrl")]
     pub download_url: serde_json::Value, // String or Map<String, String>
     pub size: Option<serde_json::Value>, // String or Map<String, String>
     pub date: Option<String>,
@@ -87,34 +92,32 @@ pub struct StorePlugin {
     /// Plugin author
     #[serde(default)]
     pub author: Option<String>,
-    /// English description
-    #[serde(default, rename = "description_en")]
-    pub description_en: Option<String>,
+    /// Localized descriptions keyed by locale, e.g. zh/en/ja
+    #[serde(default)]
+    pub description_i18n: LocalizedText,
     /// Required permissions
     #[serde(default)]
     pub permissions: Option<Vec<String>>,
     /// Configuration schema (JSON Schema format)
-    #[serde(default, rename = "config_schema")]
-    pub config_schema: Option<serde_json::Value>,
-    /// Supported file extensions (format plugins)
-    #[serde(default, rename = "supported_extensions")]
-    pub supported_extensions: Option<Vec<String>>,
-    /// Minimum core version required
-    #[serde(default, rename = "min_core_version")]
-    pub min_core_version: Option<String>,
-    /// Scraper capability declaration for scraper plugins
     #[serde(default)]
-    pub scraper: Option<StoreScraperCapabilities>,
+    pub config_schema: Option<serde_json::Value>,
+    /// Minimum core version required
+    #[serde(default)]
+    pub min_core_version: Option<String>,
+    /// Minimum Flutter client version required for client-facing plugins
+    #[serde(default)]
+    pub min_flutter_version: Option<String>,
+    /// Capability declarations used by the plugin base.
+    #[serde(default)]
+    pub capabilities: Vec<PluginCapability>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoreScraperCapabilities {
-    #[serde(default)]
-    pub auto_scrape: Option<bool>,
-    #[serde(default)]
-    pub search_fields: Option<Vec<serde_json::Value>>,
-    #[serde(default)]
-    pub result_fields: Option<Vec<String>>,
+impl StorePlugin {
+    pub fn normalize_i18n(&mut self) {
+        self.description_i18n
+            .entry("zh".to_string())
+            .or_insert_with(|| self.description.clone());
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,44 +126,15 @@ pub struct StoreDownload {
     pub url: String,
 }
 
-/// Fetch the list of plugins from the store
-pub async fn fetch_store_plugins(client: &reqwest::Client) -> Result<Vec<StorePlugin>> {
-    let url = "https://www.tingreader.cn/api/plugins";
-    let response =
-        client.get(url).send().await.map_err(|e| {
-            TingError::NetworkError(format!("Failed to fetch store plugins: {}", e))
-        })?;
-
-    if !response.status().is_success() {
-        return Err(TingError::NetworkError(format!(
-            "Store API returned status: {}",
-            response.status()
-        )));
-    }
-
-    let plugins: Vec<StorePlugin> = response.json().await.map_err(|e| {
-        TingError::SerializationError(format!("Failed to parse store response: {}", e))
+/// Parse the plugin-store provider response into store plugins.
+pub fn parse_store_plugins_response(value: serde_json::Value) -> Result<Vec<StorePlugin>> {
+    let payload = value.get("plugins").cloned().unwrap_or(value);
+    let mut plugins: Vec<StorePlugin> = serde_json::from_value(payload).map_err(|e| {
+        TingError::SerializationError(format!("Failed to parse store provider response: {}", e))
     })?;
-
-    Ok(plugins)
-}
-
-/// Fetch the list of plugins from the store with caching
-pub async fn fetch_store_plugins_cached(
-    client: &reqwest::Client,
-    cache: &PluginCache,
-) -> Result<Vec<StorePlugin>> {
-    // Try to get from cache first
-    if let Some(cached) = cache.get().await {
-        return Ok(cached);
+    for plugin in &mut plugins {
+        plugin.normalize_i18n();
     }
-
-    // Fetch from API
-    let plugins = fetch_store_plugins(client).await?;
-
-    // Update cache
-    cache.set(plugins.clone()).await;
-
     Ok(plugins)
 }
 
@@ -194,7 +168,7 @@ pub fn get_download_url(plugin: &StorePlugin) -> Result<String> {
     }
 
     Err(TingError::PluginLoadError(format!(
-        "Invalid downloadUrl format for plugin {}",
+        "Invalid download_url format for plugin {}",
         plugin.id
     )))
 }
@@ -246,7 +220,7 @@ pub async fn download_plugin(
     }
 
     // Create a temporary file
-    let file_name = url.split('/').last().unwrap_or("plugin.zip");
+    let file_name = url.split('/').last().unwrap_or("plugin.tr");
     let temp_path = temp_dir.join(file_name);
 
     let content = response

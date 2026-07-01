@@ -48,7 +48,10 @@ pub(super) async fn maybe_spawn_auto_preload(
                                 let mut tasks = state.active_preload_tasks.lock().await;
                                 if let Some(handle) = tasks.remove(&user_id) {
                                     handle.abort();
-                                    tracing::debug!("已取消用户 {} 之前的预加载任务", user_id);
+                                    tracing::debug!(
+                                        "Cancelled previous preload task for user {}",
+                                        user_id
+                                    );
                                 }
                             }
 
@@ -58,7 +61,7 @@ pub(super) async fn maybe_spawn_auto_preload(
                                     let cache = state_clone.preload_cache.read().await;
                                     if cache.contains_key(&next_chapter_id) {
                                         tracing::debug!(
-                                            "跳过 {} 的自动预加载 - 已在缓存中",
+                                            "Skipping automatic preload for {} - already cached",
                                             next_chapter_id
                                         );
                                         return;
@@ -84,7 +87,7 @@ pub(super) async fn maybe_spawn_auto_preload(
                                                 s,
                                             )
                                         })
-                                } else {
+                                } else if lib_clone.library_type.to_lowercase() == "webdav" {
                                     state_clone
                                         .storage_service
                                         .get_webdav_reader(
@@ -93,6 +96,11 @@ pub(super) async fn maybe_spawn_auto_preload(
                                             None,
                                             state_clone.encryption_key.as_ref(),
                                         )
+                                        .await
+                                } else {
+                                    state_clone
+                                        .storage_service
+                                        .get_http_reader(&next_chapter_path, None)
                                         .await
                                 };
 
@@ -104,7 +112,7 @@ pub(super) async fn maybe_spawn_auto_preload(
                                             {
                                                 let cache = state_clone.preload_cache.read().await;
                                                 if cache.contains_key(&next_chapter_id) {
-                                                    tracing::debug!("跳过 {} 的自动预加载 - 已在缓存中 (二次检查)", next_chapter_id);
+                                                    tracing::debug!("Skipping automatic preload for {} - already cached (second check)", next_chapter_id);
                                                     return;
                                                 }
                                             }
@@ -128,7 +136,7 @@ pub(super) async fn maybe_spawn_auto_preload(
 
                                                         if let Some(key) = oldest_key {
                                                             cache.remove(&key);
-                                                            tracing::debug!("已从内存中驱逐最旧的预加载章节: {}", key);
+                                                            tracing::debug!("Evicted oldest preloaded chapter from memory: {}", key);
                                                         }
                                                     }
 
@@ -141,7 +149,7 @@ pub(super) async fn maybe_spawn_auto_preload(
                                                     );
                                                 }
                                                 tracing::info!(
-                                                    "已自动预加载下一章: {}",
+                                                    "Automatically preloaded next chapter: {}",
                                                     next_chapter_id
                                                 );
 
@@ -169,7 +177,7 @@ pub(super) async fn maybe_spawn_auto_preload(
                                                             )
                                                             .await
                                                             {
-                                                                tracing::info!("已自动缓存下一章 (从缓冲区): {}", next_chapter_id);
+                                                                tracing::info!("Automatically cached next chapter (from buffer): {}", next_chapter_id);
 
                                                                 // Enforce limits
                                                                 let config =
@@ -184,21 +192,39 @@ pub(super) async fn maybe_spawn_auto_preload(
                                                                     )
                                                                     .await;
                                                             } else {
-                                                                tracing::error!("重命名章节 {} 的临时缓存文件失败", next_chapter_id);
+                                                                tracing::error!(
+                                                                    chapter_id = %next_chapter_id,
+                                                                    message_key = "media.cache.rename_failed",
+                                                                    message_params = %serde_json::json!({
+                                                                        "chapter_id": next_chapter_id,
+                                                                    }),
+                                                                    "Failed to rename temporary cache file"
+                                                                );
                                                                 let _ = tokio::fs::remove_file(
                                                                     &temp_path,
                                                                 )
                                                                 .await;
                                                             }
                                                         } else {
-                                                            tracing::error!("从缓冲区为章节 {} 写入临时缓存文件失败", next_chapter_id);
+                                                            tracing::error!(
+                                                                chapter_id = %next_chapter_id,
+                                                                message_key = "media.cache.write_failed",
+                                                                message_params = %serde_json::json!({
+                                                                    "chapter_id": next_chapter_id,
+                                                                }),
+                                                                "Failed to write temporary cache file from buffer"
+                                                            );
                                                         }
                                                     }
                                                 }
                                             } else {
                                                 tracing::error!(
-                                                    "读取下一章预加载失败: {}",
-                                                    next_chapter_id
+                                                    chapter_id = %next_chapter_id,
+                                                    message_key = "media.preload.read_failed",
+                                                    message_params = %serde_json::json!({
+                                                        "chapter_id": next_chapter_id,
+                                                    }),
+                                                    "Failed to read next chapter preload"
                                                 );
                                             }
                                         } else if auto_cache
@@ -226,7 +252,7 @@ pub(super) async fn maybe_spawn_auto_preload(
                                                                 )
                                                                 .await
                                                                 {
-                                                                    tracing::info!("已自动缓存下一章 (流式): {}", next_chapter_id);
+                                                                    tracing::info!("Automatically cached next chapter (streaming): {}", next_chapter_id);
 
                                                                     // Enforce limits
                                                                     let config = state_clone
@@ -243,14 +269,26 @@ pub(super) async fn maybe_spawn_auto_preload(
                                                                         )
                                                                         .await;
                                                                 } else {
-                                                                    tracing::error!("重命名章节 {} 的临时缓存文件失败", next_chapter_id);
+                                                                    tracing::error!(
+                                                                        chapter_id = %next_chapter_id,
+                                                                        message_key = "media.cache.rename_failed",
+                                                                        message_params = %serde_json::json!({
+                                                                            "chapter_id": next_chapter_id,
+                                                                        }),
+                                                                        "Failed to rename temporary cache file"
+                                                                    );
                                                                 }
                                                             }
                                                             Err(e) => {
                                                                 tracing::error!(
-                                                                    "自动缓存的流复制失败: {} - {}",
-                                                                    next_chapter_id,
-                                                                    e
+                                                                    chapter_id = %next_chapter_id,
+                                                                    error = %e,
+                                                                    message_key = "media.cache.stream_copy_failed",
+                                                                    message_params = %serde_json::json!({
+                                                                        "chapter_id": next_chapter_id,
+                                                                        "error": e.to_string(),
+                                                                    }),
+                                                                    "Auto-cache stream copy failed"
                                                                 );
                                                                 let _ = tokio::fs::remove_file(
                                                                     &temp_path,
@@ -261,9 +299,14 @@ pub(super) async fn maybe_spawn_auto_preload(
                                                     }
                                                     Err(e) => {
                                                         tracing::error!(
-                                                            "创建临时缓存文件失败: {} - {}",
-                                                            next_chapter_id,
-                                                            e
+                                                            chapter_id = %next_chapter_id,
+                                                            error = %e,
+                                                            message_key = "media.cache.temp_create_failed",
+                                                            message_params = %serde_json::json!({
+                                                                "chapter_id": next_chapter_id,
+                                                                "error": e.to_string(),
+                                                            }),
+                                                            "Failed to create temporary cache file"
                                                         );
                                                     }
                                                 }
@@ -272,9 +315,14 @@ pub(super) async fn maybe_spawn_auto_preload(
                                     }
                                     Err(e) => {
                                         tracing::error!(
-                                            "获取下一章 {} 的读取器失败: {}",
-                                            next_chapter_id,
-                                            e
+                                            message_key = "media.preload.reader_failed",
+                                            message_params = %serde_json::json!({
+                                                "chapter_id": next_chapter_id.as_str(),
+                                                "error": e.to_string(),
+                                            }),
+                                            chapter_id = %next_chapter_id,
+                                            error = %e,
+                                            "Failed to get next chapter reader"
                                         );
                                     }
                                 }

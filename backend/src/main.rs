@@ -33,25 +33,37 @@ async fn main() -> Result<()> {
         }
     };
 
-    info!("配置加载成功");
-    info!("正在启动 Ting Reader 后端 v{}", env!("CARGO_PKG_VERSION"));
+    info!(message_key = "system.config.loaded", "Configuration loaded");
     info!(
+        message_key = "system.backend.starting",
+        message_params = %serde_json::json!({ "version": env!("CARGO_PKG_VERSION") }),
+        version = env!("CARGO_PKG_VERSION"),
+        "Starting Ting Reader backend"
+    );
+    info!(
+        message_key = "system.server.config",
         host = %config.server.host,
         port = config.server.port,
-        "服务器配置"
+        "Server configuration"
     );
     info!(
+        message_key = "system.database.config",
         path = ?config.database.path,
-        "数据库配置"
+        "Database configuration"
     );
     info!(
+        message_key = "system.plugin.config",
         plugin_dir = ?config.plugins.plugin_dir,
+        preinstalled_dir = ?config.plugins.preinstalled_dir,
         enable_hot_reload = config.plugins.enable_hot_reload,
-        "插件配置"
+        "Plugin configuration"
     );
 
     // Ensure required directories exist
-    info!("正在确保必需的目录存在...");
+    info!(
+        message_key = "system.directories.ensuring",
+        "Ensuring required directories exist"
+    );
     let required_dirs = vec![
         &config.storage.data_dir,
         &config.storage.temp_dir,
@@ -61,26 +73,59 @@ async fn main() -> Result<()> {
 
     for dir in required_dirs {
         if !dir.exists() {
-            info!("Creating directory: {:?}", dir);
+            info!(
+                message_key = "system.directory.creating",
+                message_params = %serde_json::json!({ "path": dir.display().to_string() }),
+                path = %dir.display(),
+                "Creating directory"
+            );
             std::fs::create_dir_all(dir)
                 .map_err(|e| anyhow::anyhow!("Failed to create directory {:?}: {}", dir, e))?;
         }
     }
-    info!("所有必需的目录已就绪");
+    info!(
+        message_key = "system.directories.ready",
+        "All required directories are ready"
+    );
 
     // Initialize database
-    info!("正在初始化数据库...");
+    info!(
+        message_key = "system.database.initializing",
+        "Initializing database"
+    );
     let db = std::sync::Arc::new(db::DatabaseManager::new(
         &config.database.path,
         config.database.connection_pool_size as u32,
         std::time::Duration::from_millis(config.database.busy_timeout),
     )?);
-    info!("正在运行数据库迁移...");
+    info!(
+        message_key = "system.database.migrating",
+        "Running database migrations"
+    );
     db.migrate()?;
-    info!("数据库初始化成功");
+    info!(
+        message_key = "system.database.initialized",
+        "Database initialized"
+    );
 
     // Ensure default admin user exists
     ensure_admin_user(db.clone()).await?;
+
+    // Derive the shared encryption key before plugin discovery so plugin
+    // configuration can be loaded before plugin initialization.
+    let encryption_key =
+        core::master_key::MasterKeyManager::derive_master_key(&config.database.path)
+            .map_err(|e| anyhow::anyhow!("Failed to derive master key: {}", e))?;
+
+    info!(
+        message_key = "system.master_key.derived",
+        "Master key derived from machine features and database path"
+    );
+
+    let plugin_config_manager = std::sync::Arc::new(
+        plugin::PluginConfigManager::new(config.plugins.plugin_dir.join("configs"), encryption_key)
+            .map_err(|e| anyhow::anyhow!("Failed to create plugin config manager: {}", e))?,
+    );
 
     // Initialize plugin system
     let plugin_config = plugin::PluginConfig {
@@ -90,17 +135,38 @@ async fn main() -> Result<()> {
         max_execution_time: std::time::Duration::from_secs(config.plugins.max_execution_time),
     };
     let plugin_manager = std::sync::Arc::new(plugin::PluginManager::new(plugin_config)?);
+    plugin_manager.set_config_manager(plugin_config_manager.clone());
+    plugin_manager
+        .install_preinstalled_packages(&config.plugins.preinstalled_dir)
+        .await?;
     plugin_manager
         .discover_plugins(&config.plugins.plugin_dir)
         .await?;
 
     // Initialize API server
-    info!("正在初始化 HTTP 服务器...");
+    info!(
+        message_key = "system.http.initializing",
+        "Initializing HTTP server"
+    );
     let server_url = format!("http://{}:{}", config.server.host, config.server.port);
-    let server = api::ApiServer::new(config, db, plugin_manager)?;
+    let server = api::ApiServer::new(
+        config,
+        db,
+        plugin_manager,
+        plugin_config_manager,
+        encryption_key,
+    )?;
 
-    info!("听书后端初始化成功");
-    info!(url = %server_url, "服务器已就绪 - 开始处理请求");
+    info!(
+        message_key = "system.backend.initialized",
+        "Ting Reader backend initialized"
+    );
+    info!(
+        message_key = "system.server.ready",
+        message_params = %serde_json::json!({ "url": server_url }),
+        url = %server_url,
+        "Server ready"
+    );
 
     // Start serving (this will block until shutdown signal)
     server.serve().await?;
@@ -118,7 +184,10 @@ async fn ensure_admin_user(db: std::sync::Arc<db::DatabaseManager>) -> Result<()
     let count = user_repo.count().await?;
 
     if count == 0 {
-        info!("No users found, creating default admin user...");
+        info!(
+            message_key = "system.default_admin.creating",
+            "No users found, creating default admin user"
+        );
         let password_hash = hash_password("admin123")?;
         let admin_user = User {
             id: Uuid::new_v4().to_string(),
@@ -128,7 +197,12 @@ async fn ensure_admin_user(db: std::sync::Arc<db::DatabaseManager>) -> Result<()
             created_at: chrono::Utc::now().to_rfc3339(),
         };
         user_repo.create(&admin_user).await?;
-        info!("Default admin user created: username='admin', password='admin123'");
+        info!(
+            message_key = "system.default_admin.created",
+            message_params = %serde_json::json!({ "username": "admin" }),
+            username = "admin",
+            "Default admin user created"
+        );
     }
 
     Ok(())

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, Save } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import type { Book, Chapter, Library } from '../../core/types';
 import apiClient from '../../core/api/client';
 import BookSelector from './BookSelector';
@@ -21,6 +22,7 @@ interface Props {
 const groupSize = 100;
 
 const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, onClose, onSave }) => {
+  const { t } = useTranslation();
   const [chapters, setChapters] = useState<EditableChapter[]>(() => sortChapters(initialChapters));
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<ChapterTab>('main');
@@ -52,7 +54,7 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
         if (cancelled) return;
 
         const libraries = librariesRes.data as Library[];
-        setPathLibrary(libraries.find((library) => library.id === book.libraryId) || null);
+        setPathLibrary(libraries.find((library) => library.id === book.library_id) || null);
       } catch (err) {
         console.error('Failed to load chapter path context', err);
       }
@@ -63,10 +65,10 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
     return () => {
       cancelled = true;
     };
-  }, [book.libraryId]);
+  }, [book.library_id]);
 
-  const mainCount = useMemo(() => chapters.filter((chapter) => !chapter.isExtra).length, [chapters]);
-  const extraCount = useMemo(() => chapters.filter((chapter) => Boolean(chapter.isExtra)).length, [chapters]);
+  const mainCount = useMemo(() => chapters.filter((chapter) => !chapter.is_extra).length, [chapters]);
+  const extraCount = useMemo(() => chapters.filter((chapter) => Boolean(chapter.is_extra)).length, [chapters]);
 
   useEffect(() => {
     if (activeTab === 'extra' && extraCount === 0) {
@@ -79,7 +81,7 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
   }, [activeTab, extraCount, mainCount]);
 
   const tabChapters = useMemo(
-    () => chapters.filter((chapter) => (activeTab === 'extra' ? Boolean(chapter.isExtra) : !chapter.isExtra)),
+    () => chapters.filter((chapter) => (activeTab === 'extra' ? Boolean(chapter.is_extra) : !chapter.is_extra)),
     [activeTab, chapters],
   );
 
@@ -88,14 +90,14 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
     if (!query) return tabChapters;
 
     return tabChapters.filter((chapter) => {
-      const location = formatChapterLocation(chapter, book, pathLibrary).toLowerCase();
+      const location = formatChapterLocation(chapter, book, pathLibrary, t('chapterManager.unknownLibrary')).toLowerCase();
       return (
         chapter.title.toLowerCase().includes(query) ||
-        String(chapter.chapterIndex).includes(query) ||
+        String(chapter.chapter_index).includes(query) ||
         location.includes(query)
       );
     });
-  }, [book, pathLibrary, search, tabChapters]);
+  }, [book, pathLibrary, search, t, tabChapters]);
 
   const groups = useMemo<ChapterGroup[]>(() => {
     const count = Math.ceil(filteredChapters.length / groupSize);
@@ -121,9 +123,9 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
 
   const requestClose = useCallback(() => {
     if (saving || moving) return;
-    if (changedIds.size > 0 && !window.confirm('有未保存更改，确定关闭吗？')) return;
+    if (changedIds.size > 0 && !window.confirm(t('chapterManager.unsavedCloseConfirm'))) return;
     onClose();
-  }, [changedIds.size, moving, onClose, saving]);
+  }, [changedIds.size, moving, onClose, saving, t]);
 
   const handleSearchChange = (value: string) => {
     setSearch(value);
@@ -176,8 +178,8 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
           ? {
               ...chapter,
               title: draft.title,
-              chapterIndex: draft.chapterIndex,
-              isExtra: draft.isExtra ? 1 : 0,
+              chapter_index: draft.chapterIndex,
+              is_extra: draft.isExtra ? 1 : 0,
             }
           : chapter,
       ),
@@ -187,17 +189,17 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
   };
 
   const handleRenumber = () => {
-    if (!window.confirm('确定要按当前列表顺序重新生成章节序号（从 1 开始）吗？')) return;
-    setChapters((current) => current.map((chapter, index) => ({ ...chapter, chapterIndex: index + 1 })));
+    if (!window.confirm(t('chapterManager.renumberConfirm'))) return;
+    setChapters((current) => current.map((chapter, index) => ({ ...chapter, chapter_index: index + 1 })));
     setChangedIds(new Set(chapters.map((chapter) => chapter.id)));
   };
 
   const handleJump = () => {
-    const value = window.prompt('输入章节序号');
+    const value = window.prompt(t('chapterManager.jumpPrompt'));
     const target = Number.parseInt((value || '').trim(), 10);
     if (!Number.isFinite(target) || tabChapters.length === 0) return;
 
-    let targetIndex = tabChapters.findIndex((chapter) => chapter.chapterIndex >= target);
+    let targetIndex = tabChapters.findIndex((chapter) => chapter.chapter_index >= target);
     if (targetIndex < 0) targetIndex = tabChapters.length - 1;
     setSearch('');
     setGroupIndex(Math.floor(targetIndex / groupSize));
@@ -211,8 +213,8 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
         .map((chapter) => ({
           id: chapter.id,
           title: chapter.title,
-          chapter_index: chapter.chapterIndex,
-          is_extra: chapter.isExtra ? 1 : 0,
+          chapter_index: chapter.chapter_index,
+          is_extra: chapter.is_extra ? 1 : 0,
         }));
 
       if (updates.length > 0) {
@@ -223,7 +225,7 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
       onClose();
     } catch (err) {
       console.error('保存章节失败', err);
-      alert('保存失败');
+      alert(t('chapterManager.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -241,13 +243,15 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
       onClose();
     } catch (err) {
       console.error('移动章节失败', err);
-      alert('移动章节失败');
+      alert(t('chapterManager.moveFailed'));
     } finally {
       setMoving(false);
     }
   };
 
-  const editingLocation = editingChapter ? formatChapterLocation(editingChapter, book, pathLibrary) : '';
+  const editingLocation = editingChapter
+    ? formatChapterLocation(editingChapter, book, pathLibrary, t('chapterManager.unknownLibrary'))
+    : '';
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-0 sm:p-4">
@@ -300,7 +304,7 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
             onClick={requestClose}
             className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-500 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
           >
-            取消
+            {t('common.cancel')}
           </button>
           <button
             type="button"
@@ -309,7 +313,7 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
             className="ml-auto inline-flex min-h-10 min-w-0 flex-1 items-center justify-center gap-2 truncate rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 dark:disabled:bg-slate-800 sm:flex-none sm:px-5 sm:min-w-[210px]"
           >
             {saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-            保存更改 ({changedIds.size})
+            {t('chapterManager.saveChanges', { count: changedIds.size })}
           </button>
         </div>
 
@@ -336,7 +340,7 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
 };
 
 const sortChapters = (chapters: Chapter[]): EditableChapter[] => {
-  return [...chapters].sort((a, b) => a.chapterIndex - b.chapterIndex);
+  return [...chapters].sort((a, b) => a.chapter_index - b.chapter_index);
 };
 
 export default ChapterManagerModal;

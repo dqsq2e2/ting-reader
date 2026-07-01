@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import apiClient from '../../core/api/client';
 import type { NotificationEventOption } from '../../core/types';
 import {
@@ -18,6 +19,8 @@ import {
   createHeader,
   draftHeadersToRecord,
   headersToDraft,
+  translateEventOption,
+  translatePresetName,
 } from './webhookData';
 
 interface Props {
@@ -45,13 +48,14 @@ const WebhookModal: React.FC<Props> = ({
   onClose,
   onSave,
 }) => {
+  const { t } = useTranslation();
   const [testing, setTesting] = useState(false);
   const [selectedPresetId, setSelectedPresetId] = useState('');
   const [testResult, setTestResult] = useState<{
     success: boolean;
     status: number;
-    responseBody: string;
-    renderedBody: string;
+    response_body: string;
+    rendered_body: string;
     error?: string;
   } | null>(null);
 
@@ -87,7 +91,7 @@ const WebhookModal: React.FC<Props> = ({
 
   const testWebhook = async () => {
     if (!draft.name.trim() || !draft.url.trim() || draft.events.length === 0 || testing) {
-      alert('请先填写名称、URL 并选择事件');
+      alert(t('notifications.testRequired'));
       return;
     }
 
@@ -101,17 +105,17 @@ const WebhookModal: React.FC<Props> = ({
         events: draft.events,
         secret: draft.secret?.trim() || undefined,
         headers: draftHeadersToRecord(draft.headers),
-        bodyTemplate: draft.bodyTemplate,
+        body_template: draft.bodyTemplate,
       });
       setTestResult(response.data);
     } catch (error) {
-      console.error('测试 Webhook 失败', error);
+      console.error('Webhook test failed', error);
       setTestResult({
         success: false,
         status: 0,
-        responseBody: '',
-        renderedBody: '',
-        error: '请求未完成，请检查 URL、请求头和模板',
+        response_body: '',
+        rendered_body: '',
+        error: t('notifications.testRequestFailed'),
       });
     } finally {
       setTesting(false);
@@ -124,13 +128,13 @@ const WebhookModal: React.FC<Props> = ({
       <div className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
         <div className="px-6 md:px-8 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-bold dark:text-white">{draft.id ? '编辑 Webhook' : '添加 Webhook'}</h2>
-            <p className="text-xs text-slate-500 mt-1">{draft.events.length} 个事件</p>
+            <h2 className="text-2xl font-bold dark:text-white">{draft.id ? t('notifications.editWebhook') : t('notifications.addWebhook')}</h2>
+            <p className="text-xs text-slate-500 mt-1">{t('notifications.eventCount', { count: draft.events.length })}</p>
           </div>
           <button
             onClick={onClose}
             className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            title="关闭"
+            title={t('common.close')}
           >
             <X size={20} />
           </button>
@@ -138,11 +142,11 @@ const WebhookModal: React.FC<Props> = ({
 
         <form onSubmit={onSave} className="p-6 md:p-8 overflow-y-auto space-y-5">
           <label className="space-y-2 block">
-            <span className="text-sm font-bold text-slate-600 dark:text-slate-400">名称</span>
+            <span className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('notifications.name')}</span>
             <input
               value={draft.name}
               onChange={(event) => onChangeDraft({ ...draft, name: event.target.value })}
-              placeholder="企业微信通知"
+              placeholder={t('notifications.namePlaceholder')}
               className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
               autoFocus
             />
@@ -163,16 +167,16 @@ const WebhookModal: React.FC<Props> = ({
 
           <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-3 items-end">
             <label className="space-y-2">
-              <span className="text-sm font-bold text-slate-600 dark:text-slate-400">常见模板</span>
+              <span className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('notifications.commonTemplates')}</span>
               <select
                 value={selectedPresetId}
                 onChange={(event) => applyPreset(event.target.value)}
                 className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
               >
-                <option value="">选择模板</option>
+                <option value="">{t('notifications.chooseTemplate')}</option>
                 {WEBHOOK_PRESETS.map((preset) => (
                   <option key={preset.id} value={preset.id}>
-                    {preset.name}
+                    {translatePresetName(preset, t)}
                   </option>
                 ))}
               </select>
@@ -184,24 +188,24 @@ const WebhookModal: React.FC<Props> = ({
               className="h-12 px-4 inline-flex items-center justify-center gap-2 rounded-xl border border-primary-200 text-primary-700 dark:border-primary-900 dark:text-primary-300 font-bold hover:bg-primary-50 dark:hover:bg-primary-900/20 disabled:opacity-60"
             >
               {testing ? <Loader2 size={17} className="animate-spin" /> : <FlaskConical size={17} />}
-              测试发送
+              {t('notifications.testSend')}
             </button>
           </div>
 
           <div className="rounded-2xl border border-slate-100 dark:border-slate-800 p-4 space-y-3">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-bold text-slate-900 dark:text-white">请求头</p>
+              <p className="text-sm font-bold text-slate-900 dark:text-white">{t('notifications.requestHeaders')}</p>
               <button
                 type="button"
                 onClick={() => onChangeDraft({ ...draft, headers: [...draft.headers, createHeader()] })}
                 className="p-2 rounded-lg text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20"
-                title="添加请求头"
+                title={t('notifications.addHeader')}
               >
                 <Plus size={17} />
               </button>
             </div>
             {draft.headers.length === 0 ? (
-              <p className="text-xs text-slate-400">未设置请求头</p>
+              <p className="text-xs text-slate-400">{t('notifications.noHeaders')}</p>
             ) : (
               <div className="space-y-2">
                 {draft.headers.map((header) => (
@@ -212,13 +216,13 @@ const WebhookModal: React.FC<Props> = ({
                     <input
                       value={header.key}
                       onChange={(event) => updateHeader(header.id, 'key', event.target.value)}
-                      placeholder="Header"
+                      placeholder={t('notifications.headerPlaceholder')}
                       className="col-start-1 row-start-1 sm:col-auto sm:row-auto min-w-0 px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:text-white"
                     />
                     <input
                       value={header.value}
                       onChange={(event) => updateHeader(header.id, 'value', event.target.value)}
-                      placeholder="Value"
+                      placeholder={t('notifications.valuePlaceholder')}
                       className="col-start-1 row-start-2 sm:col-auto sm:row-auto min-w-0 px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:text-white"
                     />
                     <button
@@ -230,7 +234,7 @@ const WebhookModal: React.FC<Props> = ({
                         })
                       }
                       className="col-start-2 row-start-1 row-span-2 sm:col-auto sm:row-auto sm:row-span-1 p-2.5 rounded-xl text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
-                      title="删除请求头"
+                      title={t('notifications.deleteHeader')}
                     >
                       <Trash2 size={17} />
                     </button>
@@ -243,7 +247,7 @@ const WebhookModal: React.FC<Props> = ({
           <label className="space-y-2 block">
             <span className="text-sm font-bold text-slate-600 dark:text-slate-400 flex items-center gap-2">
               <Braces size={16} />
-              Body 模板
+              {t('notifications.bodyTemplate')}
             </span>
             <textarea
               value={draft.bodyTemplate}
@@ -271,19 +275,19 @@ const WebhookModal: React.FC<Props> = ({
                 }`}
               >
                 {testResult.success
-                  ? `发送成功 · HTTP ${testResult.status}`
-                  : testResult.error || `发送失败 · HTTP ${testResult.status}`}
+                  ? t('notifications.sendSuccess', { status: testResult.status })
+                  : testResult.error || t('notifications.sendFailed', { status: testResult.status })}
               </p>
-              {testResult.responseBody && (
+              {testResult.response_body && (
                 <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all text-xs text-slate-600 dark:text-slate-300">
-                  {testResult.responseBody}
+                  {testResult.response_body}
                 </pre>
               )}
-              {testResult.renderedBody && (
+              {testResult.rendered_body && (
                 <details className="text-xs text-slate-500 dark:text-slate-400">
-                  <summary className="cursor-pointer font-bold">实际请求体</summary>
+                  <summary className="cursor-pointer font-bold">{t('notifications.renderedBody')}</summary>
                   <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all text-slate-600 dark:text-slate-300">
-                    {testResult.renderedBody}
+                    {testResult.rendered_body}
                   </pre>
                 </details>
               )}
@@ -292,8 +296,8 @@ const WebhookModal: React.FC<Props> = ({
 
           <div className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/70">
             <div>
-              <p className="font-bold text-slate-900 dark:text-white">启用</p>
-              <p className="text-xs text-slate-500">{draft.enabled ? '开启' : '关闭'}</p>
+              <p className="font-bold text-slate-900 dark:text-white">{t('notifications.enable')}</p>
+              <p className="text-xs text-slate-500">{draft.enabled ? t('notifications.turnOn') : t('notifications.turnOff')}</p>
             </div>
             <button
               type="button"
@@ -313,8 +317,8 @@ const WebhookModal: React.FC<Props> = ({
           <div className="rounded-2xl border border-slate-100 dark:border-slate-800 p-4 space-y-4">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-bold text-slate-900 dark:text-white">监听事件</p>
-                <p className="text-xs text-slate-500 mt-1">已选 {draft.events.length}</p>
+                <p className="text-sm font-bold text-slate-900 dark:text-white">{t('notifications.listenedEvents')}</p>
+                <p className="text-xs text-slate-500 mt-1">{t('notifications.selectedEvents', { count: draft.events.length })}</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -322,21 +326,21 @@ const WebhookModal: React.FC<Props> = ({
                   onClick={selectCommonEvents}
                   className="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-primary-600 transition-colors"
                 >
-                  常用
+                  {t('notifications.common')}
                 </button>
                 <button
                   type="button"
                   onClick={() => onChangeDraft({ ...draft, events: eventOptions.map((event) => event.id) })}
                   className="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-primary-600 transition-colors"
                 >
-                  全选
+                  {t('notifications.selectAll')}
                 </button>
                 <button
                   type="button"
                   onClick={() => onChangeDraft({ ...draft, events: [] })}
                   className="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-red-500 transition-colors"
                 >
-                  清空
+                  {t('notifications.clear')}
                 </button>
               </div>
             </div>
@@ -346,7 +350,7 @@ const WebhookModal: React.FC<Props> = ({
               <input
                 value={eventFilter}
                 onChange={(event) => onChangeEventFilter(event.target.value)}
-                placeholder="搜索事件"
+                placeholder={t('notifications.searchEvents')}
                 className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:text-white"
               />
             </div>
@@ -367,7 +371,7 @@ const WebhookModal: React.FC<Props> = ({
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="font-bold text-sm">{event.label}</p>
+                        <p className="font-bold text-sm">{translateEventOption(event, t).label}</p>
                         <p className="text-[11px] opacity-75 mt-0.5 truncate">{event.id}</p>
                       </div>
                       <span
@@ -384,7 +388,7 @@ const WebhookModal: React.FC<Props> = ({
             </div>
 
             {filteredEventOptions.length === 0 && (
-              <div className="py-8 text-center text-sm text-slate-400">没有匹配的事件</div>
+              <div className="py-8 text-center text-sm text-slate-400">{t('notifications.noMatchedEvents')}</div>
             )}
           </div>
 
@@ -394,14 +398,14 @@ const WebhookModal: React.FC<Props> = ({
               onClick={onClose}
               className="flex-1 py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all"
             >
-              取消
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
               disabled={saving}
               className="flex-1 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 transition-all disabled:opacity-60"
             >
-              {saving ? <Loader2 size={18} className="animate-spin mx-auto" /> : '保存'}
+              {saving ? <Loader2 size={18} className="animate-spin mx-auto" /> : t('common.save')}
             </button>
           </div>
         </form>

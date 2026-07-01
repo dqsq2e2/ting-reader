@@ -108,6 +108,14 @@ pub async fn record_playback_start(
 
     tracing::info!(
         target: "audit::playback",
+        message_key = "playback.started",
+        message_params = %serde_json::json!({
+            "username": user.username,
+            "book_title": book_title,
+            "chapter_title": chapter_title,
+            "position": position_text,
+            "duration": duration_text,
+        }),
         user_id = %user.id,
         username = %user.username,
         action = "playback_start",
@@ -126,11 +134,6 @@ pub async fn record_playback_start(
         library_name = %library_name,
         library_type = %library_type,
         source = "progress_sync",
-        "用户 '{}' 开始播放书籍 '{}' 的章节 '{}'，位置 {}/{}",
-        user.username,
-        book_title,
-        chapter_title,
-        position_text,
-        duration_text
+        "Playback started"
     );
 }

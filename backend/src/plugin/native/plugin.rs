@@ -4,8 +4,10 @@
 //! It bridges the NativeLoader functionality with the Plugin interface.
 
 use super::super::types::{Plugin, PluginContext, PluginMetadata, PluginType};
+use super::host_api::{self, NativeHostInvocationContext};
 use super::loader::NativeLoader;
 use crate::core::error::{Result, TingError};
+use crate::plugin::{plugin_host_user_from_invocation_args, PluginHostGatewayHandle};
 use serde_json::Value;
 use std::sync::{Arc, RwLock};
 
@@ -25,6 +27,9 @@ pub struct NativePlugin {
 
     /// Plugin installation directory
     plugin_path: std::path::PathBuf,
+
+    /// Optional HostGateway bridge configured by PluginManager
+    host_gateway: Option<PluginHostGatewayHandle>,
 }
 
 impl NativePlugin {
@@ -40,6 +45,7 @@ impl NativePlugin {
         metadata: PluginMetadata,
         native_loader: Arc<NativeLoader>,
         plugin_path: std::path::PathBuf,
+        host_gateway: Option<PluginHostGatewayHandle>,
     ) -> Self {
         Self {
             metadata,
@@ -47,6 +53,7 @@ impl NativePlugin {
             native_loader,
             initialized: RwLock::new(false),
             plugin_path,
+            host_gateway,
         }
     }
 
@@ -88,11 +95,22 @@ impl NativePlugin {
         let loader = self.native_loader.clone();
         let plugin_id = self.plugin_id.clone();
         let method = method.to_string();
+        let host_context = NativeHostInvocationContext {
+            plugin_id: self.plugin_id.clone(),
+            permissions: self.metadata.permissions.clone(),
+            user: plugin_host_user_from_invocation_args(&params),
+            host_gateway: self.host_gateway.as_ref().and_then(|handle| handle.get()),
+            runtime_handle: tokio::runtime::Handle::current(),
+        };
 
         // Offload to blocking thread pool to avoid blocking the async runtime
-        tokio::task::spawn_blocking(move || loader.call_function(&plugin_id, &method, params))
-            .await
-            .map_err(|e| TingError::PluginExecutionError(format!("Task join error: {}", e)))?
+        tokio::task::spawn_blocking(move || {
+            host_api::with_invocation_context(host_context, || {
+                loader.call_function(&plugin_id, &method, params)
+            })
+        })
+        .await
+        .map_err(|e| TingError::PluginExecutionError(format!("Task join error: {}", e)))?
     }
 }
 
@@ -105,7 +123,7 @@ impl Plugin for NativePlugin {
     async fn initialize(&self, context: &PluginContext) -> Result<()> {
         tracing::info!(
             plugin_id = %self.plugin_id,
-            "正在初始化原生插件"
+            "Initializing native plugin"
         );
 
         // Call the plugin's initialize method if it exists
@@ -153,7 +171,7 @@ impl Plugin for NativePlugin {
 
         tracing::info!(
             plugin_id = %self.plugin_id,
-            "原生插件初始化成功"
+            "Native plugin initialized successfully"
         );
 
         Ok(())
@@ -212,7 +230,7 @@ impl Plugin for NativePlugin {
 
     async fn garbage_collect(&self) -> Result<()> {
         // Native plugins manage their own memory.
-        tracing::debug!(plugin_id = %self.plugin_id, "请求本地插件进行垃圾回收");
+        tracing::debug!(plugin_id = %self.plugin_id, "Requesting native plugin garbage collection");
 
         // Try to call the plugin's garbage_collect method if it exists
         // We use spawn_blocking because this is a native call
@@ -267,6 +285,7 @@ mod tests {
             metadata,
             loader,
             std::path::PathBuf::from("/tmp/test-plugin"),
+            None,
         );
 
         assert_eq!(plugin.metadata().name, "test-plugin");

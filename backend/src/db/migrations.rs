@@ -413,6 +413,13 @@ CREATE INDEX IF NOT EXISTS idx_progress_user_visible_updated
 ON progress(user_id, history_hidden_at, updated_at);
 "#;
 
+/// Twenty-third schema migration (version 23)
+const MIGRATION_V23: &str = r#"
+-- Store localizable task progress separately from legacy free-form messages.
+ALTER TABLE tasks ADD COLUMN message_key TEXT;
+ALTER TABLE tasks ADD COLUMN message_params TEXT;
+"#;
+
 /// Run all pending database migrations
 ///
 /// This function applies database schema migrations in order.
@@ -420,7 +427,7 @@ ON progress(user_id, history_hidden_at, updated_at);
 /// Before applying migrations, it creates a backup of the database.
 /// If a migration fails, it automatically rolls back to the backup.
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
-    info!("正在运行数据库迁移");
+    info!("Running database migrations");
 
     // Create migration tracking table
     conn.execute_batch(MIGRATION_TABLE)
@@ -435,7 +442,7 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         )
         .map_err(|e| TingError::DatabaseError(e))?;
 
-    info!("当前数据库模式版本: {}", current_version);
+    info!("Current database schema version: {}", current_version);
 
     // Apply migrations
     if current_version < 1 {
@@ -589,7 +596,12 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_migration(conn, 22, MIGRATION_V22)?;
     }
 
-    info!("数据库迁移成功完成");
+    if current_version < 23 {
+        info!("Applying migration v23: Task log localization keys");
+        apply_migration(conn, 23, MIGRATION_V23)?;
+    }
+
+    info!("Database migrations completed successfully");
     Ok(())
 }
 
@@ -598,7 +610,7 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
 /// This function creates a backup before applying migrations.
 /// If any migration fails, it restores from the backup.
 pub fn run_migrations_with_backup(db_path: &Path) -> Result<()> {
-    info!("正在运行数据库迁移 with automatic backup");
+    info!("Running database migrations with automatic backup");
 
     // Create backup before migration
     let backup_path = create_migration_backup(db_path)?;

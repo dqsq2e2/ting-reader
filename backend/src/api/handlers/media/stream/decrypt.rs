@@ -8,6 +8,30 @@ use futures::StreamExt;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio_util::io::ReaderStream;
 
+async fn get_remote_reader(
+    state: &AppState,
+    library: &Library,
+    path: &str,
+    range: Option<(u64, u64)>,
+) -> Result<(Box<dyn AsyncRead + Send + Unpin>, u64)> {
+    if library.library_type == "webdav" {
+        return state
+            .storage_service
+            .get_webdav_reader(library, path, range, state.encryption_key.as_ref())
+            .await;
+    }
+
+    if library.library_type == "rss" || path.starts_with("http://") || path.starts_with("https://")
+    {
+        return state.storage_service.get_http_reader(path, range).await;
+    }
+
+    Err(TingError::ValidationError(format!(
+        "Unsupported remote library type '{}'",
+        library.library_type
+    )))
+}
+
 /// Create a decrypted stream for a file using the specified plugin
 pub(crate) async fn create_decrypted_stream(
     state: &AppState,
@@ -49,16 +73,10 @@ pub(crate) async fn create_decrypted_stream(
             size,
         )
     } else {
-        let (reader, size) = state
-            .storage_service
-            .get_webdav_reader(
-                &library,
-                &chapter.path,
-                Some((0, probe_size)),
-                state.encryption_key.as_ref(),
-            )
-            .await
-            .map_err(|e| TingError::NotFound(format!("WebDAV file not found: {}", e)))?;
+        let (reader, size) =
+            get_remote_reader(state, library, &chapter.path, Some((0, probe_size)))
+                .await
+                .map_err(|e| TingError::NotFound(format!("Remote media not found: {}", e)))?;
         (
             Box::new(reader.take(probe_size)) as Box<dyn AsyncRead + Send + Unpin>,
             size,
@@ -82,8 +100,13 @@ pub(crate) async fn create_decrypted_stream(
         )
         .await
         .map_err(|e| {
-            tracing::error!("获取元数据读取大小失败: {}", e);
-            TingError::PluginExecutionError(format!("获取元数据读取大小失败: {}", e))
+            tracing::error!(
+                error = %e,
+                message_key = "media.metadata_read_size.failed",
+                message_params = %serde_json::json!({ "error": e.to_string() }),
+                "Failed to get metadata read size"
+            );
+            TingError::PluginExecutionError(format!("Failed to get metadata read size: {}", e))
         })?;
 
     let header_size = size_json["size"].as_u64().unwrap_or(8192);
@@ -108,15 +131,8 @@ pub(crate) async fn create_decrypted_stream(
             size,
         )
     } else {
-        let (reader, size) = state
-            .storage_service
-            .get_webdav_reader(
-                &library,
-                &chapter.path,
-                Some((0, header_size)),
-                state.encryption_key.as_ref(),
-            )
-            .await?;
+        let (reader, size) =
+            get_remote_reader(state, library, &chapter.path, Some((0, header_size))).await?;
         (
             Box::new(reader.take(header_size)) as Box<dyn AsyncRead + Send + Unpin>,
             size,
@@ -140,8 +156,13 @@ pub(crate) async fn create_decrypted_stream(
         )
         .await
         .map_err(|e| {
-            tracing::error!("获取解密计划失败: {}", e);
-            TingError::PluginExecutionError(format!("获取解密计划失败: {}", e))
+            tracing::error!(
+                error = %e,
+                message_key = "media.decryption_plan.failed",
+                message_params = %serde_json::json!({ "error": e.to_string() }),
+                "Failed to get decryption plan"
+            );
+            TingError::PluginExecutionError(format!("Failed to get decryption plan: {}", e))
         })?;
 
     let plan: DecryptionPlan = serde_json::from_value(plan_json)
@@ -194,18 +215,14 @@ pub(crate) async fn create_decrypted_stream(
                         0,
                     )
                 } else {
-                    let (reader, _) = state
-                        .storage_service
-                        .get_webdav_reader(
-                            &library,
-                            &chapter.path,
-                            Some((offset, offset + length as u64)),
-                            state.encryption_key.as_ref(),
-                        )
-                        .await
-                        .map_err(|e| {
-                            TingError::NotFound(format!("WebDAV file not found: {}", e))
-                        })?;
+                    let (reader, _) = get_remote_reader(
+                        state,
+                        library,
+                        &chapter.path,
+                        Some((offset, offset + length as u64)),
+                    )
+                    .await
+                    .map_err(|e| TingError::NotFound(format!("Remote media not found: {}", e)))?;
                     (
                         Box::new(reader.take(length as u64)) as Box<dyn AsyncRead + Send + Unpin>,
                         0,
@@ -328,7 +345,7 @@ pub(crate) async fn create_decrypted_stream(
                                 as Box<dyn AsyncRead + Send + Unpin>,
                             0,
                         )
-                    } else {
+                    } else if library.library_type == "webdav" {
                         let (reader, _) = state
                             .storage_service
                             .get_webdav_reader(
@@ -337,6 +354,17 @@ pub(crate) async fn create_decrypted_stream(
                                 Some((read_start, read_end)),
                                 encryption_key.as_ref(),
                             )
+                            .await
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e))?;
+                        (
+                            Box::new(reader.take(read_end - read_start))
+                                as Box<dyn AsyncRead + Send + Unpin>,
+                            0,
+                        )
+                    } else {
+                        let (reader, _) = state
+                            .storage_service
+                            .get_http_reader(&chapter_path, Some((read_start, read_end)))
                             .await
                             .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e))?;
                         (

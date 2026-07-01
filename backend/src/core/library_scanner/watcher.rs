@@ -172,7 +172,7 @@ impl LibraryWatcher {
         self.watchers.write().await.insert(lib_id.clone(), watcher);
         self.debounce_senders.write().await.insert(lib_id, tx);
 
-        info!("开始监视库 {} at {:?}", library_id, path_buf);
+        info!("Started watching library {} at {:?}", library_id, path_buf);
 
         Ok(())
     }

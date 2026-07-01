@@ -26,22 +26,22 @@ export const useIsDarkMode = () => {
 
 // ─── useThemeColorSync ──────────────────────────────────────────────────────
 // 同步当前书籍的主题色到 player store：
-// 1. 优先使用 book.themeColor（后端/上次缓存）。
+// 1. 优先使用 book.theme_color（后端/上次缓存）。
 // 2. 否则用 FastAverageColor 从封面提取主色调；为避免下次重复提取，
-//    会顺手把提取出的颜色回写到 store.currentBook.themeColor。
+//    会顺手把提取出的颜色回写到 store.currentBook.theme_color。
 export const useThemeColorSync = (currentBook: Book | null | undefined) => {
   const setThemeColor = usePlayerStore((state) => state.setThemeColor);
 
   useEffect(() => {
     if (!currentBook) return;
-    const color = currentBook.themeColor;
+    const color = currentBook.theme_color;
     if (color) {
       setThemeColor(color);
       return;
     }
-    if (!currentBook.coverUrl) return;
+    if (!currentBook.cover_url) return;
 
-    const coverUrl = getCoverUrl(currentBook.coverUrl, currentBook.libraryId, currentBook.id);
+    const coverUrl = getCoverUrl(currentBook.cover_url, currentBook.library_id, currentBook.id);
     const fac = new FastAverageColor();
     fac
       .getColorAsync(coverUrl, { algorithm: 'dominant' })
@@ -50,13 +50,13 @@ export const useThemeColorSync = (currentBook: Book | null | undefined) => {
         // 把提取出的颜色塞回 store 的 currentBook，避免本会话内重复提取。
         usePlayerStore.setState((state) => ({
           currentBook: state.currentBook
-            ? { ...state.currentBook, themeColor: extracted.hex }
+            ? { ...state.currentBook, theme_color: extracted.hex }
             : null,
         }));
       })
       .catch((e) => console.warn('在播放器中从封面提取颜色失败', e));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentBook?.id, currentBook?.themeColor]);
+  }, [currentBook?.id, currentBook?.theme_color]);
 };
 
 // ─── useChapterGroups ───────────────────────────────────────────────────────
@@ -79,8 +79,8 @@ export const useChapterGroups = (
   activeTab: 'main' | 'extra'
 ) => {
   const { mainChapters, extraChapters } = useMemo(() => ({
-    mainChapters: chapters.filter((c) => !c.isExtra),
-    extraChapters: chapters.filter((c) => c.isExtra),
+    mainChapters: chapters.filter((c) => !c.is_extra),
+    extraChapters: chapters.filter((c) => c.is_extra),
   }), [chapters]);
 
   const currentChapters = activeTab === 'main' ? mainChapters : extraChapters;
@@ -90,8 +90,8 @@ export const useChapterGroups = (
     for (let i = 0; i < currentChapters.length; i += CHAPTERS_PER_GROUP) {
       const slice = currentChapters.slice(i, i + CHAPTERS_PER_GROUP);
       g.push({
-        start: slice[0]?.chapterIndex || (i + 1),
-        end: slice[slice.length - 1]?.chapterIndex || (i + slice.length),
+        start: slice[0]?.chapter_index || (i + 1),
+        end: slice[slice.length - 1]?.chapter_index || (i + slice.length),
         chapters: slice,
       });
     }
@@ -315,17 +315,26 @@ export const formatPlayerTime = (time: number): string => {
 };
 
 interface ChapterProgressLike {
-  progressPosition?: number | null;
+  progress_position?: number | null;
   duration?: number | null;
 }
 
-export const getChapterProgressText = (chapter: ChapterProgressLike): string | null => {
-  if (!chapter.progressPosition || !chapter.duration) return null;
+export const getChapterProgressText = (
+  chapter: ChapterProgressLike,
+  labels: {
+    complete: string;
+    percent: (percent: number) => string;
+  } = {
+    complete: 'Completed',
+    percent: (percent) => `Played ${percent}%`,
+  }
+): string | null => {
+  if (!chapter.progress_position || !chapter.duration) return null;
 
-  const percent = Math.floor((chapter.progressPosition / chapter.duration) * 100);
+  const percent = Math.floor((chapter.progress_position / chapter.duration) * 100);
   if (percent === 0) return null;
-  if (percent >= 95) return '已播完';
-  return `已播${percent}%`;
+  if (percent >= 95) return labels.complete;
+  return labels.percent(percent);
 };
 
 // ─── useStuckDecodeDetector ─────────────────────────────────────────────────
@@ -449,10 +458,10 @@ export const useProgressSync = (options: {
       };
       const saveHttp = (playbackStart?: number) => {
         apiClient.post('/api/progress', {
-          bookId,
-          chapterId,
+          book_id: bookId,
+          chapter_id: chapterId,
           position: Math.floor(currentTimeRef.current),
-          ...(playbackStart !== undefined ? { playbackStart } : {}),
+          ...(playbackStart !== undefined ? { playback_start: playbackStart } : {}),
         }).catch(err => console.error('HTTP进度同步失败', err));
       };
 
@@ -486,7 +495,7 @@ export const useProgressSync = (options: {
     if (prevIsPlayingRef.current && !isPlaying && bookId && chapterId) {
       const pos = Math.floor(currentTimeRef.current);
       wsSendProgress(bookId, chapterId, pos);
-      apiClient.post('/api/progress', { bookId, chapterId, position: pos })
+      apiClient.post('/api/progress', { book_id: bookId, chapter_id: chapterId, position: pos })
         .catch(err => console.error('暂停时保存进度失败', err));
     }
     prevIsPlayingRef.current = isPlaying;

@@ -22,6 +22,7 @@ use super::super::types::metadata::read_plugin_metadata;
 use super::super::types::{PluginMetadata, PluginType};
 use super::runtime::JsRuntimeWrapper;
 use crate::core::error::TingError;
+use crate::plugin::PluginHostGatewayHandle;
 
 /// JavaScript plugin loader
 ///
@@ -40,20 +41,20 @@ impl JavaScriptPluginLoader {
     /// Create a new JavaScript plugin loader from a plugin directory
     ///
     /// # Arguments
-    /// * `plugin_dir` - Path to the plugin directory containing plugin.json and .js files
+    /// * `plugin_dir` - Path to the plugin directory containing plugin.yml/plugin.yaml and .js files
     ///
     /// # Returns
     /// A new JavaScriptPluginLoader instance
     ///
     /// # Errors
     /// Returns an error if:
-    /// - plugin.json cannot be read or parsed
+    /// - plugin.yml/plugin.yaml cannot be read or parsed
     /// - The runtime field is not "javascript"
     /// - The entry point file doesn't exist
     pub fn new(plugin_dir: PathBuf) -> Result<Self> {
         info!("Loading JavaScript plugin from: {}", plugin_dir.display());
 
-        // Read and parse plugin.json using shared metadata reader
+        // Read and parse plugin.yml/plugin.yaml using shared metadata reader
         let metadata = read_plugin_metadata(&plugin_dir)?;
 
         // Verify this is a JavaScript plugin
@@ -97,6 +98,17 @@ impl JavaScriptPluginLoader {
         JavaScriptPluginExecutor::new(self.plugin_dir.clone(), self.metadata.clone())
     }
 
+    pub fn create_executor_with_host_gateway(
+        &self,
+        host_gateway: Option<PluginHostGatewayHandle>,
+    ) -> Result<JavaScriptPluginExecutor> {
+        JavaScriptPluginExecutor::new_with_host_gateway(
+            self.plugin_dir.clone(),
+            self.metadata.clone(),
+            host_gateway,
+        )
+    }
+
     /// Install npm dependencies for this plugin
     ///
     /// This method generates a package.json and runs npm install if the plugin
@@ -133,8 +145,12 @@ impl JavaScriptPluginLoader {
             &self.metadata.npm_dependencies,
         )?;
 
-        // Install dependencies
-        npm_manager.install_dependencies(&self.plugin_dir)?;
+        // Install dependencies, reusing the shared cache when configured.
+        npm_manager.install_dependencies_with_cache(
+            &self.plugin_dir,
+            &self.metadata.name,
+            &self.metadata.npm_dependencies,
+        )?;
 
         info!(
             "npm dependencies installed successfully for plugin: {}",
@@ -152,25 +168,13 @@ impl JavaScriptPluginLoader {
     }
 
     /// Verify that the plugin metadata specifies JavaScript runtime
-    fn verify_runtime(metadata: &PluginMetadata, plugin_dir: &Path) -> Result<()> {
-        // Read plugin.json to check for runtime field
-        let metadata_path = plugin_dir.join("plugin.json");
-        let content = std::fs::read_to_string(&metadata_path)?;
-        let json: Value = serde_json::from_str(&content)?;
-
-        if let Some(runtime) = json.get("runtime") {
-            if let Some(runtime_str) = runtime.as_str() {
-                if runtime_str != "javascript" {
-                    return Err(TingError::PluginLoadError(format!(
-                        "Plugin runtime is '{}', expected 'javascript'",
-                        runtime_str
-                    ))
-                    .into());
-                }
-            } else {
-                return Err(TingError::PluginLoadError(
-                    "Plugin 'runtime' field must be a string".to_string(),
-                )
+    fn verify_runtime(metadata: &PluginMetadata, _plugin_dir: &Path) -> Result<()> {
+        if let Some(runtime) = metadata.runtime.as_deref() {
+            if runtime != "javascript" {
+                return Err(TingError::PluginLoadError(format!(
+                    "Plugin runtime is '{}', expected 'javascript'",
+                    runtime
+                ))
                 .into());
             }
         } else {
@@ -206,8 +210,21 @@ pub struct JavaScriptPluginExecutor {
 impl JavaScriptPluginExecutor {
     /// Create a new JavaScript plugin executor
     fn new(plugin_dir: PathBuf, metadata: PluginMetadata) -> Result<Self> {
+        Self::new_with_host_gateway(plugin_dir, metadata, None)
+    }
+
+    fn new_with_host_gateway(
+        plugin_dir: PathBuf,
+        metadata: PluginMetadata,
+        host_gateway: Option<PluginHostGatewayHandle>,
+    ) -> Result<Self> {
         let entry_point = plugin_dir.join(&metadata.entry_point);
-        let runtime = JsRuntimeWrapper::new(entry_point, metadata.clone(), None)?;
+        let runtime = JsRuntimeWrapper::new_with_host_gateway(
+            entry_point,
+            metadata.clone(),
+            None,
+            host_gateway,
+        )?;
 
         Ok(Self {
             runtime,
@@ -233,8 +250,11 @@ impl JavaScriptPluginExecutor {
         // Call the initialize function if it exists
         let init_code = format!(
             r#"
+            const context = {};
+            globalThis.Ting = globalThis.Ting || {{}};
+            globalThis.Ting.config = context.config || {{}};
+            globalThis.Ting.dataDir = context.data_dir || null;
             if (typeof initialize === 'function') {{
-                const context = {};
                 initialize(context);
             }}
             "#,
@@ -311,22 +331,29 @@ mod tests {
         let plugin_dir = temp_dir.path().join(name);
         fs::create_dir(&plugin_dir).unwrap();
 
-        // Create plugin.json
+        // Create plugin.yml
         let metadata = serde_json::json!({
             "name": name,
             "version": "1.0.0",
-            "plugin_type": "utility",
+            "min_core_version": "1.4.8",
             "author": "Test Author",
             "description": "Test JavaScript plugin",
             "runtime": runtime,
             "entry_point": "plugin.js",
             "dependencies": [],
-            "permissions": []
+            "permissions": [],
+            "capabilities": [
+                {
+                    "id": "test.tools",
+                    "kind": "tool_provider",
+                    "invoke": "hello"
+                }
+            ]
         });
 
         fs::write(
-            plugin_dir.join("plugin.json"),
-            serde_json::to_string_pretty(&metadata).unwrap(),
+            plugin_dir.join("plugin.yml"),
+            serde_yaml::to_string(&metadata).unwrap(),
         )
         .unwrap();
 
@@ -411,20 +438,27 @@ mod tests {
         let plugin_dir = temp_dir.path().join("test-plugin");
         fs::create_dir(&plugin_dir).unwrap();
 
-        // Create plugin.json but no plugin.js
+        // Create plugin.yml but no plugin.js
         let metadata = serde_json::json!({
             "name": "test-plugin",
             "version": "1.0.0",
-            "plugin_type": "utility",
+            "min_core_version": "1.4.8",
             "author": "Test Author",
             "description": "Test plugin",
             "runtime": "javascript",
             "entry_point": "plugin.js",
+            "capabilities": [
+                {
+                    "id": "test.tools",
+                    "kind": "tool_provider",
+                    "invoke": "hello"
+                }
+            ]
         });
 
         fs::write(
-            plugin_dir.join("plugin.json"),
-            serde_json::to_string_pretty(&metadata).unwrap(),
+            plugin_dir.join("plugin.yml"),
+            serde_yaml::to_string(&metadata).unwrap(),
         )
         .unwrap();
 
@@ -435,6 +469,19 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("Entry point file not found"));
+    }
+
+    #[test]
+    fn test_install_npm_dependencies_skips_when_empty() {
+        let temp_dir = create_test_plugin_dir("test-plugin", "javascript");
+        let plugin_dir = temp_dir.path().join("test-plugin");
+        let loader = JavaScriptPluginLoader::new(plugin_dir.clone()).unwrap();
+        let npm_manager =
+            super::super::npm::NpmManager::new(Some(PathBuf::from("missing-npm")), None);
+
+        loader.install_npm_dependencies(&npm_manager).unwrap();
+
+        assert!(!plugin_dir.join("package.json").exists());
     }
 
     #[tokio::test]

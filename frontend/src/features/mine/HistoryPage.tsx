@@ -22,20 +22,23 @@ import {
   type CoverShape,
 } from '../../core/hooks/useBookshelfCoverShape';
 import LoadingSpinner from '../../shared/ui/LoadingSpinner';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 
 interface HistoryBookGroup {
-  bookId: string;
-  bookTitle: string;
-  coverUrl?: string;
-  libraryId?: string;
+  book_id: string;
+  book_title: string;
+  cover_url?: string;
+  library_id?: string;
   latest: Progress;
   chapters: Progress[];
 }
 
 const progressKey = (progress: Progress) =>
-  progress.id || `${progress.bookId}:${progress.chapterId}`;
+  progress.id || `${progress.book_id}:${progress.chapter_id}`;
 
 const HistoryPage: React.FC = () => {
+  const { t } = useTranslation();
   const currentChapter = usePlayerStore((state) => state.currentChapter);
   const coverShape = useBookshelfCoverShape();
   const [recentPlays, setRecentPlays] = useState<Progress[]>([]);
@@ -65,20 +68,20 @@ const HistoryPage: React.FC = () => {
   const groups = useMemo(() => {
     const map = new Map<string, HistoryBookGroup>();
     for (const item of recentPlays) {
-      if (!item.chapterId) continue;
-      const existing = map.get(item.bookId);
+      if (!item.chapter_id) continue;
+      const existing = map.get(item.book_id);
       if (existing) {
         existing.chapters.push(item);
-        if (new Date(item.updatedAt).getTime() > new Date(existing.latest.updatedAt).getTime()) {
+        if (new Date(item.updated_at).getTime() > new Date(existing.latest.updated_at).getTime()) {
           existing.latest = item;
         }
         continue;
       }
-      map.set(item.bookId, {
-        bookId: item.bookId,
-        bookTitle: item.bookTitle || '未知书籍',
-        coverUrl: item.coverUrl,
-        libraryId: item.libraryId,
+      map.set(item.book_id, {
+        book_id: item.book_id,
+        book_title: item.book_title || t('historyPage.unknownBook'),
+        cover_url: item.cover_url,
+        library_id: item.library_id,
         latest: item,
         chapters: [item],
       });
@@ -88,13 +91,13 @@ const HistoryPage: React.FC = () => {
       .map((group) => ({
         ...group,
         chapters: [...group.chapters].sort(
-          (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+          (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
         ),
       }))
       .sort(
-        (a, b) => new Date(b.latest.updatedAt).getTime() - new Date(a.latest.updatedAt).getTime()
+        (a, b) => new Date(b.latest.updated_at).getTime() - new Date(a.latest.updated_at).getTime()
       );
-  }, [recentPlays]);
+  }, [recentPlays, t]);
 
   const allIds = useMemo(() => recentPlays.map(progressKey), [recentPlays]);
   const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
@@ -160,14 +163,14 @@ const HistoryPage: React.FC = () => {
     try {
       const selected = recentPlays.filter((item) => selectedIds.has(progressKey(item)));
       await apiClient.post('/api/progress/recent/delete', {
-        progressIds: selected.map((item) => item.id).filter(Boolean),
-        chapterIds: selected.filter((item) => !item.id).map((item) => item.chapterId),
+        progress_ids: selected.map((item) => item.id).filter(Boolean),
+        chapter_ids: selected.filter((item) => !item.id).map((item) => item.chapter_id),
       });
       setRecentPlays((current) => current.filter((item) => !selectedIds.has(progressKey(item))));
       exitSelectionMode();
     } catch (err) {
       console.error('删除我的历史失败', err);
-      alert('删除历史失败，请稍后重试');
+      alert(t('historyPage.deleteFailed'));
     } finally {
       setDeleting(false);
     }
@@ -186,10 +189,10 @@ const HistoryPage: React.FC = () => {
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
               <History className="text-primary-600" />
-              我的历史
+              {t('historyPage.title')}
             </h1>
             <p className="text-sm md:text-base text-slate-500 dark:text-slate-400 mt-1">
-              按书籍整理，共 {groups.length} 本、{recentPlays.length} 个章节。
+              {t('historyPage.subtitle', { books: groups.length, chapters: recentPlays.length })}
             </p>
           </div>
 
@@ -201,7 +204,7 @@ const HistoryPage: React.FC = () => {
                 className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-sm font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
               >
                 {allSelected ? <CheckSquare size={18} /> : <Square size={18} />}
-                全选
+                {t('historyPage.selectAll')}
               </button>
               <button
                 onClick={deleteSelected}
@@ -210,12 +213,12 @@ const HistoryPage: React.FC = () => {
               >
                 <Trash2 size={18} />
                 {deleting ? (
-                  '删除中...'
+                  t('historyPage.deleting')
                 ) : (
                   <>
-                    <span className="sm:hidden">删除</span>
+                    <span className="sm:hidden">{t('historyPage.delete')}</span>
                     <span className="hidden sm:inline">
-                      {`删除所选 ${selectedIds.size || ''}`.trim()}
+                      {t('historyPage.deleteSelected', { count: selectedIds.size })}
                     </span>
                   </>
                 )}
@@ -226,7 +229,7 @@ const HistoryPage: React.FC = () => {
                 className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
               >
                 <X size={18} />
-                取消
+                {t('historyPage.cancel')}
               </button>
             </div>
           ) : (
@@ -236,7 +239,7 @@ const HistoryPage: React.FC = () => {
               className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <CheckSquare size={18} />
-              选择
+              {t('historyPage.select')}
             </button>
           )}
         </div>
@@ -245,13 +248,13 @@ const HistoryPage: React.FC = () => {
           <div className="space-y-3">
             {groups.map((group) => (
               <HistoryBookSection
-                key={group.bookId}
+                key={group.book_id}
                 group={group}
                 coverShape={coverShape}
-                expanded={expandedBookIds.has(group.bookId)}
+                expanded={expandedBookIds.has(group.book_id)}
                 selectionMode={selectionMode}
                 selectedIds={selectedIds}
-                onToggleExpanded={() => toggleExpanded(group.bookId)}
+                onToggleExpanded={() => toggleExpanded(group.book_id)}
                 onToggleBook={() => toggleBook(group)}
                 onToggleProgress={toggleProgress}
               />
@@ -262,9 +265,9 @@ const HistoryPage: React.FC = () => {
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 mb-4">
               <Play size={30} />
             </div>
-            <p className="text-slate-500">暂无我的历史，去书架开始第一本吧。</p>
+            <p className="text-slate-500">{t('historyPage.empty')}</p>
             <Link to="/bookshelf" className="mt-4 inline-flex px-5 py-2.5 rounded-xl bg-primary-600 text-white text-sm font-bold">
-              去书架
+              {t('historyPage.goBookshelf')}
             </Link>
           </div>
         )}
@@ -297,6 +300,7 @@ const HistoryBookSection = ({
   onToggleBook: () => void;
   onToggleProgress: (progress: Progress) => void;
 }) => {
+  const { t, i18n } = useTranslation();
   const latest = group.latest;
   const latestPercent = progressPercent(latest);
   const chapterIds = group.chapters.map(progressKey);
@@ -310,7 +314,7 @@ const HistoryBookSection = ({
           <button
             onClick={onToggleBook}
             className="shrink-0 text-primary-600 hover:text-primary-700"
-            aria-label={`选择 ${group.bookTitle}`}
+            aria-label={t('historyPage.chooseBook', { title: group.book_title })}
           >
             {bookSelected ? <CheckSquare size={22} /> : <Square size={22} />}
           </button>
@@ -321,8 +325,8 @@ const HistoryBookSection = ({
         >
           <div className={`w-16 md:w-20 ${getCoverAspectClass(coverShape)} rounded-xl overflow-hidden shrink-0 shadow-sm`}>
             <img
-              src={getCoverUrl(group.coverUrl, group.libraryId, group.bookId)}
-              alt={group.bookTitle}
+              src={getCoverUrl(group.cover_url, group.library_id, group.book_id)}
+              alt={group.book_title}
               referrerPolicy="no-referrer"
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               onError={(event) => {
@@ -333,16 +337,16 @@ const HistoryBookSection = ({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <p className="font-bold text-sm md:text-base dark:text-white group-hover:text-primary-600 transition-colors truncate">
-                {group.bookTitle}
+                {group.book_title}
               </p>
               <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
-                {group.chapters.length} 章
+                {t('historyPage.chapterUnit', { count: group.chapters.length })}
               </span>
             </div>
-            <p className="text-xs text-slate-500 truncate mt-0.5">{latest.chapterTitle || '未知章节'}</p>
+            <p className="text-xs text-slate-500 truncate mt-0.5">{latest.chapter_title || t('historyPage.unknownChapter')}</p>
             <p className="text-xs text-slate-400 truncate mt-1 flex items-center gap-1">
               <Clock size={13} className="shrink-0" />
-              最后收听：{formatLastListenedTime(latest.updatedAt)}
+              {t('historyPage.lastListened', { time: formatLastListenedTime(latest.updated_at, t, i18n.language) })}
             </p>
             <div className="flex items-center justify-between mt-3">
               <div className="flex-1 h-1 bg-slate-100 dark:bg-slate-800 rounded-full mr-3 overflow-hidden">
@@ -387,6 +391,7 @@ const HistoryChapterRow = ({
   selected: boolean;
   onToggle: () => void;
 }) => {
+  const { t, i18n } = useTranslation();
   const percent = progressPercent(progress);
   const body = (
     <>
@@ -397,18 +402,20 @@ const HistoryChapterRow = ({
             onToggle();
           }}
           className="shrink-0 text-primary-600 hover:text-primary-700"
-          aria-label={`选择 ${progress.chapterTitle || '章节'}`}
+          aria-label={t('historyPage.chooseChapter', {
+            title: progress.chapter_title || t('historyPage.chapterFallback'),
+          })}
         >
           {selected ? <CheckSquare size={20} /> : <Square size={20} />}
         </button>
       )}
       <div className="flex-1 min-w-0">
         <p className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">
-          {progress.chapterTitle || '未知章节'}
+          {progress.chapter_title || t('historyPage.unknownChapter')}
         </p>
         <p className="text-xs text-slate-400 mt-1 flex items-center gap-1">
           <Clock size={13} className="shrink-0" />
-          {formatLastListenedTime(progress.updatedAt)}
+          {formatLastListenedTime(progress.updated_at, t, i18n.language)}
         </p>
         <div className="flex items-center justify-between mt-2">
           <div className="flex-1 h-1 bg-slate-200 dark:bg-slate-800 rounded-full mr-3 overflow-hidden">
@@ -417,7 +424,7 @@ const HistoryChapterRow = ({
               style={{ width: `${percent}%` }}
             />
           </div>
-          <span className="text-[10px] text-slate-400 shrink-0">{percent >= 95 ? '已播完' : `${percent}%`}</span>
+          <span className="text-[10px] text-slate-400 shrink-0">{percent >= 95 ? t('historyPage.completed') : `${percent}%`}</span>
         </div>
       </div>
     </>
@@ -433,7 +440,7 @@ const HistoryChapterRow = ({
 
   return (
     <Link
-      to={`/book/${progress.bookId}?chapterId=${encodeURIComponent(progress.chapterId)}`}
+      to={`/book/${progress.book_id}?chapter_id=${encodeURIComponent(progress.chapter_id)}`}
       className="flex items-center gap-3 px-4 md:px-5 py-3 border-t border-slate-100 dark:border-slate-800 first:border-t-0 hover:bg-white dark:hover:bg-slate-900 transition-colors"
     >
       {body}
@@ -442,26 +449,27 @@ const HistoryChapterRow = ({
 };
 
 const progressPercent = (progress: Progress) => {
-  const duration = progress.chapterDuration || progress.duration || 1;
+  const duration = progress.chapter_duration || progress.duration || 1;
   return Math.min(100, Math.round((progress.position / duration) * 100));
 };
 
-const formatLastListenedTime = (value?: string) => {
-  if (!value) return '未知时间';
+const formatLastListenedTime = (value: string | undefined, t: TFunction, language: string) => {
+  if (!value) return t('historyPage.unknownTime');
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '未知时间';
+  if (Number.isNaN(date.getTime())) return t('historyPage.unknownTime');
 
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
   const dayDiff = Math.round((startOfToday - startOfDate) / 86400000);
-  const time = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  const locale = language?.startsWith('en') ? 'en-US' : 'zh-CN';
+  const time = date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
 
-  if (dayDiff === 0) return `今天 ${time}`;
-  if (dayDiff === 1) return `昨天 ${time}`;
-  if (dayDiff > 1 && dayDiff < 7) return `${dayDiff} 天前 ${time}`;
+  if (dayDiff === 0) return t('historyPage.today', { time });
+  if (dayDiff === 1) return t('historyPage.yesterday', { time });
+  if (dayDiff > 1 && dayDiff < 7) return t('historyPage.daysAgo', { count: dayDiff, time });
 
-  return date.toLocaleString('zh-CN', {
+  return date.toLocaleString(locale, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',

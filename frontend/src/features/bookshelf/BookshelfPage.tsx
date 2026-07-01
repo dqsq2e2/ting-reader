@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import apiClient from '../../core/api/client';
 import type { Book, Library, Series } from '../../core/types';
 import BookCard from '../../shared/cards/BookCard';
@@ -10,9 +11,11 @@ import { Search, Database, Plus, Library as LibraryIcon, Layers, Check, X, Check
 import { usePlayerStore } from '../../core/stores/playerStore';
 import { useAuthStore } from '../../core/stores/authStore';
 import { getPinyinInitial } from '../../core/utils/pinyin';
+import { localeCompare } from '../../core/utils/locale';
 import { publishBookshelfCoverShape } from '../../core/hooks/useBookshelfCoverShape';
 
 const BookshelfPage: React.FC = () => {
+  const { t } = useTranslation();
   const currentChapter = usePlayerStore((state) => state.currentChapter);
   const user = useAuthStore((state) => state.user);
   const isAdmin = user?.role === 'admin';
@@ -72,22 +75,22 @@ const BookshelfPage: React.FC = () => {
     const loadSettings = async () => {
       try {
         const res = await apiClient.get('/api/settings');
-        const settings = res.data.settingsJson || {};
+        const settings = res.data.settings_json || {};
         
-        if (settings.bookshelfLibraryId) {
-          setSelectedLibraryId(settings.bookshelfLibraryId);
+        if (settings.bookshelf_library_id) {
+          setSelectedLibraryId(settings.bookshelf_library_id);
         }
-        if (settings.bookshelfSortBy) {
-          setSortBy(settings.bookshelfSortBy);
+        if (settings.bookshelf_sort_by) {
+          setSortBy(settings.bookshelf_sort_by);
         }
-        if (settings.bookshelfIconSize) {
-          setIconSize(settings.bookshelfIconSize);
+        if (settings.bookshelf_icon_size) {
+          setIconSize(settings.bookshelf_icon_size);
         }
-        if (settings.bookshelfCoverShape) {
-          setCoverShape(settings.bookshelfCoverShape);
+        if (settings.bookshelf_cover_shape) {
+          setCoverShape(settings.bookshelf_cover_shape);
         }
       } catch (err) {
-        console.error('加载设置失败', err);
+        console.error('Failed to load bookshelf settings', err);
       } finally {
         setSettingsLoaded(true);
       }
@@ -97,26 +100,26 @@ const BookshelfPage: React.FC = () => {
 
   const handleLibraryChange = (newId: string) => {
     setSelectedLibraryId(newId);
-    apiClient.post('/api/settings', { bookshelfLibraryId: newId });
+    apiClient.post('/api/settings', { bookshelf_library_id: newId });
   };
 
   const handleSortChange = (newSort: 'createdAt' | 'title' | 'author' | 'year') => {
     setSortBy(newSort);
     setShowFilterMenu(false);
-    apiClient.post('/api/settings', { bookshelfSortBy: newSort });
+    apiClient.post('/api/settings', { bookshelf_sort_by: newSort });
   };
 
   const handleIconSizeChange = (newSize: 'small' | 'medium' | 'large') => {
     setIconSize(newSize);
     setShowFilterMenu(false);
-    apiClient.post('/api/settings', { bookshelfIconSize: newSize });
+    apiClient.post('/api/settings', { bookshelf_icon_size: newSize });
   };
 
   const handleCoverShapeChange = (newShape: 'rect' | 'square') => {
     setCoverShape(newShape);
     setShowFilterMenu(false);
     publishBookshelfCoverShape(newShape);
-    apiClient.post('/api/settings', { bookshelfCoverShape: newShape });
+    apiClient.post('/api/settings', { bookshelf_cover_shape: newShape });
   };
 
   const fetchData = async () => {
@@ -134,23 +137,23 @@ const BookshelfPage: React.FC = () => {
       if (selectedLibraryId) {
         const exists = libs.find((l: Library) => l.id === selectedLibraryId);
         if (!exists) {
-          console.warn(`Selected library ${selectedLibraryId} 未找到，重置为默认值。`);
+          console.warn(`Selected library ${selectedLibraryId} was not found. Resetting to default.`);
           effectiveLibraryId = '';
           setSelectedLibraryId('');
           // Update settings to clear the invalid ID
-          apiClient.post('/api/settings', { bookshelfLibraryId: '' });
+          apiClient.post('/api/settings', { bookshelf_library_id: '' });
         }
       }
 
       // 3. Fetch Books & Series with effective ID
       const [booksRes, seriesRes] = await Promise.all([
-        apiClient.get('/api/books', { params: { libraryId: effectiveLibraryId || undefined } }),
+        apiClient.get('/api/books', { params: { library_id: effectiveLibraryId || undefined } }),
         apiClient.get('/api/v1/series', { params: { library_id: effectiveLibraryId || undefined } })
       ]);
       setBooks(booksRes.data);
       setSeries(seriesRes.data);
     } catch (err) {
-      console.error('获取数据失败', err);
+      console.error('Failed to fetch bookshelf data', err);
     } finally {
       setLoading(false);
     }
@@ -164,14 +167,14 @@ const BookshelfPage: React.FC = () => {
   }, [selectedLibraryId, settingsLoaded]);
 
   const sortedBooks = [...books].sort((a, b) => {
-    if (sortBy === 'title') return a.title.localeCompare(b.title, 'zh-CN');
-    if (sortBy === 'author') return (a.author || '').localeCompare(b.author || '', 'zh-CN');
+    if (sortBy === 'title') return localeCompare(a.title, b.title);
+    if (sortBy === 'author') return localeCompare(a.author || '', b.author || '');
     if (sortBy === 'year') {
       const yearA = a.year || 0;
       const yearB = b.year || 0;
       return yearB - yearA; // Descending order (newest first)
     }
-    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
 
   // Collect all book IDs that are in a series
@@ -253,8 +256,8 @@ const BookshelfPage: React.FC = () => {
     // Sort items within each group
     Object.keys(groups).forEach(key => {
       groups[key].sort((a, b) => {
-        if (sortBy === 'title') return a.title.localeCompare(b.title, 'zh-CN');
-        if (sortBy === 'author') return (a.author || '').localeCompare(b.author || '', 'zh-CN');
+        if (sortBy === 'title') return localeCompare(a.title, b.title);
+        if (sortBy === 'author') return localeCompare(a.author || '', b.author || '');
         if (sortBy === 'year') {
           const yearA = 'year' in a ? (a.year || 0) : 0;
           const yearB = 'year' in b ? (b.year || 0) : 0;
@@ -271,7 +274,7 @@ const BookshelfPage: React.FC = () => {
           // For year sorting, sort keys numerically in descending order
           return Number(b) - Number(a);
         }
-        return a.localeCompare(b);
+        return localeCompare(a, b);
     });
 
     return { groups, sortedKeys };
@@ -332,7 +335,7 @@ const BookshelfPage: React.FC = () => {
     return (
       <div className="flex-1 flex flex-col items-center justify-center min-h-full">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-        <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">加载中...</p>
+        <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">{t('common.loading')}</p>
       </div>
     );
   }
@@ -344,24 +347,24 @@ const BookshelfPage: React.FC = () => {
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
               <LibraryIcon className="text-primary-600" />
-              我的书架
+              {t('bookshelf.myBookshelf')}
             </h1>
-            <p className="text-sm md:text-base text-slate-500 dark:text-slate-400 mt-1">发现您收藏的所有有声读物。</p>
+            <p className="text-sm md:text-base text-slate-500 dark:text-slate-400 mt-1">{t('bookshelf.subtitle')}</p>
           </div>
           
           <div className="flex flex-wrap min-[550px]:flex-nowrap items-center gap-2 sm:gap-3 w-full min-[880px]:w-auto justify-end">
             {isSelectionMode ? (
               <div className="flex items-center gap-2 order-1">
                 <span className="text-sm font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap hidden sm:inline">
-                  已选 {selectedBookIds.length}
+                  {t('bookshelf.selectedCount', { count: selectedBookIds.length })}
                 </span>
                 <button
                   onClick={handleSelectAll}
                   className="flex items-center gap-2 px-3 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-sm font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shrink-0"
-                  title="全选当前"
+                  title={t('bookshelf.selectAllCurrent')}
                 >
                   <CheckSquare size={18} />
-                  <span>全选</span>
+                  <span>{t('bookshelf.selectAll')}</span>
                 </button>
                 {isAdmin && (
                   <button
@@ -370,7 +373,7 @@ const BookshelfPage: React.FC = () => {
                     className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-primary-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-primary-500/30 disabled:opacity-50 whitespace-nowrap shrink-0"
                   >
                     <Layers size={18} />
-                    <span>创建系列</span>
+                    <span>{t('bookshelf.createSeries')}</span>
                   </button>
                 )}
                 <button
@@ -387,8 +390,8 @@ const BookshelfPage: React.FC = () => {
                   className="flex items-center gap-2 px-3 sm:px-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-sm font-medium shrink-0 order-1"
                 >
                   <Layers size={18} />
-                  <span className="sm:hidden">选择</span>
-                  <span className="hidden sm:inline">选择模式</span>
+                  <span className="sm:hidden">{t('bookshelf.select')}</span>
+                  <span className="hidden sm:inline">{t('bookshelf.selectionMode')}</span>
                 </button>
               )
             )}
@@ -404,7 +407,7 @@ const BookshelfPage: React.FC = () => {
                   onChange={(e) => handleLibraryChange(e.target.value)}
                   className="w-full pl-8 pr-7 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 text-sm font-medium text-slate-700 dark:text-slate-200 appearance-none cursor-pointer truncate"
                 >
-                  <option value="">所有媒体库</option>
+                  <option value="">{t('bookshelf.allLibraries')}</option>
                   {libraries.map(lib => (
                     <option key={lib.id} value={lib.id}>{lib.name}</option>
                   ))}
@@ -422,7 +425,7 @@ const BookshelfPage: React.FC = () => {
               className="w-full min-[550px]:w-auto min-[550px]:min-w-48 md:w-64 order-first min-[550px]:order-none inline-flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-500 dark:text-slate-400 hover:text-primary-600 hover:border-primary-200 dark:hover:border-primary-900 transition-colors"
             >
               <Search size={18} className="shrink-0" />
-              <span className="text-sm font-medium truncate">搜索书名、作者、演播者</span>
+              <span className="text-sm font-medium truncate">{t('bookshelf.searchPlaceholder')}</span>
             </Link>
             <DisplaySettingsMenu
               className="order-3"
@@ -430,32 +433,32 @@ const BookshelfPage: React.FC = () => {
               onOpenChange={setShowFilterMenu}
               sections={[
                 {
-                  title: '排序方式',
+                  title: t('bookshelf.sortBy'),
                   value: sortBy,
                   options: [
-                    { value: 'createdAt', label: '最近添加' },
-                    { value: 'title', label: '书名排序' },
-                    { value: 'author', label: '作者排序' },
-                    { value: 'year', label: '年份排序' },
+                    { value: 'createdAt', label: t('bookshelf.sortRecentlyAdded') },
+                    { value: 'title', label: t('bookshelf.sortTitle') },
+                    { value: 'author', label: t('bookshelf.sortAuthor') },
+                    { value: 'year', label: t('bookshelf.sortYear') },
                   ],
                   onChange: (value) => handleSortChange(value as 'createdAt' | 'title' | 'author' | 'year'),
                 },
                 {
-                  title: '图标大小',
+                  title: t('bookshelf.iconSize'),
                   value: iconSize,
                   options: [
-                    { value: 'large', label: '大图标' },
-                    { value: 'medium', label: '中图标 (默认)' },
-                    { value: 'small', label: '小图标' },
+                    { value: 'large', label: t('bookshelf.largeIcon') },
+                    { value: 'medium', label: t('bookshelf.mediumIconDefault') },
+                    { value: 'small', label: t('bookshelf.smallIcon') },
                   ],
                   onChange: (value) => handleIconSizeChange(value as 'small' | 'medium' | 'large'),
                 },
                 {
-                  title: '封面形状',
+                  title: t('bookshelf.coverShape'),
                   value: coverShape,
                   options: [
-                    { value: 'rect', label: '3:4 比例 (默认)' },
-                    { value: 'square', label: '1:1 方形' },
+                    { value: 'rect', label: t('bookshelf.rectCoverDefault') },
+                    { value: 'square', label: t('bookshelf.squareCover') },
                   ],
                   onChange: (value) => handleCoverShapeChange(value as 'rect' | 'square'),
                 },
@@ -594,8 +597,8 @@ const BookshelfPage: React.FC = () => {
               <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-slate-100 dark:bg-slate-900 text-slate-400 mb-4">
                 <Search size={40} />
               </div>
-              <h3 className="text-lg font-medium dark:text-white">暂无可显示内容</h3>
-              <p className="text-slate-500 mt-2">可以切换媒体库或到搜索页精确查找</p>
+              <h3 className="text-lg font-medium dark:text-white">{t('bookshelf.noDisplayContent')}</h3>
+              <p className="text-slate-500 mt-2">{t('bookshelf.noDisplayHint')}</p>
             </div>
           )}
         </>
@@ -604,14 +607,14 @@ const BookshelfPage: React.FC = () => {
           <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-primary-50 dark:bg-primary-900/20 text-primary-600 mb-6">
             <Database size={40} />
           </div>
-          <h3 className="text-xl font-bold dark:text-white mb-2">书架空空如也</h3>
-          <p className="text-sm text-slate-500 max-w-md mx-auto mb-8">您还没有添加任何存储库，或者存储库中还没有扫描到音频文件。</p>
+          <h3 className="text-xl font-bold dark:text-white mb-2">{t('bookshelf.emptyTitle')}</h3>
+          <p className="text-sm text-slate-500 max-w-md mx-auto mb-8">{t('bookshelf.emptyDescription')}</p>
           <Link 
             to="/admin/libraries"
             className="inline-flex items-center gap-2 px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-bold rounded-xl shadow-xl shadow-primary-500/30 transition-all active:scale-95"
           >
             <Plus size={18} />
-            配置存储库
+            {t('bookshelf.configureLibrary')}
           </Link>
         </div>
       )}

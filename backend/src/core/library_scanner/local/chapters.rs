@@ -1,3 +1,7 @@
+use super::super::shared::{
+    apply_chapter_title_template, chapter_title_template_preserves_raw,
+    clean_or_preserve_chapter_title,
+};
 use super::super::LibraryScanner;
 use crate::core::error::{Result, TingError};
 use crate::db::models::Chapter;
@@ -19,6 +23,8 @@ impl LibraryScanner {
         use_filename_as_title: bool,
         cloud_mode: bool,
         json_chapters: Option<Vec<crate::core::metadata_writer::AudiobookshelfChapter>>,
+        chapter_title_template: Option<&str>,
+        chapter_title_overrides: Option<&[String]>,
     ) -> Result<bool> {
         let mut has_changes = false;
         let total_files = files.len();
@@ -37,6 +43,8 @@ impl LibraryScanner {
         } else {
             false
         };
+        let preserve_raw_chapter_titles =
+            chapter_title_template_preserves_raw(chapter_title_template);
 
         // Fetch book to check for regex rule
         let book = self
@@ -70,8 +78,15 @@ impl LibraryScanner {
             if index % 5 == 0 {
                 // Check cancellation and log progress
                 self.check_cancellation(task_id).await?;
-                self.update_progress(task_id, format!("处理章节 {}/{}", index + 1, total_files))
-                    .await;
+                self.update_progress_key(
+                    task_id,
+                    "scan.chapter.processing",
+                    serde_json::json!({
+                        "current": index + 1,
+                        "total": total_files,
+                    }),
+                )
+                .await;
             }
 
             // Incremental Scan Logic
@@ -100,6 +115,10 @@ impl LibraryScanner {
                 .and_then(|s| s.to_str())
                 .unwrap_or("Unknown")
                 .to_string();
+            let ai_chapter_title = chapter_title_overrides
+                .and_then(|titles| titles.get(index))
+                .map(|title| title.trim())
+                .filter(|title| !title.is_empty());
             let mut regex_idx = None;
             let mut regex_title = None;
 
@@ -123,15 +142,26 @@ impl LibraryScanner {
                     // Also respect manual_corrected if we were to update anything else
 
                     let title_override = if ch.manual_corrected == 0 {
-                        if let Some(rt) = regex_title.clone() {
-                            let (cleaned, is_extra) = self
+                        if let Some(ai_title) = ai_chapter_title {
+                            let (_, is_extra) = self
                                 .text_cleaner
-                                .clean_chapter_title(&rt, book.title.as_deref());
+                                .clean_chapter_title(ai_title, book.title.as_deref());
+                            Some((ai_title.to_string(), is_extra))
+                        } else if let Some(rt) = regex_title.clone() {
+                            let (cleaned, is_extra) = clean_or_preserve_chapter_title(
+                                self.text_cleaner.as_ref(),
+                                &rt,
+                                book.title.as_deref(),
+                                preserve_raw_chapter_titles,
+                            );
                             Some((cleaned, is_extra))
                         } else if use_filename_as_title {
-                            let (cleaned, is_extra) = self
-                                .text_cleaner
-                                .clean_chapter_title(&filename_str, book.title.as_deref());
+                            let (cleaned, is_extra) = clean_or_preserve_chapter_title(
+                                self.text_cleaner.as_ref(),
+                                &filename_str,
+                                book.title.as_deref(),
+                                preserve_raw_chapter_titles,
+                            );
                             Some((cleaned, is_extra))
                         } else if use_json_chapters {
                             json_chapters.as_ref().and_then(|chapters| {
@@ -185,6 +215,13 @@ impl LibraryScanner {
                     // and forced filename titles must still apply to unchanged files.
                     // JSON titles are preserved verbatim, while still detecting extras.
                     if let Some((target_title, target_is_extra)) = title_override {
+                        let target_title = apply_chapter_title_template(
+                            chapter_title_template,
+                            book.title.as_deref(),
+                            target_idx,
+                            &target_title,
+                        );
+
                         if ch.title.as_deref() != Some(&target_title) {
                             new_title = Some(target_title);
                             should_update = true;
@@ -289,9 +326,18 @@ impl LibraryScanner {
                 (filename_str.clone(), true)
             };
 
-            let (final_title, is_extra) = if should_clean_title {
-                self.text_cleaner
-                    .clean_chapter_title(&raw_title, book.title.as_deref())
+            let (final_title, is_extra) = if let Some(ai_title) = ai_chapter_title {
+                let (_, is_extra) = self
+                    .text_cleaner
+                    .clean_chapter_title(ai_title, book.title.as_deref());
+                (ai_title.to_string(), is_extra)
+            } else if should_clean_title {
+                clean_or_preserve_chapter_title(
+                    self.text_cleaner.as_ref(),
+                    &raw_title,
+                    book.title.as_deref(),
+                    preserve_raw_chapter_titles,
+                )
             } else {
                 let (_, is_extra) = self
                     .text_cleaner
@@ -310,6 +356,12 @@ impl LibraryScanner {
 
             // Final Index
             let chapter_idx = regex_idx.unwrap_or(counter_idx);
+            let final_title = apply_chapter_title_template(
+                chapter_title_template,
+                book.title.as_deref(),
+                chapter_idx,
+                &final_title,
+            );
 
             if let Some(mut ch) = existing_chapter {
                 // Update Existing

@@ -289,6 +289,12 @@ impl IntoResponse for TingError {
     fn into_response(self) -> Response {
         let status_code = self.status_code();
         let error_response = ErrorResponse::from_error(&self);
+        let error_message = self.to_string();
+        let log_params = serde_json::json!({
+            "error": error_message.clone(),
+            "error_type": self.error_type(),
+            "status_code": status_code.as_u16(),
+        });
 
         // Log the error with appropriate level based on error type
         match &self {
@@ -296,10 +302,12 @@ impl IntoResponse for TingError {
             TingError::AuthenticationError(_) => {
                 tracing::warn!(
                     error_type = self.error_type(),
+                    error = %error_message,
                     trace_id = %error_response.trace_id,
                     status_code = %status_code,
-                    "认证失败: {}",
-                    self
+                    message_key = "http.error.authentication",
+                    message_params = %log_params,
+                    "Authentication failed"
                 );
             }
             // Invalid requests are also warnings (client errors)
@@ -308,20 +316,24 @@ impl IntoResponse for TingError {
             | TingError::NotFound(_) => {
                 tracing::warn!(
                     error_type = self.error_type(),
+                    error = %error_message,
                     trace_id = %error_response.trace_id,
                     status_code = %status_code,
-                    "请求失败: {}",
-                    self
+                    message_key = "http.error.request",
+                    message_params = %log_params,
+                    "Request failed"
                 );
             }
             // Permission errors are warnings
             TingError::PermissionDenied(_) => {
                 tracing::warn!(
                     error_type = self.error_type(),
+                    error = %error_message,
                     trace_id = %error_response.trace_id,
                     status_code = %status_code,
-                    "权限不足: {}",
-                    self
+                    message_key = "http.error.permission",
+                    message_params = %log_params,
+                    "Permission denied"
                 );
             }
             // All other errors are actual system errors
@@ -334,10 +346,12 @@ impl IntoResponse for TingError {
                         {
                             tracing::warn!(
                                 error_type = self.error_type(),
+                                error = %error_message,
                                 trace_id = %error_response.trace_id,
                                 status_code = %status_code,
-                                "数据库繁忙: {}",
-                                self
+                                message_key = "http.error.database_busy",
+                                message_params = %log_params,
+                                "Database busy"
                             );
                             return (status_code, Json(error_response)).into_response();
                         }
@@ -346,10 +360,12 @@ impl IntoResponse for TingError {
 
                 tracing::error!(
                     error_type = self.error_type(),
+                    error = %error_message,
                     trace_id = %error_response.trace_id,
                     status_code = %status_code,
-                    "请求失败: {}",
-                    self
+                    message_key = "http.error.request",
+                    message_params = %log_params,
+                    "Request failed"
                 );
             }
         }

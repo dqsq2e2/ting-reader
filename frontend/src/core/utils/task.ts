@@ -10,7 +10,48 @@ interface TaskPayload {
     [key: string]: any;
 }
 
-export const formatTaskPayload = (payloadString: string): string => {
+type TaskPayloadLabels = {
+    libraryScan: (id: string) => string;
+    metadataScrape: (query: string) => string;
+    pluginInvoke: (pluginId: string, method: string) => string;
+    formatConvert: (input: string, output: string) => string;
+    writeMetadata: (bookId: string) => string;
+    task: (taskType: string) => string;
+    nodeLibraryScan: (id: string) => string;
+};
+
+type TaskStatusLabels = {
+    completed: string;
+    failed: string;
+    running: string;
+    cancelled: string;
+    queued: string;
+    unknown: string;
+};
+
+const defaultTaskPayloadLabels: TaskPayloadLabels = {
+    libraryScan: (id) => `Library scan: ${id}`,
+    metadataScrape: (query) => `Metadata scrape: ${query}`,
+    pluginInvoke: (pluginId, method) => `Plugin call: ${pluginId} - ${method}`,
+    formatConvert: (input, output) => `Format convert: ${input} -> ${output}`,
+    writeMetadata: (bookId) => `Write metadata: ${bookId}`,
+    task: (taskType) => `Task: ${taskType}`,
+    nodeLibraryScan: (id) => `Library scan (ID: ${id.substring(0, 8)}...)`,
+};
+
+const defaultTaskStatusLabels: TaskStatusLabels = {
+    completed: 'Completed',
+    failed: 'Failed',
+    running: 'Running',
+    cancelled: 'Cancelled',
+    queued: 'Queued',
+    unknown: 'Unknown status',
+};
+
+export const formatTaskPayload = (
+    payloadString: string,
+    labels: TaskPayloadLabels = defaultTaskPayloadLabels,
+): string => {
     if (!payloadString) return '';
     
     try {
@@ -21,23 +62,23 @@ export const formatTaskPayload = (payloadString: string): string => {
             const { task_type, data } = payload.Custom;
             switch (task_type) {
                 case 'library_scan':
-                    return `图书馆扫描: ${data.library_id}`; // Ideally we would map ID to name, but ID is what we have in payload
+                    return labels.libraryScan(data.library_id);
                 case 'scraper_search':
-                    return `元数据刮削: ${data.query}`;
+                    return labels.metadataScrape(data.query);
                 case 'plugin_invoke':
-                    return `插件调用: ${data.plugin_id} - ${data.method}`;
+                    return labels.pluginInvoke(data.plugin_id, data.method);
                 case 'format_convert':
-                    return `格式转换: ${data.input} -> ${data.output}`;
+                    return labels.formatConvert(data.input, data.output);
                 case 'write_metadata':
-                    return `写入元数据: ${data.book_id}`;
+                    return labels.writeMetadata(data.book_id);
                 default:
-                    return `任务: ${task_type}`;
+                    return labels.task(task_type);
             }
         }
         
         // Handle Node.js backend format
-        if (payload.libraryId) {
-            return `图书馆扫描 (ID: ${payload.libraryId.substring(0, 8)}...)`;
+        if (payload.library_id) {
+            return labels.nodeLibraryScan(payload.library_id);
         }
 
         // Fallback for other JSON
@@ -47,13 +88,16 @@ export const formatTaskPayload = (payloadString: string): string => {
     }
 };
 
-export const getTaskStatusText = (status: string): string => {
+export const getTaskStatusText = (
+    status: string,
+    labels: TaskStatusLabels = defaultTaskStatusLabels,
+): string => {
     switch (status) {
-        case 'completed': return '已完成';
-        case 'failed': return '失败';
-        case 'running': return '进行中';
-        case 'cancelled': return '已取消';
-        case 'queued': return '等待中';
-        default: return '未知状态';
+        case 'completed': return labels.completed;
+        case 'failed': return labels.failed;
+        case 'running': return labels.running;
+        case 'cancelled': return labels.cancelled;
+        case 'queued': return labels.queued;
+        default: return labels.unknown;
     }
 };

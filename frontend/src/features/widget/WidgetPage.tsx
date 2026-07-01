@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import apiClient from '../../core/api/client';
 import Player from '../player/Player';
 import { usePlayerStore } from '../../core/stores/playerStore';
@@ -9,6 +10,7 @@ import { getCoverUrl } from '../../core/utils/image';
 import { getCoverAspectClass, useBookshelfCoverShape } from '../../core/hooks/useBookshelfCoverShape';
 
 const WidgetPage: React.FC = () => {
+  const { t } = useTranslation();
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
@@ -35,10 +37,10 @@ const WidgetPage: React.FC = () => {
       try {
         const payload = JSON.parse(atob(token.split('.')[1]));
         const user = {
-          id: payload.userId,
+          id: payload.user_id,
           username: payload.username,
           role: payload.role,
-          createdAt: '',
+          created_at: '',
         };
         setAuth(user, token);
       } catch (e) {
@@ -52,8 +54,7 @@ const WidgetPage: React.FC = () => {
   useEffect(() => {
     if (isAuthenticated) {
       apiClient.get('/api/settings').then(res => {
-        // API returns camelCase
-        const css = res.data.widgetCss ?? res.data.widget_css;
+        const css = res.data.widget_css;
         if (css) {
           const styleId = 'widget-custom-css';
           let style = document.getElementById(styleId) as HTMLStyleElement;
@@ -133,7 +134,7 @@ const WidgetPage: React.FC = () => {
     } catch (err: unknown) {
       console.error('登录失败', err);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const msg = (err as any)?.response?.data?.error || (err as any)?.response?.data?.message || '登录失败';
+      const msg = (err as any)?.response?.data?.error || (err as any)?.response?.data?.message || t('widgetPage.loginFailed');
       setLoginError(msg);
     } finally {
       setIsLoggingIn(false);
@@ -152,7 +153,7 @@ const WidgetPage: React.FC = () => {
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="用户名"
+                  placeholder={t('widgetPage.username')}
                   className="w-full pl-8 pr-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs outline-none focus:ring-1 focus:ring-primary-500 dark:text-white"
                   required
                 />
@@ -163,7 +164,7 @@ const WidgetPage: React.FC = () => {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="密码"
+                  placeholder={t('widgetPage.password')}
                   className="w-full pl-8 pr-2 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs outline-none focus:ring-1 focus:ring-primary-500 dark:text-white"
                   required
                 />
@@ -186,7 +187,7 @@ const WidgetPage: React.FC = () => {
               ) : (
                 <>
                   <LogIn size={12} />
-                  登录
+                  {t('widgetPage.login')}
                 </>
               )}
             </button>
@@ -203,7 +204,7 @@ const WidgetPage: React.FC = () => {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
           <input 
             type="text" 
-            placeholder="搜索专辑..."
+            placeholder={t('widgetPage.searchAlbum')}
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2 bg-slate-100 dark:bg-slate-900 border-none rounded-xl text-xs outline-none dark:text-white"
@@ -230,7 +231,7 @@ const WidgetPage: React.FC = () => {
                 className="flex items-center gap-3 p-2 hover:bg-slate-50 dark:hover:bg-slate-900 rounded-xl cursor-pointer transition-colors"
               >
                 <img 
-                  src={getCoverUrl(book.coverUrl || book.cover_url, book.libraryId || book.library_id, book.id)} 
+                  src={getCoverUrl(book.cover_url || book.cover_url, book.library_id || book.library_id, book.id)}
                   className={`w-10 ${getCoverAspectClass(coverShape)} rounded-lg object-cover shrink-0`} 
                   alt={book.title}
                 />
@@ -241,7 +242,7 @@ const WidgetPage: React.FC = () => {
               </div>
             ))
           ) : (
-            <p className="text-center text-xs text-slate-400 py-8">未找到相关书籍</p>
+            <p className="text-center text-xs text-slate-400 py-8">{t('widgetPage.noBooks')}</p>
           )}
         </div>
       </div>
@@ -253,7 +254,7 @@ const WidgetPage: React.FC = () => {
       <button 
         onClick={() => setShowBookList(true)}
         className="absolute top-2 left-2 z-[200] p-1.5 bg-white/80 dark:bg-slate-900/80 rounded-full shadow-sm text-slate-500 hover:text-primary-600 transition-colors"
-        title="更换专辑"
+        title={t('widgetPage.changeAlbum')}
       >
         <ArrowLeft size={14} />
       </button>
@@ -272,7 +273,7 @@ const WidgetPage: React.FC = () => {
         body { margin: 0; overflow: hidden; background: transparent !important; }
 
         /* Hide some UI elements that don't make sense in a small widget */
-        .widget-mode [title="展开播放器"] { display: none !important; }
+        .widget-mode .mini-player-expand-button { display: none !important; }
       `}</style>
     </div>
   );

@@ -74,11 +74,11 @@ export const getRelativeChapterPath = (
   const roots: string[] = [];
 
   if (pathLibrary) {
-    if (pathLibrary.libraryType === 'webdav') {
-      roots.push(joinDisplayPath(pathLibrary.url, pathLibrary.rootPath));
+    if (pathLibrary.library_type === 'webdav') {
+      roots.push(joinDisplayPath(pathLibrary.url, pathLibrary.root_path));
     }
     roots.push(pathLibrary.url);
-    roots.push(pathLibrary.rootPath);
+    roots.push(pathLibrary.root_path);
   }
 
   for (const root of roots.filter(Boolean).sort((a, b) => b.length - a.length)) {
@@ -86,8 +86,8 @@ export const getRelativeChapterPath = (
     if (relativePath !== null) return relativePath;
   }
 
-  if (pathLibrary?.libraryType === 'local') {
-    for (const segment of [pathLibrary.url, pathLibrary.rootPath].filter(Boolean)) {
+  if (pathLibrary?.library_type === 'local') {
+    for (const segment of [pathLibrary.url, pathLibrary.root_path].filter(Boolean)) {
       const relativePath = relativeFromPathSegment(chapterPath, segment);
       if (relativePath !== null) return relativePath;
     }
@@ -111,8 +111,9 @@ export const formatChapterLocation = (
   chapter: EditableChapter,
   book: Book,
   pathLibrary: Library | null,
+  unknownLibrary: string,
 ) => {
-  const libraryName = pathLibrary?.name || '未知存储库';
+  const libraryName = pathLibrary?.name || unknownLibrary;
   const relativePath = getRelativeChapterPath(chapter.path, book, pathLibrary);
   return relativePath ? `${libraryName} / ${relativePath}` : libraryName;
 };

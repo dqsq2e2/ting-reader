@@ -3,6 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import apiClient from '../../core/api/client';
 import type { Book, Chapter, Progress } from '../../core/types';
 import { usePlayerStore } from '../../core/stores/playerStore';
+import { useTranslation } from 'react-i18next';
 
 import ChapterManagerModal from '../../shared/modals/ChapterManagerModal';
 import ScrapeDiffModal from '../../shared/modals/ScrapeDiffModal';
@@ -18,11 +19,66 @@ import DeleteBookModal from './bookDetail/DeleteBookModal';
 import BookHeaderSection from './bookDetail/BookHeaderSection';
 import ChapterListSection from './bookDetail/ChapterListSection';
 
+type ChapterGroupOrder = 'asc' | 'desc';
+
+interface ChapterGroupOrderEntry {
+  book_id: string;
+  order: ChapterGroupOrder;
+}
+
+const normalizeChapterGroupOrder = (value: unknown): ChapterGroupOrder | null => {
+  if (value === 'asc' || value === 'desc') {
+    return value;
+  }
+  return null;
+};
+
+const readChapterGroupOrders = (settings: Record<string, unknown>): ChapterGroupOrderEntry[] => {
+  const raw = settings.chapter_group_orders;
+
+  if (Array.isArray(raw)) {
+    return raw.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const item = entry as Record<string, unknown>;
+      const bookId = typeof item.book_id === 'string' ? item.book_id : '';
+      const order = normalizeChapterGroupOrder(item.order);
+      return bookId && order ? [{ book_id: bookId, order }] : [];
+    });
+  }
+
+  if (raw && typeof raw === 'object') {
+    return Object.entries(raw as Record<string, unknown>).flatMap(([bookId, value]) => {
+      const order = normalizeChapterGroupOrder(value);
+      return order ? [{ book_id: bookId, order }] : [];
+    });
+  }
+
+  return [];
+};
+
+const findChapterGroupOrder = (
+  orders: ChapterGroupOrderEntry[],
+  bookId: string
+): ChapterGroupOrder | null => orders.find((item) => item.book_id === bookId)?.order ?? null;
+
+const upsertChapterGroupOrder = (
+  orders: ChapterGroupOrderEntry[],
+  bookId: string,
+  order: ChapterGroupOrder
+): ChapterGroupOrderEntry[] => {
+  const exists = orders.some((item) => item.book_id === bookId);
+  if (!exists) {
+    return [...orders, { book_id: bookId, order }];
+  }
+  return orders.map((item) => item.book_id === bookId ? { ...item, order } : item);
+};
+
 const BookDetailPage: React.FC = () => {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const entryChapterId = searchParams.get('chapterId') || searchParams.get('chapter_id');
+  const entryChapterId = searchParams.get('chapter_id');
   const { user } = useAuthStore();
   const [book, setBook] = useState<Book | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -45,7 +101,10 @@ const BookDetailPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'main' | 'extra'>('main');
   const [currentGroupIndex, setCurrentGroupIndex] = useState(0);
   const [chapterAscending, setChapterAscending] = useState(true);
-  const [themeColor, setThemeColor] = useState<string | null>(book?.themeColor ?? null);
+  const [chapterGroupsDescending, setChapterGroupsDescending] = useState(false);
+  const [chapterGroupOrders, setChapterGroupOrders] = useState<ChapterGroupOrderEntry[]>([]);
+  const [editChapterGroupOrder, setEditChapterGroupOrder] = useState<ChapterGroupOrder>('asc');
+  const [themeColor, setThemeColor] = useState<string | null>(book?.theme_color ?? null);
   const [isTagsExpanded, setIsTagsExpanded] = useState(false);
   const tagsRef = useRef<HTMLDivElement>(null);
   const [isTagsOverflowing, setIsTagsOverflowing] = useState(false);
@@ -78,13 +137,13 @@ const BookDetailPage: React.FC = () => {
       });
       setGenResult(res.data);
     } catch {
-      alert('生成失败');
+      alert(t('bookshelf.generateFailed'));
     }
   };
 
   const applyGeneratedRegex = () => {
     if (genResult?.regex) {
-      setEditData({ ...editData, chapterRegex: genResult.regex });
+      setEditData({ ...editData, chapter_regex: genResult.regex });
       setShowRegexGenerator(false);
       setGenResult(null);
     }
@@ -101,12 +160,15 @@ const BookDetailPage: React.FC = () => {
     setActiveTab('main');
     setCurrentGroupIndex(0);
     setChapterAscending(true);
+    setChapterGroupsDescending(false);
+    setChapterGroupOrders([]);
+    setEditChapterGroupOrder('asc');
   }, [id, entryChapterId]);
 
   // Clear highlighted chapter when current chapter changes (user plays a new chapter)
   const currentChapter = usePlayerStore((state) => state.currentChapter);
   useEffect(() => {
-    if (currentChapter?.bookId === book?.id && !entryChapterId) {
+    if (currentChapter?.book_id === book?.id && !entryChapterId) {
       setHighlightedChapterId(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -132,6 +194,7 @@ const BookDetailPage: React.FC = () => {
         start: i + 1,
         end: Math.min(i + chaptersPerGroup, activeTotal),
         offset: i,
+        index: g.length,
       });
     }
     return g;
@@ -148,10 +211,10 @@ const BookDetailPage: React.FC = () => {
 
   useEffect(() => {
     if (book) {
-      setThemeColor(book.themeColor || null);
+      setThemeColor(book.theme_color || null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [book?.themeColor]);
+  }, [book?.theme_color]);
 
   useEffect(() => {
     const fetchBookDetails = async () => {
@@ -167,21 +230,28 @@ const BookDetailPage: React.FC = () => {
           apiClient.get('/api/settings')
         ]);
         const fetchedBook = bookRes.data;
-        const initialChapterId = entryChapterId || progressRes?.chapterId || null;
+        const initialChapterId = entryChapterId || progressRes?.chapter_id || null;
+        const rssLibrary = fetchedBook.library_type === 'rss';
         setBook(fetchedBook);
         setBookProgress(progressRes);
         setHighlightedChapterId(initialChapterId);
-        setIsFavorite(fetchedBook.isFavorite);
-        setActiveTab('main');
-        setCurrentGroupIndex(0); // Reset group index when book changes
-
+        setIsFavorite(fetchedBook.is_favorite);
         // Load user settings
-        const settings = settingsRes.data.settingsJson || {};
-        if (settings.bookshelfCoverShape) {
-          setCoverShape(settings.bookshelfCoverShape);
+        const settings = settingsRes.data.settings_json || {};
+        const savedGroupOrders = readChapterGroupOrders(settings);
+        const effectiveGroupOrder = findChapterGroupOrder(savedGroupOrders, fetchedBook.id)
+          ?? (rssLibrary ? 'desc' : 'asc');
+        setChapterGroupOrders(savedGroupOrders);
+        setEditChapterGroupOrder(effectiveGroupOrder);
+        if (settings.bookshelf_cover_shape) {
+          setCoverShape(settings.bookshelf_cover_shape);
         }
+        setActiveTab('main');
+        setCurrentGroupIndex(0);
+        setChapterGroupsDescending(effectiveGroupOrder === 'desc');
+        setChapterAscending(effectiveGroupOrder === 'asc');
       } catch (err) {
-        console.error('获取书籍详情失败', err);
+        console.error('Failed to fetch book details', err);
       } finally {
         setLoading(false);
       }
@@ -192,7 +262,8 @@ const BookDetailPage: React.FC = () => {
   const fetchChapterPage = React.useCallback(async (options?: {
     tab?: 'main' | 'extra';
     groupIndex?: number;
-    targetChapterId?: string | null;
+    target_chapter_id?: string | null;
+    preferLastGroup?: boolean;
   }) => {
     if (!id) return;
 
@@ -203,11 +274,11 @@ const BookDetailPage: React.FC = () => {
       offset: requestedGroupIndex * chaptersPerGroup,
       order: 'asc',
     };
-    if (!(options?.targetChapterId && !options?.tab)) {
-      params.chapterType = requestedTab;
+    if (!(options?.target_chapter_id && !options?.tab)) {
+      params.chapter_type = requestedTab;
     }
-    if (options?.targetChapterId) {
-      params.targetChapterId = options.targetChapterId;
+    if (options?.target_chapter_id) {
+      params.target_chapter_id = options.target_chapter_id;
     }
 
     setChapterPageLoading(true);
@@ -217,12 +288,34 @@ const BookDetailPage: React.FC = () => {
       setChapters(data.chapters || []);
       setChapterTotals({
         total: data.total ?? 0,
-        main: data.mainTotal ?? 0,
-        extra: data.extraTotal ?? 0,
+        main: data.main_total ?? 0,
+        extra: data.extra_total ?? 0,
       });
 
-      const resolvedTab = data.chapterType === 'extra' ? 'extra' : 'main';
+      const resolvedTab = data.chapter_type === 'extra' ? 'extra' : 'main';
       const resolvedGroupIndex = Math.floor((data.offset || 0) / chaptersPerGroup);
+      const filteredTotal = resolvedTab === 'extra'
+        ? (data.extra_total ?? 0)
+        : (data.main_total ?? 0);
+      const lastGroupIndex = Math.max(0, Math.ceil(filteredTotal / chaptersPerGroup) - 1);
+
+      if (options?.preferLastGroup && !options?.target_chapter_id && requestedGroupIndex !== lastGroupIndex) {
+        setChapterTotals({
+          total: data.total ?? 0,
+          main: data.main_total ?? 0,
+          extra: data.extra_total ?? 0,
+        });
+        if (resolvedTab !== activeTab) {
+          setActiveTab(resolvedTab);
+        }
+        setCurrentGroupIndex(lastGroupIndex);
+        setChapters([]);
+        return {
+          tab: resolvedTab,
+          groupIndex: lastGroupIndex,
+        };
+      }
+
       if (resolvedTab !== activeTab) {
         setActiveTab(resolvedTab);
       }
@@ -234,7 +327,7 @@ const BookDetailPage: React.FC = () => {
         groupIndex: resolvedGroupIndex,
       };
     } catch (err) {
-      console.error('获取章节分页失败', err);
+      console.error('Failed to fetch chapter page', err);
       setChapters([]);
       return null;
     } finally {
@@ -267,10 +360,13 @@ const BookDetailPage: React.FC = () => {
     const targetChapterId = !hasInitialScrolled.current
       ? entryChapterId
       : null;
+    const preferLastGroup = !hasInitialScrolled.current
+      && !targetChapterId
+      && chapterGroupsDescending;
     fetchChapterPage(
       targetChapterId
-        ? { targetChapterId }
-        : { tab: activeTab, groupIndex: currentGroupIndex }
+        ? { target_chapter_id: targetChapterId }
+        : { tab: activeTab, groupIndex: currentGroupIndex, preferLastGroup }
     ).then((page) => {
       if (targetChapterId) {
         setTimeout(() => scrollToChapterNode(targetChapterId, page?.groupIndex ?? currentGroupIndex), 120);
@@ -278,14 +374,14 @@ const BookDetailPage: React.FC = () => {
     });
     hasInitialScrolled.current = true;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [book?.id, activeTab, currentGroupIndex, entryChapterId]);
+  }, [book?.id, activeTab, currentGroupIndex, entryChapterId, chapterGroupsDescending]);
 
   // Find the chapter to resume or highlight
   const resumeChapter = React.useMemo(() => {
     if (!book) return null;
 
     // 1. Priority: Currently playing chapter if it belongs to this book
-    if (currentChapter && currentChapter.bookId === book.id) {
+    if (currentChapter && currentChapter.book_id === book.id) {
       return currentChapter;
     }
 
@@ -296,30 +392,30 @@ const BookDetailPage: React.FC = () => {
       }
     }
 
-    if (bookProgress?.chapterId) {
-      const progressChapter = chapters.find(c => c.id === bookProgress.chapterId);
+    if (bookProgress?.chapter_id) {
+      const progressChapter = chapters.find(c => c.id === bookProgress.chapter_id);
       if (progressChapter) {
         return {
           ...progressChapter,
-          progressPosition: bookProgress.position,
-          progressUpdatedAt: bookProgress.updatedAt,
+          progress_position: bookProgress.position,
+          progress_updated_at: bookProgress.updated_at,
         };
       }
 
       return {
-        id: bookProgress.chapterId,
-        bookId: book.id,
-        title: bookProgress.chapterTitle || '上次收听章节',
+        id: bookProgress.chapter_id,
+        book_id: book.id,
+        title: bookProgress.chapter_title || t('bookshelf.lastListenedChapter'),
         path: '',
-        duration: bookProgress.chapterDuration || bookProgress.duration || 0,
-        chapterIndex: 0,
-        progressPosition: bookProgress.position,
-        progressUpdatedAt: bookProgress.updatedAt,
+        duration: bookProgress.chapter_duration || bookProgress.duration || 0,
+        chapter_index: 0,
+        progress_position: bookProgress.position,
+        progress_updated_at: bookProgress.updated_at,
       };
     }
 
     return null;
-  }, [book, chapters, currentChapter, bookProgress, entryChapterId]);
+  }, [book, chapters, currentChapter, bookProgress, entryChapterId, t]);
 
   // Auto-highlight current chapter logic (without scroll)
   useEffect(() => {
@@ -336,7 +432,7 @@ const BookDetailPage: React.FC = () => {
     }
 
     setHighlightedChapterId(null);
-  }, [book?.id, id, resumeChapter, entryChapterId, chapters]);
+  }, [book?.id, id, resumeChapter, entryChapterId, chapters, t]);
 
   const doScroll = (chapterId: string, groupIndex: number) => {
       scrollToChapterNode(chapterId, groupIndex);
@@ -348,7 +444,7 @@ const BookDetailPage: React.FC = () => {
 
   const fetchAllChaptersForPlayback = async () => {
     if (allChaptersCacheRef.current) return allChaptersCacheRef.current;
-    if (book && storeChapters.length > 0 && storeChapters.some(c => c.bookId === book.id)) {
+    if (book && storeChapters.length > 0 && storeChapters.some(c => c.book_id === book.id)) {
       allChaptersCacheRef.current = storeChapters;
       return storeChapters;
     }
@@ -373,7 +469,7 @@ const BookDetailPage: React.FC = () => {
       const allChapters = await fetchAllChaptersForPlayback();
       setChapterManagerChapters(allChapters);
     } catch (err) {
-      console.error('获取章节管理列表失败', err);
+      console.error('Failed to fetch chapters for manager', err);
       setChapterManagerChapters([]);
     } finally {
       setChapterManagerLoading(false);
@@ -397,7 +493,7 @@ const BookDetailPage: React.FC = () => {
       } else if (inExtra) {
         scrollToChapterElement(targetChapter.id);
       } else {
-        const page = await fetchChapterPage({ targetChapterId: targetChapter.id });
+        const page = await fetchChapterPage({ target_chapter_id: targetChapter.id });
         setTimeout(() => doScroll(targetChapter.id, page?.groupIndex ?? currentGroupIndex), 120);
       }
     } else {
@@ -474,11 +570,11 @@ const BookDetailPage: React.FC = () => {
       tempSpan.style.fontSize = computedStyle.fontSize;
       tempSpan.style.fontFamily = computedStyle.fontFamily;
       
-      const text = resumeChapter && currentChapter?.bookId === book?.id
-        ? `正在播放：${resumeChapter.title}`
+      const text = resumeChapter && currentChapter?.book_id === book?.id
+        ? t('bookshelf.nowPlayingChapter', { title: resumeChapter.title })
         : resumeChapter
-        ? `继续播放：${resumeChapter.title}`
-        : '立即播放';
+        ? t('bookshelf.continuePlayingChapter', { title: resumeChapter.title })
+        : t('bookshelf.playNow');
       
       tempSpan.textContent = text;
       document.body.appendChild(tempSpan);
@@ -507,7 +603,7 @@ const BookDetailPage: React.FC = () => {
       clearTimeout(timer);
       clearTimeout(resizeTimer);
     };
-  }, [resumeChapter, currentChapter, book?.id]);
+  }, [resumeChapter, currentChapter, book?.id, t]);
 
   const toggleFavorite = async () => {
     try {
@@ -518,20 +614,20 @@ const BookDetailPage: React.FC = () => {
       }
       setIsFavorite(!isFavorite);
     } catch (err) {
-      console.error('切换收藏状态失败', err);
+      console.error('Failed to toggle favorite', err);
     }
   };
 
   const handleWriteMetadata = async () => {
     try {
-      if (!confirm('确定要将当前元数据写入到音频文件吗？这可能需要一些时间。')) {
+      if (!confirm(t('bookshelf.writeMetadataConfirm'))) {
         return;
       }
       await apiClient.post(`/api/books/${id}/write-metadata`);
-      alert('已开始后台写入元数据，请稍候查看任务进度。');
+      alert(t('bookshelf.writeMetadataStarted'));
     } catch (err) {
-      console.error('写入元数据失败', err);
-      alert('写入失败');
+      console.error('Failed to write metadata', err);
+      alert(t('bookshelf.writeMetadataFailed'));
     }
   };
 
@@ -539,22 +635,34 @@ const BookDetailPage: React.FC = () => {
     try {
       const dataToSave = { ...editData };
       // If cover changed, clear theme color so it's recalculated
-    if (editData.coverUrl && editData.coverUrl !== displayCoverUrl) {
-        dataToSave.themeColor = undefined;
+    if (editData.cover_url && editData.cover_url !== displayCoverUrl) {
+        dataToSave.theme_color = undefined;
       }
       
-      // The API expects camelCase for updates (client will convert to snake_case)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const payload: Record<string, any> = { ...dataToSave };
       
       const res = await apiClient.patch(`/api/books/${id}`, payload);
       const updatedBookData = res.data;
+
+      if (book && findChapterGroupOrder(chapterGroupOrders, book.id) !== editChapterGroupOrder) {
+        const nextOrders = upsertChapterGroupOrder(chapterGroupOrders, book.id, editChapterGroupOrder);
+        await apiClient.post('/api/settings', { chapter_group_orders: nextOrders });
+        setChapterGroupOrders(nextOrders);
+      }
+
+      if (editChapterGroupOrder !== (chapterGroupsDescending ? 'desc' : 'asc')) {
+        const nextDescending = editChapterGroupOrder === 'desc';
+        setChapterGroupsDescending(nextDescending);
+        setChapterAscending(!nextDescending);
+        setCurrentGroupIndex(nextDescending ? lastGroupIndexFor(activeTab) : 0);
+      }
       
       // Update local state - merge the changes
       const updatedBook = { ...book!, ...updatedBookData };
       // Preserve existing auxiliary fields if not in response
-      if (book!.libraryType) updatedBook.libraryType = book!.libraryType;
-      if (book!.isFavorite !== undefined) updatedBook.isFavorite = book!.isFavorite;
+      if (book!.library_type) updatedBook.library_type = book!.library_type;
+      if (book!.is_favorite !== undefined) updatedBook.is_favorite = book!.is_favorite;
       
       setBook(updatedBook);
       
@@ -570,25 +678,25 @@ const BookDetailPage: React.FC = () => {
       }
       
       // If chapterRegex changed, trigger a re-scan of this book
-      if (payload.chapterRegex) {
-          apiClient.post(`/api/libraries/${book!.libraryId}/scan`);
-          alert('规则已保存。正在后台重新扫描该库以应用新规则...');
+      if (payload.chapter_regex) {
+          apiClient.post(`/api/libraries/${book!.library_id}/scan`);
+          alert(t('bookshelf.regexSavedRescanning'));
       }
 
       setIsEditModalOpen(false);
     } catch {
-      alert('保存失败');
+      alert(t('common.saveFailed'));
     }
   };
 
   const handleDelete = async () => {
     try {
       setDeleting(true);
-      await apiClient.delete(`/api/books/${id}?deleteFiles=${deleteSourceFiles}`);
+      await apiClient.delete(`/api/books/${id}?delete_files=${deleteSourceFiles}`);
       navigate('/', { replace: true });
     } catch (err) {
-      console.error('删除书籍失败', err);
-      alert('删除书籍失败');
+      console.error('Failed to delete book', err);
+      alert(t('bookshelf.deleteBookFailed'));
     } finally {
       setDeleting(false);
       setIsDeleteModalOpen(false);
@@ -608,22 +716,32 @@ const BookDetailPage: React.FC = () => {
   };
 
   const getChapterProgressText = (chapter: Chapter) => {
-    if (!chapter.progressPosition || !chapter.duration) return null;
+    if (!chapter.progress_position || !chapter.duration) return null;
     
-    const percent = Math.floor((chapter.progressPosition / chapter.duration) * 100);
+    const percent = Math.floor((chapter.progress_position / chapter.duration) * 100);
     if (percent === 0) return null;
-    if (percent >= 95) return '已播完';
-    return `已播${percent}%`;
+    if (percent >= 95) return t('bookshelf.progressComplete');
+    return t('bookshelf.progressPercent', { percent });
   };
 
-  const displayThemeColor = book ? (book.themeColor || themeColor) : themeColor;
+  const lastGroupIndexFor = (tab: 'main' | 'extra') => {
+    const total = tab === 'extra' ? chapterTotals.extra : chapterTotals.main;
+    return Math.max(0, Math.ceil(total / chaptersPerGroup) - 1);
+  };
+
+  const handleSetActiveTab = (tab: 'main' | 'extra') => {
+    setActiveTab(tab);
+    setCurrentGroupIndex(chapterGroupsDescending ? lastGroupIndexFor(tab) : 0);
+  };
+
+  const displayThemeColor = book ? (book.theme_color || themeColor) : themeColor;
   // If the color is too light (close to white), we ignore it and use default to ensure text readability
   const effectiveThemeColor = displayThemeColor && !isTooLight(displayThemeColor) ? displayThemeColor : undefined;
 
-  const displayCoverUrl = book ? book.coverUrl : undefined;
+  const displayCoverUrl = book ? book.cover_url : undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const displayLibraryId = book ? (book.libraryId || (book as any).library_id) : undefined;
-  const displayLibraryType = book ? book.libraryType : undefined;
+  const displayLibraryId = book ? (book.library_id || (book as any).library_id) : undefined;
+  const displayLibraryType = book ? book.library_type : undefined;
 
   useEffect(() => {
     if (effectiveThemeColor) {
@@ -641,7 +759,7 @@ const BookDetailPage: React.FC = () => {
     );
   }
 
-  if (!book) return <div className="dark:text-white p-8">未找到书籍</div>;
+  if (!book) return <div className="dark:text-white p-8">{t('bookshelf.notFound')}</div>;
 
   return (
     <div 
@@ -655,7 +773,7 @@ const BookDetailPage: React.FC = () => {
           className="flex items-center gap-2 text-slate-500 hover:text-primary-600 transition-colors"
         >
           <ChevronLeft size={20} />
-          <span>返回</span>
+          <span>{t('common.back')}</span>
         </button>
 
         {/* Book Info Section */}
@@ -667,7 +785,7 @@ const BookDetailPage: React.FC = () => {
           effectiveThemeColor={effectiveThemeColor}
           chapterTotalCount={chapterTotals.total}
           resumeChapterTitle={resumeChapter?.title}
-          resumeChapterBookMatches={currentChapter?.bookId === book.id}
+          resumeChapterBookMatches={currentChapter?.book_id === book.id}
           hasResumeChapter={!!resumeChapter}
           isPlayButtonTextOverflowing={isPlayButtonTextOverflowing}
           playButtonContainerRef={playButtonContainerRef}
@@ -685,12 +803,13 @@ const BookDetailPage: React.FC = () => {
           onOpenEditModal={() => {
             setEditData({
               ...book,
-              coverUrl: displayCoverUrl,
-              themeColor: displayThemeColor ?? undefined,
-              libraryType: displayLibraryType,
-              skipIntro: book.skipIntro,
-              skipOutro: book.skipOutro
+              cover_url: displayCoverUrl,
+              theme_color: displayThemeColor ?? undefined,
+              library_type: displayLibraryType,
+              skip_intro: book.skip_intro,
+              skip_outro: book.skip_outro
             });
+            setEditChapterGroupOrder(chapterGroupsDescending ? 'desc' : 'asc');
             setIsEditModalOpen(true);
           }}
           onSetIsTagsExpanded={setIsTagsExpanded}
@@ -707,6 +826,7 @@ const BookDetailPage: React.FC = () => {
           currentGroupIndex={currentGroupIndex}
           activeTab={activeTab}
           chapterAscending={chapterAscending}
+          chapterGroupsDescending={chapterGroupsDescending}
           chapterPageLoading={chapterPageLoading}
           scrollRef={scrollRef}
           currentChapterId={currentChapter?.id}
@@ -714,7 +834,7 @@ const BookDetailPage: React.FC = () => {
           isPlaying={isPlaying}
           effectiveThemeColor={effectiveThemeColor}
           onScrollGroups={scrollGroups}
-          onSetActiveTab={setActiveTab}
+          onSetActiveTab={handleSetActiveTab}
           onSetCurrentGroupIndex={setCurrentGroupIndex}
           onToggleAscending={() => setChapterAscending(prev => !prev)}
           onPlayChapter={playChapterWithFullQueue}
@@ -729,7 +849,7 @@ const BookDetailPage: React.FC = () => {
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
           <div className="relative bg-white dark:bg-slate-900 rounded-3xl shadow-2xl px-8 py-6 flex items-center gap-3 text-slate-600 dark:text-slate-300">
             <Loader2 className="w-5 h-5 animate-spin text-primary-600" />
-            加载章节管理...
+            {t('bookshelf.loadingChapterManager')}
           </div>
         </div>
       )}
@@ -769,7 +889,9 @@ const BookDetailPage: React.FC = () => {
           genNum={genNum}
           genTitle={genTitle}
           genResult={genResult}
+          chapterGroupOrder={editChapterGroupOrder}
           onChangeEditData={setEditData}
+          onChangeChapterGroupOrder={setEditChapterGroupOrder}
           onShowRegexGenerator={() => setShowRegexGenerator(true)}
           onHideRegexGenerator={() => setShowRegexGenerator(false)}
           onChangeGenFilename={setGenFilename}

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import apiClient from '../../core/api/client';
 import type { Book, Playlist, Progress, Series } from '../../core/types';
@@ -28,14 +29,15 @@ import {
   TrendingUp,
   RefreshCw,
 } from 'lucide-react';
+import { formatLocalizedDate } from '../../core/utils/locale';
 
 type HeroItem = {
   id: string;
   title: string;
   subtitle: string;
   description: string;
-  coverUrl?: string;
-  libraryId?: string;
+  cover_url?: string;
+  library_id?: string;
   book?: Book;
   progress?: Progress;
 };
@@ -45,18 +47,19 @@ const getSeriesCover = (series: Series): PlaylistCoverItem[] => {
   return [{
     id: series.id,
     title: series.title,
-    coverUrl: series.coverUrl || coverBook?.coverUrl,
-    libraryId: series.libraryId || coverBook?.libraryId,
-    bookId: coverBook?.id,
+    cover_url: series.cover_url || coverBook?.cover_url,
+    library_id: series.library_id || coverBook?.library_id,
+    book_id: coverBook?.id,
   }];
 };
 
 const progressUpdatedTime = (progress: Progress) => {
-  const time = new Date(progress.updatedAt).getTime();
+  const time = new Date(progress.updated_at).getTime();
   return Number.isFinite(time) ? time : 0;
 };
 
 const HomePage: React.FC = () => {
+  const { t } = useTranslation();
   const currentChapter = usePlayerStore((state) => state.currentChapter);
   const coverShape = useBookshelfCoverShape();
   const [recentPlays, setRecentPlays] = useState<Progress[]>([]);
@@ -100,9 +103,9 @@ const HomePage: React.FC = () => {
     const loadHomeLayout = async () => {
       try {
         const res = await apiClient.get('/api/settings');
-        setHomeLayout(normalizeHomeLayout(res.data.settingsJson?.homeLayout ?? res.data.homeLayout));
+        setHomeLayout(normalizeHomeLayout(res.data.settings_json?.home_layout ?? res.data.home_layout));
       } catch (err) {
-        console.error('加载首页设置失败', err);
+        console.error('Failed to load home settings', err);
       }
     };
 
@@ -121,10 +124,10 @@ const HomePage: React.FC = () => {
     const map = new Map<string, Progress>();
 
     recentPlays.forEach(progress => {
-      if (!progress.bookId) return;
-      const existing = map.get(progress.bookId);
+      if (!progress.book_id) return;
+      const existing = map.get(progress.book_id);
       if (!existing || progressUpdatedTime(progress) > progressUpdatedTime(existing)) {
-        map.set(progress.bookId, progress);
+        map.set(progress.book_id, progress);
       }
     });
 
@@ -135,7 +138,7 @@ const HomePage: React.FC = () => {
 
   const recentlyAddedBooks = useMemo(() => {
     return [...books]
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
       .slice(0, 10);
   }, [books]);
 
@@ -144,17 +147,17 @@ const HomePage: React.FC = () => {
     const items: HeroItem[] = [];
 
     recentBookPlays.forEach(progress => {
-      const book = bookMap.get(progress.bookId);
-      const id = book?.id || progress.bookId;
+      const book = bookMap.get(progress.book_id);
+      const id = book?.id || progress.book_id;
       if (!id || seen.has(id)) return;
       seen.add(id);
       items.push({
         id,
-        title: book?.title || progress.bookTitle || '未知书籍',
-        subtitle: progress.chapterTitle ? `上次听到 ${progress.chapterTitle}` : (book?.author || '继续收听'),
-        description: book?.description || (progress.chapterTitle ? `继续从「${progress.chapterTitle}」开始，接上你的听书进度。` : '继续上次没有听完的内容。'),
-        coverUrl: book?.coverUrl || progress.coverUrl,
-        libraryId: book?.libraryId || progress.libraryId,
+        title: book?.title || progress.book_title || t('home.unknownBook'),
+        subtitle: progress.chapter_title ? t('home.continueListeningAt', { chapter: progress.chapter_title }) : (book?.author || t('home.continueListening')),
+        description: book?.description || (progress.chapter_title ? t('home.continueFromChapter', { chapter: progress.chapter_title }) : t('home.continuePrevious')),
+        cover_url: book?.cover_url || progress.cover_url,
+        library_id: book?.library_id || progress.library_id,
         book,
         progress,
       });
@@ -166,16 +169,16 @@ const HomePage: React.FC = () => {
       items.push({
         id: book.id,
         title: book.title,
-        subtitle: book.author || '今日推荐',
-        description: book.description || '从书架里挑一本作品，开启今天的听书时间。',
-        coverUrl: book.coverUrl,
-        libraryId: book.libraryId,
+        subtitle: book.author || t('home.todayRecommendation'),
+        description: book.description || t('home.pickToday'),
+        cover_url: book.cover_url,
+        library_id: book.library_id,
         book,
       });
     });
 
     return items.slice(0, 10);
-  }, [bookMap, favorites, recentBookPlays, recentlyAddedBooks]);
+  }, [bookMap, favorites, recentBookPlays, recentlyAddedBooks, t]);
 
   const activeHeroItem = useMemo(() => (
     heroItems.find(item => item.id === activeHeroBookId) || heroItems[0]
@@ -200,7 +203,7 @@ const HomePage: React.FC = () => {
     const source = [
       activeHeroItem?.book,
       ...favorites,
-      ...recentBookPlays.map(progress => bookMap.get(progress.bookId)),
+      ...recentBookPlays.map(progress => bookMap.get(progress.book_id)),
       ...recentlyAddedBooks,
     ].filter(Boolean) as Book[];
 
@@ -218,10 +221,10 @@ const HomePage: React.FC = () => {
 
   const getGreeting = () => {
     const hour = new Date().getHours();
-    if (hour >= 5 && hour < 12) return '早上好';
-    if (hour >= 12 && hour < 14) return '中午好';
-    if (hour >= 14 && hour < 18) return '下午好';
-    return '晚上好';
+    if (hour >= 5 && hour < 12) return t('home.greetingMorning');
+    if (hour >= 12 && hour < 14) return t('home.greetingNoon');
+    if (hour >= 14 && hour < 18) return t('home.greetingAfternoon');
+    return t('home.greetingEvening');
   };
 
   const coverAspectClass = getCoverAspectClass(coverShape);
@@ -241,21 +244,21 @@ const HomePage: React.FC = () => {
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <p className="text-sm font-bold text-primary-600">{getGreeting()}</p>
-            <h1 className="text-2xl md:text-4xl font-bold text-slate-900 dark:text-white mt-1">今天听点什么</h1>
-            <p className="text-sm md:text-base text-slate-500 dark:text-slate-400 mt-2">推荐、最近、书单和你的听书节奏都在这里。</p>
+            <h1 className="text-2xl md:text-4xl font-bold text-slate-900 dark:text-white mt-1">{t('home.title')}</h1>
+            <p className="text-sm md:text-base text-slate-500 dark:text-slate-400 mt-2">{t('home.subtitle')}</p>
           </div>
 
           <div className="flex items-center gap-2">
             <div className="hidden md:flex h-12 items-center gap-2 text-sm text-slate-500 bg-white dark:bg-slate-900 px-4 py-2.5 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800">
               <Calendar size={16} />
-              <span>{new Date().toLocaleDateString('zh-CN', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
+              <span>{formatLocalizedDate(new Date(), { weekday: 'long', month: 'long', day: 'numeric' })}</span>
             </div>
             <Link
               to="/search"
               className="inline-flex h-12 items-center gap-2 px-4 py-2.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl text-sm font-bold shadow-lg shadow-slate-900/10 dark:shadow-white/5 hover:opacity-90 transition-opacity"
             >
               <Search size={18} />
-              搜索内容
+              {t('home.searchContent')}
             </Link>
           </div>
         </div>
@@ -266,7 +269,7 @@ const HomePage: React.FC = () => {
           <div className="relative overflow-hidden rounded-3xl border border-white/70 dark:border-white/10 bg-[linear-gradient(135deg,#f8fafc_0%,#dbeafe_42%,#f0f9ff_100%)] dark:bg-[linear-gradient(135deg,#020617_0%,#172554_46%,#2e1065_100%)] text-slate-950 dark:text-white shadow-2xl shadow-sky-200/70 dark:shadow-slate-950/40">
             {activeHeroItem && (
               <img
-                src={getCoverUrl(activeHeroItem.coverUrl, activeHeroItem.libraryId, activeHeroItem.id)}
+                src={getCoverUrl(activeHeroItem.cover_url, activeHeroItem.library_id, activeHeroItem.id)}
                 alt=""
                 aria-hidden="true"
                 referrerPolicy="no-referrer"
@@ -286,16 +289,16 @@ const HomePage: React.FC = () => {
                   <div className="flex-1 min-w-0">
                     <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/5 dark:bg-white/10 border border-slate-900/10 dark:border-white/10 text-xs font-bold text-slate-700 dark:text-white backdrop-blur-sm">
                     <Sparkles size={14} className="text-amber-500 dark:text-amber-300" />
-                    {heroProgress ? '继续收听' : '今日推荐'}
+                    {heroProgress ? t('home.continueListening') : t('home.todayRecommendation')}
                     </div>
                     <h2 className="text-3xl sm:text-4xl md:text-5xl font-black mt-4 sm:mt-5 leading-tight line-clamp-2 sm:line-clamp-none">
-                      {activeHeroItem?.title || '打开一本新的声音'}
+                      {activeHeroItem?.title || t('home.heroFallbackTitle')}
                     </h2>
                     <p className="text-sm md:text-base text-slate-500 dark:text-white/72 mt-2 sm:mt-3 line-clamp-1">
-                      {activeHeroItem?.subtitle || '从书架里挑一本作品开始播放'}
+                      {activeHeroItem?.subtitle || t('home.heroFallbackSubtitle')}
                     </p>
                     <p className="text-sm md:text-base text-slate-700 dark:text-slate-100/90 mt-3 sm:mt-4 max-w-3xl line-clamp-3 sm:line-clamp-4 leading-6 sm:leading-8">
-                      {activeHeroItem?.description || '从书架里挑一本最近添加的作品，或者去搜索页面发现新的内容。'}
+                      {activeHeroItem?.description || t('home.heroFallbackDescription')}
                     </p>
                   </div>
 
@@ -305,13 +308,13 @@ const HomePage: React.FC = () => {
                       onClick={handleCycleHero}
                       disabled={heroItems.length <= 1}
                       className={`relative w-[min(62vw,13.5rem)] sm:w-56 md:w-64 lg:w-72 text-left ${heroItems.length > 1 ? 'cursor-pointer group/hero-cover' : 'cursor-default'}`}
-                      aria-label={heroItems.length > 1 ? '点击切换下一本作品' : '当前作品封面'}
+                      aria-label={heroItems.length > 1 ? t('home.switchNextBook') : t('home.currentCover')}
                     >
                       <div className={`absolute -left-2 sm:-left-4 top-3 sm:top-4 w-full ${coverAspectClass} rounded-[22px] sm:rounded-[28px] bg-white/45 dark:bg-white/10 shadow-2xl shadow-sky-900/10 dark:shadow-black/25 -rotate-6 backdrop-blur-sm`} />
                       {nextHeroItem && (
                         <div className={`absolute -right-3 sm:-right-5 top-5 sm:top-8 w-full ${coverAspectClass} rounded-[22px] sm:rounded-[28px] overflow-hidden bg-white/20 dark:bg-white/10 border border-white/25 dark:border-white/10 shadow-2xl shadow-sky-900/20 dark:shadow-black/30 rotate-6 opacity-80`}>
                           <img
-                            src={getCoverUrl(nextHeroItem.coverUrl, nextHeroItem.libraryId, nextHeroItem.id)}
+                            src={getCoverUrl(nextHeroItem.cover_url, nextHeroItem.library_id, nextHeroItem.id)}
                             alt={nextHeroItem.title}
                             referrerPolicy="no-referrer"
                             className="w-full h-full object-cover scale-105 saturate-75"
@@ -325,7 +328,7 @@ const HomePage: React.FC = () => {
                       <div className={`relative ${coverAspectClass} rounded-[22px] sm:rounded-[28px] overflow-hidden shadow-[0_22px_60px_-30px_rgba(15,23,42,0.85)] sm:shadow-[0_30px_90px_-36px_rgba(15,23,42,0.85)] dark:shadow-[0_28px_76px_-34px_rgba(0,0,0,0.92)] bg-slate-900/60 border border-white/40 dark:border-white/15 backdrop-blur-sm transition-transform duration-300 ${heroItems.length > 1 ? 'group-hover/hero-cover:-translate-y-1' : ''}`}>
                         {activeHeroItem ? (
                           <img
-                            src={getCoverUrl(activeHeroItem.coverUrl, activeHeroItem.libraryId, activeHeroItem.id)}
+                            src={getCoverUrl(activeHeroItem.cover_url, activeHeroItem.library_id, activeHeroItem.id)}
                             alt={activeHeroItem.title}
                             referrerPolicy="no-referrer"
                             className="w-full h-full object-cover"
@@ -341,8 +344,10 @@ const HomePage: React.FC = () => {
                         {heroItems.length > 1 && (
                           <div className="absolute inset-x-2 bottom-2 sm:inset-x-3 sm:bottom-3 flex items-center justify-between gap-2 sm:gap-3 rounded-xl sm:rounded-2xl border border-white/12 bg-slate-950/45 px-2.5 sm:px-3 py-2 backdrop-blur-sm">
                             <div className="min-w-0">
-                              <p className="hidden sm:block text-[10px] uppercase tracking-wide text-white/55">下一本</p>
-                              <p className="text-[11px] sm:text-xs font-bold text-white truncate">下一本：{nextHeroItem?.title || '继续切换'}</p>
+                              <p className="hidden sm:block text-[10px] uppercase tracking-wide text-white/55">{t('home.nextBook')}</p>
+                              <p className="text-[11px] sm:text-xs font-bold text-white truncate">
+                                {t('home.nextBookTitle', { title: nextHeroItem?.title || t('home.keepSwitching') })}
+                              </p>
                             </div>
                             <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-white/12 flex items-center justify-center text-white/85 shrink-0">
                               <RefreshCw size={13} />
@@ -361,7 +366,7 @@ const HomePage: React.FC = () => {
                       className="inline-flex items-center justify-center gap-2 px-3 sm:px-5 py-3 rounded-2xl bg-slate-950 dark:bg-white text-white dark:text-slate-950 text-sm font-black hover:opacity-90 transition-opacity shadow-xl shadow-slate-950/20 dark:shadow-black/25"
                     >
                       <Play size={18} fill="currentColor" />
-                      {heroProgress ? '继续播放' : '查看详情'}
+                      {heroProgress ? t('home.continuePlay') : t('home.viewDetails')}
                     </Link>
                   ) : (
                     <Link
@@ -369,7 +374,7 @@ const HomePage: React.FC = () => {
                       className="inline-flex items-center justify-center gap-2 px-3 sm:px-5 py-3 rounded-2xl bg-slate-950 dark:bg-white text-white dark:text-slate-950 text-sm font-black hover:opacity-90 transition-opacity shadow-xl shadow-slate-950/20 dark:shadow-black/25"
                     >
                       <Library size={18} />
-                      去书架
+                      {t('home.goBookshelf')}
                     </Link>
                   )}
                   <Link
@@ -377,7 +382,7 @@ const HomePage: React.FC = () => {
                     className="inline-flex items-center justify-center gap-2 px-3 sm:px-5 py-3 rounded-2xl bg-white/45 dark:bg-white/10 border border-white/60 dark:border-white/10 text-slate-800 dark:text-white text-sm font-bold hover:bg-white/70 dark:hover:bg-white/15 transition-colors backdrop-blur-sm"
                   >
                     <ListMusic size={18} />
-                    管理书单
+                    {t('home.managePlaylists')}
                   </Link>
                 </div>
               </div>
@@ -388,18 +393,18 @@ const HomePage: React.FC = () => {
 
           {homeLayout.showStats && (
           <div className="grid grid-cols-2 gap-4">
-            <DataCard icon={<Headphones size={20} />} label="最近已听" value={listenMinutes > 0 ? `${listenMinutes}` : '0'} unit="分钟" tone="text-primary-600 bg-primary-50 dark:bg-primary-900/20" />
-            <DataCard icon={<Heart size={20} />} label="收藏作品" value={favorites.length} unit="本" tone="text-red-500 bg-red-50 dark:bg-red-900/20" />
-            <DataCard icon={<ListMusic size={20} />} label="我的书单" value={playlists.length} unit="个" tone="text-amber-600 bg-amber-50 dark:bg-amber-900/20" />
-            <DataCard icon={<History size={20} />} label="收听记录" value={recentPlays.length} unit="条" tone="text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20" />
+            <DataCard icon={<Headphones size={20} />} label={t('home.recentlyListened')} value={listenMinutes > 0 ? `${listenMinutes}` : '0'} unit={t('home.minutes')} tone="text-primary-600 bg-primary-50 dark:bg-primary-900/20" />
+            <DataCard icon={<Heart size={20} />} label={t('home.favoriteWorks')} value={favorites.length} unit={t('home.bookUnit')} tone="text-red-500 bg-red-50 dark:bg-red-900/20" />
+            <DataCard icon={<ListMusic size={20} />} label={t('home.myPlaylists')} value={playlists.length} unit={t('home.itemUnit')} tone="text-amber-600 bg-amber-50 dark:bg-amber-900/20" />
+            <DataCard icon={<History size={20} />} label={t('home.listeningHistory')} value={recentPlays.length} unit={t('home.recordUnit')} tone="text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20" />
             <div className="col-span-2 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-5 shadow-sm">
               <div className="flex items-center gap-3">
                 <div className="w-11 h-11 rounded-2xl bg-violet-50 dark:bg-violet-900/20 text-violet-600 flex items-center justify-center">
                   <Clock size={20} />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-xs text-slate-500 font-bold">当前播放</p>
-                  <p className="text-lg md:text-xl font-bold dark:text-white truncate">{currentChapter?.title || '暂无播放'}</p>
+                  <p className="text-xs text-slate-500 font-bold">{t('home.nowPlaying')}</p>
+                  <p className="text-lg md:text-xl font-bold dark:text-white truncate">{currentChapter?.title || t('home.noPlayback')}</p>
                 </div>
               </div>
             </div>
@@ -410,7 +415,7 @@ const HomePage: React.FC = () => {
 
         {homeLayout.showRecommended && (
         <section className="space-y-4">
-          <SectionTitle icon={<Sparkles size={22} className="text-amber-500" />} title="为你推荐" to="/bookshelf" action="查看书架" />
+          <SectionTitle icon={<Sparkles size={22} className="text-amber-500" />} title={t('home.recommended')} to="/bookshelf" action={t('home.viewBookshelf')} />
           {recommendedBooks.length > 0 ? (
             <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-x-4 gap-y-7">
               {recommendedBooks.map(book => (
@@ -418,7 +423,7 @@ const HomePage: React.FC = () => {
               ))}
             </div>
           ) : (
-            <EmptyBand icon={<Library size={34} />} title="还没有可推荐的内容" action="去书架看看" to="/bookshelf" />
+            <EmptyBand icon={<Library size={34} />} title={t('home.noRecommended')} action={t('home.goBookshelf')} to="/bookshelf" />
           )}
         </section>
         )}
@@ -427,22 +432,22 @@ const HomePage: React.FC = () => {
         <section className="grid grid-cols-1 gap-8">
           {homeLayout.showRecent && (
           <div className="space-y-4">
-            <SectionTitle icon={<History size={22} className="text-primary-600" />} title="最近收听" to="/history" action="查看历史" />
+            <SectionTitle icon={<History size={22} className="text-primary-600" />} title={t('home.recentListening')} to="/history" action={t('home.viewHistory')} />
             {recentBookPlays.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {recentBookPlays.slice(0, 4).map(progress => (
-                  <RecentListenTile key={progress.id || `${progress.bookId}-${progress.chapterId}`} progress={progress} coverShape={coverShape} />
+                  <RecentListenTile key={progress.id || `${progress.book_id}-${progress.chapter_id}`} progress={progress} coverShape={coverShape} />
                 ))}
               </div>
             ) : (
-              <EmptyBand icon={<Play size={34} />} title="暂无播放记录" action="开始听书" to="/bookshelf" />
+              <EmptyBand icon={<Play size={34} />} title={t('home.noPlaybackRecords')} action={t('home.startListening')} to="/bookshelf" />
             )}
           </div>
           )}
 
           {homeLayout.showRecentlyAdded && (
           <div className="space-y-4">
-            <SectionTitle icon={<TrendingUp size={22} className="text-emerald-600" />} title="最近上新" to="/bookshelf" action="更多" />
+            <SectionTitle icon={<TrendingUp size={22} className="text-emerald-600" />} title={t('home.recentlyAdded')} to="/bookshelf" action={t('home.more')} />
             {recentlyAddedBooks.length > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                 {recentlyAddedBooks.slice(0, 6).map(book => (
@@ -450,7 +455,7 @@ const HomePage: React.FC = () => {
                 ))}
               </div>
             ) : (
-              <EmptyBand icon={<TrendingUp size={34} />} title="暂无上新内容" action="去书架看看" to="/bookshelf" />
+              <EmptyBand icon={<TrendingUp size={34} />} title={t('home.noRecentlyAdded')} action={t('home.goBookshelf')} to="/bookshelf" />
             )}
           </div>
           )}
@@ -459,13 +464,13 @@ const HomePage: React.FC = () => {
 
         {homeLayout.showCollections && (
         <section className="space-y-4">
-          <SectionTitle icon={<ListMusic size={22} className="text-orange-500" />} title="书单与系列" to="/playlists" action="管理书单" />
+          <SectionTitle icon={<ListMusic size={22} className="text-orange-500" />} title={t('home.collections')} to="/playlists" action={t('home.managePlaylists')} />
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             {playlists.slice(0, 4).map(playlist => (
               <CollectionCard
                 key={playlist.id}
                 title={playlist.title}
-                subtitle={`${getPlaylistBookCount(playlist)} 本书`}
+                subtitle={t('home.bookCount', { count: getPlaylistBookCount(playlist) })}
                 to={`/playlists/${playlist.id}`}
                 items={collectPlaylistCovers(playlist, playlistCoverSeed)}
               />
@@ -474,14 +479,14 @@ const HomePage: React.FC = () => {
               <CollectionCard
                 key={item.id}
                 title={item.title}
-                subtitle={`${item.books?.length || 0} 本系列作品`}
+                subtitle={t('home.seriesBookCount', { count: item.books?.length || 0 })}
                 to={`/series/${item.id}`}
                 items={getSeriesCover(item)}
               />
             ))}
             {playlists.length === 0 && series.length === 0 && (
               <div className="md:col-span-2 xl:col-span-4">
-                <EmptyBand icon={<ListMusic size={34} />} title="还没有书单或系列" action="创建书单" to="/playlists" />
+                <EmptyBand icon={<ListMusic size={34} />} title={t('home.noCollections')} action={t('home.createPlaylist')} to="/playlists" />
               </div>
             )}
           </div>
@@ -536,17 +541,18 @@ const DataCard = ({
 );
 
 const RecentListenTile = ({ progress, coverShape }: { progress: Progress; coverShape: CoverShape }) => {
-  const percent = Math.min(100, Math.round((progress.position / (progress.chapterDuration || 1)) * 100));
+  const { t } = useTranslation();
+  const percent = Math.min(100, Math.round((progress.position / (progress.chapter_duration || 1)) * 100));
 
   return (
     <Link
-      to={`/book/${progress.bookId}`}
+      to={`/book/${progress.book_id}`}
       className="bg-white dark:bg-slate-900 rounded-3xl p-3 md:p-4 shadow-sm border border-slate-100 dark:border-slate-800 flex gap-3 md:gap-4 hover:shadow-md transition-shadow group"
     >
       <div className={`w-20 md:w-24 ${getCoverAspectClass(coverShape)} rounded-2xl overflow-hidden shrink-0 shadow-sm`}>
         <img
-          src={getCoverUrl(progress.coverUrl, progress.libraryId, progress.bookId)}
-          alt={progress.bookTitle}
+          src={getCoverUrl(progress.cover_url, progress.library_id, progress.book_id)}
+          alt={progress.book_title}
           referrerPolicy="no-referrer"
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
           onError={(event) => {
@@ -557,9 +563,11 @@ const RecentListenTile = ({ progress, coverShape }: { progress: Progress; coverS
       <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
         <div className="min-w-0">
           <p className="font-bold text-sm md:text-base dark:text-white group-hover:text-primary-600 transition-colors truncate">
-            {progress.bookTitle || '未知书籍'}
+            {progress.book_title || t('home.unknownBook')}
           </p>
-          <p className="text-xs text-slate-500 truncate mt-0.5">正在播放: {progress.chapterTitle}</p>
+          <p className="text-xs text-slate-500 truncate mt-0.5">
+            {t('home.playingChapter', { chapter: progress.chapter_title })}
+          </p>
         </div>
         <div className="flex items-center justify-between mt-2">
           <div className="flex-1 h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full mr-3 overflow-hidden">
@@ -572,30 +580,34 @@ const RecentListenTile = ({ progress, coverShape }: { progress: Progress; coverS
   );
 };
 
-const RecentlyAddedTile = ({ book, coverShape }: { book: Book; coverShape: CoverShape }) => (
-  <Link
-    to={`/book/${book.id}`}
-    className="group bg-white dark:bg-slate-900 rounded-3xl p-3 md:p-4 shadow-sm border border-slate-100 dark:border-slate-800 flex items-center gap-4 hover:shadow-md transition-shadow min-w-0"
-  >
-    <div className={`w-20 md:w-24 ${getCoverAspectClass(coverShape)} rounded-2xl overflow-hidden shrink-0 shadow-sm bg-slate-100 dark:bg-slate-800`}>
-      <img
-        src={getCoverUrl(book.coverUrl, book.libraryId, book.id)}
-        alt={book.title}
-        referrerPolicy="no-referrer"
-        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-        onError={(event) => {
-          (event.target as HTMLImageElement).src = 'https://placehold.co/300x400?text=No+Cover';
-        }}
-      />
-    </div>
-    <div className="min-w-0 flex-1">
-      <p className="text-[11px] font-black text-emerald-600 dark:text-emerald-400 mb-1">最近入库</p>
-      <p className="font-bold text-sm md:text-base dark:text-white truncate group-hover:text-primary-600 transition-colors">{book.title}</p>
-      <p className="text-xs text-slate-500 truncate mt-1">{book.author || '未知作者'}</p>
-    </div>
-    <ChevronRight size={16} className="text-slate-300 shrink-0" />
-  </Link>
-);
+const RecentlyAddedTile = ({ book, coverShape }: { book: Book; coverShape: CoverShape }) => {
+  const { t } = useTranslation();
+
+  return (
+    <Link
+      to={`/book/${book.id}`}
+      className="group bg-white dark:bg-slate-900 rounded-3xl p-3 md:p-4 shadow-sm border border-slate-100 dark:border-slate-800 flex items-center gap-4 hover:shadow-md transition-shadow min-w-0"
+    >
+      <div className={`w-20 md:w-24 ${getCoverAspectClass(coverShape)} rounded-2xl overflow-hidden shrink-0 shadow-sm bg-slate-100 dark:bg-slate-800`}>
+        <img
+          src={getCoverUrl(book.cover_url, book.library_id, book.id)}
+          alt={book.title}
+          referrerPolicy="no-referrer"
+          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+          onError={(event) => {
+            (event.target as HTMLImageElement).src = 'https://placehold.co/300x400?text=No+Cover';
+          }}
+        />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] font-black text-emerald-600 dark:text-emerald-400 mb-1">{t('home.recentlyImported')}</p>
+        <p className="font-bold text-sm md:text-base dark:text-white truncate group-hover:text-primary-600 transition-colors">{book.title}</p>
+        <p className="text-xs text-slate-500 truncate mt-1">{book.author || t('home.unknownAuthor')}</p>
+      </div>
+      <ChevronRight size={16} className="text-slate-300 shrink-0" />
+    </Link>
+  );
+};
 
 const CollectionCard = ({
   title,
@@ -617,7 +629,7 @@ const CollectionCard = ({
     <div className="relative h-[178px] rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-800">
       {items && items.length > 0 ? (
         <img
-          src={getCoverUrl(items[0].coverUrl, items[0].libraryId, items[0].bookId)}
+          src={getCoverUrl(items[0].cover_url, items[0].library_id, items[0].book_id)}
           alt={items[0].title || title}
           referrerPolicy="no-referrer"
           className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"

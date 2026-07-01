@@ -14,6 +14,4 @@ export interface ChapterEditDraft {
   isExtra: boolean;
 }
 
-export interface EditableChapter extends Chapter {
-  isExtra?: number;
-}
+export type EditableChapter = Chapter;

@@ -170,4 +170,68 @@ impl StorageService {
 
         Ok((Box::new(reader), total_size))
     }
+
+    /// Get a reader for a plain HTTP/HTTPS media URL.
+    pub async fn get_http_reader(
+        &self,
+        media_url: &str,
+        range: Option<(u64, u64)>,
+    ) -> Result<(Box<dyn AsyncRead + Send + Unpin>, u64)> {
+        let url = Url::parse(media_url).map_err(|e| TingError::ValidationError(e.to_string()))?;
+
+        if url.scheme() != "http" && url.scheme() != "https" {
+            return Err(TingError::ValidationError(
+                "Remote media URL must start with http:// or https://".to_string(),
+            ));
+        }
+
+        let mut req = self
+            .client
+            .get(url.clone())
+            .header("Accept", "*/*")
+            .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+            .header("Accept-Encoding", "gzip, deflate, br")
+            .header("Connection", "keep-alive");
+
+        if let Some((start, end)) = range {
+            let end_byte = if end > 0 { end.saturating_sub(1) } else { 0 };
+            if end > start {
+                req = req.header("Range", format!("bytes={}-{}", start, end_byte));
+            } else {
+                req = req.header("Range", format!("bytes={}-", start));
+            }
+        }
+
+        let res = req
+            .send()
+            .await
+            .map_err(|e| TingError::NetworkError(e.to_string()))?;
+
+        if !res.status().is_success() {
+            return Err(TingError::NotFound(format!(
+                "Remote media not found: {} at {}",
+                res.status(),
+                url
+            )));
+        }
+
+        let mut total_size = res.content_length().unwrap_or(0);
+
+        if let Some(range_header) = res.headers().get("Content-Range") {
+            if let Ok(range_str) = range_header.to_str() {
+                if let Some(slash_pos) = range_str.rfind('/') {
+                    if let Ok(total) = range_str[slash_pos + 1..].parse::<u64>() {
+                        total_size = total;
+                    }
+                }
+            }
+        }
+
+        let stream = res
+            .bytes_stream()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+        let reader = StreamReader::new(stream);
+
+        Ok((Box::new(reader), total_size))
+    }
 }

@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom';
 import { getCoverUrl } from '../../core/utils/image';
 import { toSolidColor, isLight, isTooLight } from '../../core/utils/color';
 import ExpandableTitle from '../widgets/ExpandableTitle';
+import { useTranslation } from 'react-i18next';
 
 interface BookCardProps {
   book: Book;
@@ -15,13 +16,14 @@ interface BookCardProps {
 }
 
 const BookCard: React.FC<BookCardProps> = ({ book, onClick, disableLink, coverShape = 'rect' }) => {
-  const effectiveThemeColor = book.themeColor && !isTooLight(book.themeColor) ? book.themeColor : undefined;
+  const { t } = useTranslation();
+  const effectiveThemeColor = book.theme_color && !isTooLight(book.theme_color) ? book.theme_color : undefined;
 
   const content = (
     <>
       <div className={`relative ${coverShape === 'square' ? 'aspect-square' : 'aspect-[3/4]'} overflow-hidden rounded-md shadow-md bg-white dark:bg-slate-800`}>
-        <img 
-          src={getCoverUrl(book.coverUrl, book.libraryId, book.id)} 
+        <img
+          src={getCoverUrl(book.cover_url, book.library_id, book.id)}
           alt={book.title}
           loading="lazy"
           referrerPolicy="no-referrer"
@@ -50,7 +52,7 @@ const BookCard: React.FC<BookCardProps> = ({ book, onClick, disableLink, coverSh
         />
         <div className="mt-1 flex flex-col gap-0.5">
           <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-            <span className="line-clamp-1">{book.author || '未知作者'}</span>
+            <span className="line-clamp-1">{book.author || t('shared.unknownAuthor')}</span>
           </div>
         </div>
       </div>

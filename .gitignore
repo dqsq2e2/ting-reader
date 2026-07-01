@@ -21,6 +21,9 @@ pnpm-debug.log*
 /temp/
 /storage/
 /plugins/*/
+/backend/data/
+/backend/storage/
+/backend/plugins/
 
 # Environment
 .env

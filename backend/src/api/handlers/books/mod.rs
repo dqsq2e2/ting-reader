@@ -138,19 +138,26 @@ pub async fn create_book(
 
     tracing::info!(
         target: "audit::library",
+        message_key = "book.created",
+        message_params = %serde_json::json!({
+            "actor": user.username.as_str(),
+            "book_id": book.id.as_str(),
+            "book_title": book_title.as_str(),
+            "library_id": book.library_id.as_str(),
+            "library_name": library_name.as_deref().unwrap_or(""),
+        }),
         actor_id = %user.id,
         actor = %user.username,
         book_id = %book.id,
         book_title = %book_title,
         library_id = %book.library_id,
         library_name = %library_name.as_deref().unwrap_or(""),
-        "用户 '{}' 创建了作品 '{}'",
-        user.username,
-        book_title
+        "Book created"
     );
 
-    crate::core::notifications::dispatch_notification_event(
+    crate::core::notifications::dispatch_application_event(
         state.notification_repo.clone(),
+        state.plugin_manager.clone(),
         crate::core::notifications::NotificationEventPayload::new(
             "book.created",
             "作品入库",
@@ -248,7 +255,12 @@ pub async fn update_book(
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("计算主题颜色失败: {}", e);
+                    tracing::warn!(
+                        error = %e,
+                        message_key = "book.theme_color.calculate_failed",
+                        message_params = %serde_json::json!({ "error": e.to_string() }),
+                        "Book theme color calculation failed"
+                    );
                 }
             }
         } else {
@@ -394,9 +406,14 @@ pub async fn update_book(
                 .write_book_nfo_to_dir(&target_dir, &metadata)
             {
                 tracing::warn!(
-                    "为书籍 {} 写入 NFO 失败: {}",
-                    updated_book.title.as_deref().unwrap_or("?"),
-                    e
+                    book_title = %updated_book.title.as_deref().unwrap_or("?"),
+                    error = %e,
+                    message_key = "metadata.nfo.write_failed",
+                    message_params = %serde_json::json!({
+                        "book_title": updated_book.title.as_deref().unwrap_or("?"),
+                        "error": e.to_string(),
+                    }),
+                    "Failed to write NFO"
                 );
             }
         }
@@ -513,7 +530,17 @@ pub async fn update_book(
             if let Err(e) =
                 crate::core::metadata_writer::write_metadata_json(&target_dir, &metadata_json)
             {
-                tracing::error!(target: "audit::metadata", "为书籍 {} 写入 metadata.json 失败: {}", updated_book.title.as_deref().unwrap_or("?"), e);
+                tracing::error!(
+                    target: "audit::metadata",
+                    book_title = %updated_book.title.as_deref().unwrap_or("?"),
+                    error = %e,
+                    message_key = "metadata.json.write_failed",
+                    message_params = %serde_json::json!({
+                        "book_title": updated_book.title.as_deref().unwrap_or("?"),
+                        "error": e.to_string(),
+                    }),
+                    "Failed to write metadata.json"
+                );
             }
         }
     }
@@ -540,9 +567,18 @@ pub async fn delete_book(
             let path = std::path::Path::new(&path_str);
             if path.exists() {
                 if let Err(e) = std::fs::remove_file(path) {
-                    tracing::warn!("删除封面缓存 {} 失败: {}", cover_url, e);
+                    tracing::warn!(
+                        path = %cover_url,
+                        error = %e,
+                        message_key = "library.cover_cache.delete_failed",
+                        message_params = %serde_json::json!({
+                            "path": cover_url,
+                            "error": e.to_string(),
+                        }),
+                        "Failed to delete cover cache"
+                    );
                 } else {
-                    tracing::info!("已删除孤立的封面缓存: {}", cover_url);
+                    tracing::info!("Deleted orphan cover cache: {}", cover_url);
                 }
             }
         }
@@ -561,19 +597,26 @@ pub async fn delete_book(
 
     tracing::info!(
         target: "audit::library",
+        message_key = "book.deleted",
+        message_params = %serde_json::json!({
+            "actor": user.username.as_str(),
+            "book_id": book.id.as_str(),
+            "book_title": book_title.as_str(),
+            "library_id": book.library_id.as_str(),
+            "library_name": library_name.as_deref().unwrap_or(""),
+        }),
         actor_id = %user.id,
         actor = %user.username,
         book_id = %book.id,
         book_title = %book_title,
         library_id = %book.library_id,
         library_name = %library_name.as_deref().unwrap_or(""),
-        "用户 '{}' 删除了作品 '{}'",
-        user.username,
-        book_title
+        "Book deleted"
     );
 
-    crate::core::notifications::dispatch_notification_event(
+    crate::core::notifications::dispatch_application_event(
         state.notification_repo.clone(),
+        state.plugin_manager.clone(),
         crate::core::notifications::NotificationEventPayload::new(
             "book.deleted",
             "删除作品",
@@ -874,7 +917,17 @@ pub async fn update_chapter(
             if let Err(e) =
                 crate::core::metadata_writer::write_metadata_json(&target_dir, &metadata_json)
             {
-                tracing::error!(target: "audit::metadata", "为章节更新 {} 写入 metadata.json 失败: {}", updated_chapter.title.as_deref().unwrap_or("?"), e);
+                tracing::error!(
+                    target: "audit::metadata",
+                    chapter_title = %updated_chapter.title.as_deref().unwrap_or("?"),
+                    error = %e,
+                    message_key = "metadata.json.write_failed",
+                    message_params = %serde_json::json!({
+                        "chapter_title": updated_chapter.title.as_deref().unwrap_or("?"),
+                        "error": e.to_string(),
+                    }),
+                    "Failed to write metadata.json"
+                );
             }
         }
     }
@@ -1101,7 +1154,17 @@ pub async fn batch_update_chapters(
             if let Err(e) =
                 crate::core::metadata_writer::write_metadata_json(&target_dir, &metadata_json)
             {
-                tracing::error!(target: "audit::metadata", "为批量更新 {} 写入 metadata.json 失败: {}", book.title.as_deref().unwrap_or("?"), e);
+                tracing::error!(
+                    target: "audit::metadata",
+                    book_title = %book.title.as_deref().unwrap_or("?"),
+                    error = %e,
+                    message_key = "metadata.json.write_failed",
+                    message_params = %serde_json::json!({
+                        "book_title": book.title.as_deref().unwrap_or("?"),
+                        "error": e.to_string(),
+                    }),
+                    "Failed to write metadata.json"
+                );
             }
         }
     }

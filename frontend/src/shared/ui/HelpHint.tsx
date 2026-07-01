@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { HelpCircle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 const TOOLTIP_WIDTH = 288;
 const VIEWPORT_PADDING = 12;
 
 const HelpHint: React.FC<{ text: string }> = ({ text }) => {
+  const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const [position, setPosition] = useState<{ left: number; top: number; width: number; placement: 'top' | 'bottom' } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -63,9 +65,8 @@ const HelpHint: React.FC<{ text: string }> = ({ text }) => {
       <button
         ref={buttonRef}
         type="button"
-        aria-label="查看说明"
+        aria-label={t('helpHint.ariaLabel')}
         aria-expanded={visible}
-        title={text}
         onMouseEnter={showHint}
         onMouseLeave={() => setVisible(false)}
         onFocus={showHint}

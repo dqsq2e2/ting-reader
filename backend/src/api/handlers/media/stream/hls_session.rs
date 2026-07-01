@@ -66,9 +66,14 @@ impl HlsSessionManager {
 
         if active_count >= self.max_concurrent {
             tracing::warn!(
-                "并发限制: 当前活跃会话数 {}/{}",
-                active_count,
-                self.max_concurrent
+                message_key = "media.hls.concurrent_limit",
+                message_params = %serde_json::json!({
+                    "active_count": active_count,
+                    "max_concurrent": self.max_concurrent,
+                }),
+                active_count = active_count,
+                max_concurrent = self.max_concurrent,
+                "HLS concurrent session limit reached"
             );
             return Err("Too many concurrent transcoding sessions".to_string());
         }
@@ -102,7 +107,7 @@ impl HlsSessionManager {
             .await
             .insert(session_id.clone(), session);
         tracing::info!(
-            "创建 HLS 会话: {} (活跃: {}/{})",
+            "Created HLS session: {} (active: {}/{})",
             session_id,
             active_count,
             self.max_concurrent
@@ -135,7 +140,7 @@ impl HlsSessionManager {
         if let Some(session) = sessions.get_mut(session_id) {
             if let Some(mut child) = session.ffmpeg_process.take() {
                 let _ = child.kill().await;
-                tracing::info!("已终止 HLS 会话 {} 的 FFmpeg 进程", session_id);
+                tracing::info!("Terminated FFmpeg process for HLS session {}", session_id);
             }
         }
     }
@@ -179,7 +184,7 @@ impl HlsSessionManager {
         for id in finished {
             if let Some(mut session) = sessions.remove(&id) {
                 session.ffmpeg_process = None;
-                tracing::info!("清理已完成的 HLS 会话: {}", id);
+                tracing::info!("Cleaning up completed HLS session: {}", id);
 
                 // 重新插入会话（保留会话信息，但移除进程）
                 sessions.insert(id, session);
@@ -210,7 +215,7 @@ impl HlsSessionManager {
                 // 删除临时文件
                 let _ = std::fs::remove_dir_all(&session.temp_dir);
 
-                tracing::info!("清理过期 HLS 会话: {}", id);
+                tracing::info!("Cleaning up expired HLS session: {}", id);
             }
         }
     }

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ArrowRight,
   Check,
@@ -35,23 +36,24 @@ const ChapterManagerToolbar: React.FC<Props> = ({
   onJump,
   onMove,
 }) => {
+  const { t } = useTranslation();
   return (
     <div className="shrink-0 border-b border-slate-100 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/70 sm:px-6">
       {selectionMode ? (
         <div className="flex flex-wrap items-center gap-2">
-          <ToolbarButton active icon={<Check size={17} />} label="完成" onClick={onToggleSelectionMode} />
+          <ToolbarButton active icon={<Check size={17} />} label={t('chapterManager.done')} onClick={onToggleSelectionMode} />
           <ToolbarButton
             icon={allSelected ? <CheckSquare size={17} /> : <Square size={17} />}
-            label={`全选 ${totalCount}`}
+            label={t('chapterManager.selectAll', { count: totalCount })}
             onClick={onToggleAll}
             disabled={totalCount === 0}
           />
           <div className="inline-flex min-h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-            已选 {selectedCount}
+            {t('chapterManager.selectedCount', { count: selectedCount })}
           </div>
           <ToolbarButton
             icon={moving ? <Loader2 size={17} className="animate-spin" /> : <ArrowRight size={17} />}
-            label="移动"
+            label={t('chapterManager.move')}
             onClick={onMove}
             disabled={selectedCount === 0 || moving}
           />
@@ -60,12 +62,12 @@ const ChapterManagerToolbar: React.FC<Props> = ({
         <div className="flex flex-wrap items-center gap-2">
           <ToolbarButton
             icon={<ListTodo size={17} />}
-            label="选择"
+            label={t('chapterManager.select')}
             onClick={onToggleSelectionMode}
             disabled={totalCount === 0}
           />
-          <ToolbarButton icon={<ListOrdered size={17} />} label="重排" onClick={onRenumber} />
-          <ToolbarButton icon={<CornerDownRight size={17} />} label="跳转" onClick={onJump} />
+          <ToolbarButton icon={<ListOrdered size={17} />} label={t('chapterManager.renumber')} onClick={onRenumber} />
+          <ToolbarButton icon={<CornerDownRight size={17} />} label={t('chapterManager.jump')} onClick={onJump} />
         </div>
       )}
     </div>

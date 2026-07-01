@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Activity,
   BarChart3,
@@ -20,14 +21,18 @@ import type {
   UserActivityStatistics,
 } from '../../core/types';
 import LoadingSpinner from '../../shared/ui/LoadingSpinner';
+import { formatLocalizedNumber, getCurrentLocale } from '../../core/utils/locale';
+
+type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 const AdminStatisticsPage: React.FC = () => {
+  const { t } = useTranslation();
   const [report, setReport] = useState<AdminStatistics | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchReport = async (silent = false) => {
+  const fetchReport = React.useCallback(async (silent = false) => {
     if (silent) {
       setRefreshing(true);
     } else {
@@ -39,24 +44,24 @@ const AdminStatisticsPage: React.FC = () => {
       const res = await apiClient.get('/api/system/statistics');
       setReport(res.data);
     } catch (err) {
-      console.error('获取统计报表失败', err);
-      setError('统计报表加载失败');
+      console.error('Failed to fetch statistics report', err);
+      setError(t('adminStats.loadFailed'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [t]);
 
   useEffect(() => {
     fetchReport();
-  }, []);
+  }, [fetchReport]);
 
   const maxUserListen = useMemo(
-    () => Math.max(1, ...(report?.userActivity || []).map(item => item.listenSeconds)),
+    () => Math.max(1, ...(report?.user_activity || []).map(item => item.listen_seconds)),
     [report]
   );
   const maxBookHeat = useMemo(
-    () => Math.max(1, ...(report?.topBooks || []).map(item => getBookHeatScore(item))),
+    () => Math.max(1, ...(report?.top_books || []).map(item => getBookHeatScore(item))),
     [report]
   );
 
@@ -72,7 +77,7 @@ const AdminStatisticsPage: React.FC = () => {
         <div className="flex-1 space-y-6 max-w-7xl w-full mx-auto">
           <BackButton fallback="/mine" />
           <div className="rounded-2xl border border-red-100 dark:border-red-900/30 bg-red-50 dark:bg-red-950/20 p-6 text-red-600 dark:text-red-300">
-            {error || '统计报表暂无数据'}
+            {error || t('adminStats.noData')}
           </div>
         </div>
       </div>
@@ -80,11 +85,11 @@ const AdminStatisticsPage: React.FC = () => {
   }
 
   const { overview } = report;
-  const totalLibraries = Math.max(1, overview.totalLibraries);
-  const localPercent = Math.round((overview.localLibraries / totalLibraries) * 100);
-  const webdavPercent = Math.round((overview.webdavLibraries / totalLibraries) * 100);
-  const activeUserRate = overview.totalUsers > 0
-    ? Math.round((overview.activeUsers / overview.totalUsers) * 100)
+  const totalLibraries = Math.max(1, overview.total_libraries);
+  const localPercent = Math.round((overview.local_libraries / totalLibraries) * 100);
+  const webdavPercent = Math.round((overview.webdav_libraries / totalLibraries) * 100);
+  const activeUserRate = overview.total_users > 0
+    ? Math.round((overview.active_users / overview.total_users) * 100)
     : 0;
 
   return (
@@ -95,9 +100,9 @@ const AdminStatisticsPage: React.FC = () => {
           <div>
             <h1 className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white flex items-center gap-3">
               <BarChart3 size={28} className="text-primary-600" />
-              数据统计
+              {t('adminStats.title')}
             </h1>
-            <p className="text-sm text-slate-500 mt-2">生成时间：{formatDateTime(report.generatedAt)}</p>
+            <p className="text-sm text-slate-500 mt-2">{t('adminStats.generatedAt', { time: formatDateTime(report.generated_at, t) })}</p>
           </div>
           <button
             onClick={() => fetchReport(true)}
@@ -105,55 +110,55 @@ const AdminStatisticsPage: React.FC = () => {
             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-sm font-bold hover:opacity-90 disabled:opacity-60 transition-opacity"
           >
             <RefreshCw size={17} className={refreshing ? 'animate-spin' : ''} />
-            刷新报表
+            {t('adminStats.refresh')}
           </button>
         </div>
 
       <section className="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
         <MetricTile
           icon={<Library size={19} />}
-          label="馆藏作品"
-          value={formatNumber(overview.totalBooks)}
-          detail={`${formatNumber(overview.totalChapters)} 章 · ${formatDuration(overview.totalDuration)}`}
+          label={t('adminStats.libraryWorks')}
+          value={formatNumber(overview.total_books)}
+          detail={t('adminStats.chaptersDetail', { chapters: formatNumber(overview.total_chapters), duration: formatDuration(overview.total_duration, t) })}
           tone="text-sky-600 bg-sky-50 dark:bg-sky-900/20"
         />
         <MetricTile
           icon={<Headphones size={19} />}
-          label="累计收听"
-          value={formatDuration(overview.totalListenSeconds)}
-          detail={`${formatNumber(overview.totalProgressRecords)} 条进度记录`}
+          label={t('adminStats.totalListening')}
+          value={formatDuration(overview.total_listen_seconds, t)}
+          detail={t('adminStats.progressRecordsDetail', { count: formatNumber(overview.total_progress_records) })}
           tone="text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20"
         />
         <MetricTile
           icon={<Users size={19} />}
-          label="活跃用户"
-          value={`${formatNumber(overview.activeUsers)} / ${formatNumber(overview.totalUsers)}`}
-          detail={`活跃率 ${activeUserRate}% · 管理员 ${formatNumber(overview.adminUsers)}`}
+          label={t('adminStats.activeUsers')}
+          value={`${formatNumber(overview.active_users)} / ${formatNumber(overview.total_users)}`}
+          detail={t('adminStats.activeRateDetail', { rate: activeUserRate, admins: formatNumber(overview.admin_users) })}
           tone="text-violet-600 bg-violet-50 dark:bg-violet-900/20"
         />
         <MetricTile
           icon={<Database size={19} />}
-          label="媒体库"
-          value={formatNumber(overview.totalLibraries)}
-          detail={`本地 ${formatNumber(overview.localLibraries)} · WebDAV ${formatNumber(overview.webdavLibraries)}`}
+          label={t('adminStats.libraries')}
+          value={formatNumber(overview.total_libraries)}
+          detail={t('adminStats.libraryTypeDetail', { local: formatNumber(overview.local_libraries), webdav: formatNumber(overview.webdav_libraries) })}
           tone="text-amber-600 bg-amber-50 dark:bg-amber-900/20"
         />
       </section>
 
       <section className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1.28fr)_minmax(380px,0.72fr)] gap-5">
-        <Panel title="活跃趋势" icon={<TrendingUp size={19} />}>
-          {report.recentActivity.length > 0 ? (
-            <UsageTrend items={report.recentActivity} />
+        <Panel title={t('adminStats.activeTrend')} icon={<TrendingUp size={19} />}>
+          {report.recent_activity.length > 0 ? (
+            <UsageTrend items={report.recent_activity} />
           ) : (
-            <EmptyState icon={<TrendingUp size={30} />} text="暂无近期活跃记录" />
+            <EmptyState icon={<TrendingUp size={30} />} text={t('adminStats.noRecentActivity')} />
           )}
         </Panel>
 
-        <Panel title="媒体库结构" icon={<Database size={19} />}>
+        <Panel title={t('adminStats.libraryStructure')} icon={<Database size={19} />}>
           <LibraryMix
-            total={overview.totalLibraries}
-            local={overview.localLibraries}
-            webdav={overview.webdavLibraries}
+            total={overview.total_libraries}
+            local={overview.local_libraries}
+            webdav={overview.webdav_libraries}
             localPercent={localPercent}
             webdavPercent={webdavPercent}
           />
@@ -161,28 +166,28 @@ const AdminStatisticsPage: React.FC = () => {
       </section>
 
       <section className="grid grid-cols-1 2xl:grid-cols-[minmax(0,1.12fr)_minmax(420px,0.88fr)] gap-5">
-        <Panel title="馆藏数据" icon={<Library size={19} />}>
-          {report.libraryBreakdown.length > 0 ? (
-            <LibraryCards items={report.libraryBreakdown} />
+        <Panel title={t('adminStats.libraryData')} icon={<Library size={19} />}>
+          {report.library_breakdown.length > 0 ? (
+            <LibraryCards items={report.library_breakdown} />
           ) : (
-            <EmptyState icon={<Library size={30} />} text="暂无媒体库数据" />
+            <EmptyState icon={<Library size={30} />} text={t('adminStats.noLibraryData')} />
           )}
         </Panel>
 
-        <Panel title="用户使用情况" icon={<Activity size={19} />}>
-          {report.userActivity.length > 0 ? (
-            <UserTable items={report.userActivity} maxListen={maxUserListen} />
+        <Panel title={t('adminStats.userUsage')} icon={<Activity size={19} />}>
+          {report.user_activity.length > 0 ? (
+            <UserTable items={report.user_activity} maxListen={maxUserListen} />
           ) : (
-            <EmptyState icon={<Users size={30} />} text="暂无用户活跃数据" />
+            <EmptyState icon={<Users size={30} />} text={t('adminStats.noUserActivity')} />
           )}
         </Panel>
       </section>
 
-      <Panel title="热门收听作品" icon={<BookOpen size={19} />}>
-        {report.topBooks.length > 0 ? (
-          <TopBookLeaderboard items={report.topBooks} maxHeat={maxBookHeat} />
+      <Panel title={t('adminStats.topBooks')} icon={<BookOpen size={19} />}>
+        {report.top_books.length > 0 ? (
+          <TopBookLeaderboard items={report.top_books} maxHeat={maxBookHeat} />
         ) : (
-          <EmptyState icon={<BookOpen size={30} />} text="暂无作品收听数据" />
+          <EmptyState icon={<BookOpen size={30} />} text={t('adminStats.noBookActivity')} />
         )}
       </Panel>
       </div>
@@ -228,28 +233,29 @@ const MetricTile = ({
 );
 
 const UsageTrend = ({ items }: { items: RecentActivityPoint[] }) => {
+  const { t } = useTranslation();
   const width = 720;
   const height = 230;
   const paddingX = 28;
   const paddingY = 24;
-  const maxUpdates = Math.max(1, ...items.map(item => item.progressUpdates));
+  const maxUpdates = Math.max(1, ...items.map(item => item.progress_updates));
   const points = items.map((item, index) => {
     const x = items.length === 1 ? width / 2 : paddingX + (index / (items.length - 1)) * (width - paddingX * 2);
-    const y = height - paddingY - (item.progressUpdates / maxUpdates) * (height - paddingY * 2);
+    const y = height - paddingY - (item.progress_updates / maxUpdates) * (height - paddingY * 2);
     return { x, y, item };
   });
   const line = points.map(point => `${point.x},${point.y}`).join(' ');
   const area = `${paddingX},${height - paddingY} ${line} ${width - paddingX},${height - paddingY}`;
-  const totalUpdates = items.reduce((sum, item) => sum + item.progressUpdates, 0);
-  const totalListen = items.reduce((sum, item) => sum + item.listenSeconds, 0);
-  const activeUsers = Math.max(0, ...items.map(item => item.activeUsers));
+  const totalUpdates = items.reduce((sum, item) => sum + item.progress_updates, 0);
+  const totalListen = items.reduce((sum, item) => sum + item.listen_seconds, 0);
+  const activeUsers = Math.max(0, ...items.map(item => item.active_users));
 
   return (
     <div>
       <div className="grid grid-cols-3 gap-3 mb-4">
-        <TrendStat label="更新次数" value={`${formatNumber(totalUpdates)} 次`} />
-        <TrendStat label="活跃峰值" value={`${formatNumber(activeUsers)} 人`} />
-        <TrendStat label="累计收听" value={formatDuration(totalListen)} />
+        <TrendStat label={t('adminStats.updateCount')} value={t('adminStats.updateCountValue', { count: formatNumber(totalUpdates) })} />
+        <TrendStat label={t('adminStats.activePeak')} value={t('adminStats.activePeakValue', { count: formatNumber(activeUsers) })} />
+        <TrendStat label={t('adminStats.totalListening')} value={formatDuration(totalListen, t)} />
       </div>
       <div className="relative h-72 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 overflow-hidden">
         <svg viewBox={`0 0 ${width} ${height}`} className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
@@ -313,20 +319,40 @@ const LibraryMix = ({
 }) => (
   <div className="space-y-4">
     <div className="grid grid-cols-3 gap-3">
-      <SmallStat label="总数" value={formatNumber(total)} />
-      <SmallStat label="本地" value={formatNumber(local)} />
-      <SmallStat label="WebDAV" value={formatNumber(webdav)} />
+      <LibraryMixStats total={total} local={local} webdav={webdav} />
     </div>
     <div className="h-3 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
       <div className="bg-sky-500" style={{ width: `${localPercent}%` }} />
       <div className="bg-violet-500" style={{ width: `${webdavPercent}%` }} />
     </div>
     <div className="space-y-3">
-      <MixRow label="本地库" value={localPercent} color="bg-sky-500" />
-      <MixRow label="WebDAV" value={webdavPercent} color="bg-violet-500" />
+      <LibraryMixRows localPercent={localPercent} webdavPercent={webdavPercent} />
     </div>
   </div>
 );
+
+const LibraryMixStats = ({ total, local, webdav }: { total: number; local: number; webdav: number }) => {
+  const { t } = useTranslation();
+
+  return (
+    <>
+      <SmallStat label={t('adminStats.totalLabel')} value={formatNumber(total)} />
+      <SmallStat label={t('adminStats.localLabel')} value={formatNumber(local)} />
+      <SmallStat label="WebDAV" value={formatNumber(webdav)} />
+    </>
+  );
+};
+
+const LibraryMixRows = ({ localPercent, webdavPercent }: { localPercent: number; webdavPercent: number }) => {
+  const { t } = useTranslation();
+
+  return (
+    <>
+      <MixRow label={t('adminStats.localLibrary')} value={localPercent} color="bg-sky-500" />
+      <MixRow label="WebDAV" value={webdavPercent} color="bg-violet-500" />
+    </>
+  );
+};
 
 const SmallStat = ({ label, value }: { label: string; value: string }) => (
   <div className="rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-800 p-3">
@@ -345,9 +371,12 @@ const MixRow = ({ label, value, color }: { label: string; value: number; color: 
   </div>
 );
 
-const LibraryCards = ({ items }: { items: LibraryStatistics[] }) => (
-  <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-    {items.map(item => (
+const LibraryCards = ({ items }: { items: LibraryStatistics[] }) => {
+  const { t } = useTranslation();
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+      {items.map(item => (
       <article
         key={item.id}
         className="rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/40 p-4"
@@ -355,29 +384,33 @@ const LibraryCards = ({ items }: { items: LibraryStatistics[] }) => (
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="font-black text-slate-900 dark:text-white truncate">{item.name}</p>
-            <p className="text-xs text-slate-500 mt-1">{formatDuration(item.totalDuration)}</p>
+            <p className="text-xs text-slate-500 mt-1">{formatDuration(item.total_duration, t)}</p>
           </div>
-          <TypeBadge value={item.libraryType} />
+          <TypeBadge value={item.library_type} />
         </div>
 
         <div className="grid grid-cols-3 gap-2 mt-4">
-          <CompactStat label="作品" value={formatNumber(item.totalBooks)} />
-          <CompactStat label="章节" value={formatNumber(item.totalChapters)} />
-          <CompactStat label="时长" value={formatShortDuration(item.totalDuration)} />
+          <CompactStat label={t('adminStats.works')} value={formatNumber(item.total_books)} />
+          <CompactStat label={t('adminStats.chapters')} value={formatNumber(item.total_chapters)} />
+          <CompactStat label={t('adminStats.duration')} value={formatShortDuration(item.total_duration)} />
         </div>
 
         <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-slate-200/70 dark:border-slate-800 text-xs">
-          <span className="text-slate-400 font-bold">最近扫描</span>
-          <span className="text-slate-600 dark:text-slate-300 font-bold truncate">{formatDateTime(item.lastScannedAt)}</span>
+          <span className="text-slate-400 font-bold">{t('adminStats.lastScanned')}</span>
+          <span className="text-slate-600 dark:text-slate-300 font-bold truncate">{formatDateTime(item.last_scanned_at, t)}</span>
         </div>
       </article>
-    ))}
-  </div>
-);
+      ))}
+    </div>
+  );
+};
 
-const UserTable = ({ items, maxListen }: { items: UserActivityStatistics[]; maxListen: number }) => (
-  <div className="space-y-0 divide-y divide-slate-100 dark:divide-slate-800">
-    {items.map(item => (
+const UserTable = ({ items, maxListen }: { items: UserActivityStatistics[]; maxListen: number }) => {
+  const { t } = useTranslation();
+
+  return (
+    <div className="space-y-0 divide-y divide-slate-100 dark:divide-slate-800">
+      {items.map(item => (
       <div key={item.id} className="py-3">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
@@ -386,26 +419,32 @@ const UserTable = ({ items, maxListen }: { items: UserActivityStatistics[]; maxL
             </div>
             <div className="min-w-0">
               <p className="font-black text-slate-900 dark:text-white truncate">{item.username}</p>
-              <p className="text-xs text-slate-500">{item.role === 'admin' ? '管理员' : '普通用户'} · {formatNumber(item.listenedBooks)} 本</p>
+              <p className="text-xs text-slate-500">
+                {item.role === 'admin' ? t('adminStats.admin') : t('adminStats.regularUser')} · {t('adminStats.listenedBooks', { count: formatNumber(item.listened_books) })}
+              </p>
             </div>
           </div>
           <div className="text-right shrink-0">
-            <p className="text-sm font-black text-slate-900 dark:text-white">{formatDuration(item.listenSeconds)}</p>
-            <p className="text-[11px] text-slate-400">{formatDateTime(item.lastActiveAt)}</p>
+            <p className="text-sm font-black text-slate-900 dark:text-white">{formatDuration(item.listen_seconds, t)}</p>
+            <p className="text-[11px] text-slate-400">{formatDateTime(item.last_active_at, t)}</p>
           </div>
         </div>
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 mt-3">
-          <ProgressLine value={item.listenSeconds} max={maxListen} color="bg-emerald-500" />
-          <span className="text-[11px] text-slate-500 font-bold">{formatNumber(item.progressRecords)} 条</span>
+          <ProgressLine value={item.listen_seconds} max={maxListen} color="bg-emerald-500" />
+          <span className="text-[11px] text-slate-500 font-bold">{t('adminStats.recordsValue', { count: formatNumber(item.progress_records) })}</span>
         </div>
       </div>
-    ))}
-  </div>
-);
+      ))}
+    </div>
+  );
+};
 
-const TopBookLeaderboard = ({ items, maxHeat }: { items: BookActivityStatistics[]; maxHeat: number }) => (
-  <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-    {items.map((item, index) => {
+const TopBookLeaderboard = ({ items, maxHeat }: { items: BookActivityStatistics[]; maxHeat: number }) => {
+  const { t } = useTranslation();
+
+  return (
+    <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+      {items.map((item, index) => {
       const heat = getBookHeatScore(item);
       const accent = getRankAccent(index);
       return (
@@ -418,31 +457,32 @@ const TopBookLeaderboard = ({ items, maxHeat }: { items: BookActivityStatistics[
               {index + 1}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="font-black text-slate-900 dark:text-white truncate">{item.title || '未知作品'}</p>
+              <p className="font-black text-slate-900 dark:text-white truncate">{item.title || t('adminStats.unknownWork')}</p>
               <p className="text-xs text-slate-500 mt-1 truncate">
-                {item.author || '未知作者'} · {item.libraryName || '未知媒体库'}
+                {item.author || t('adminStats.unknownAuthor')} · {item.library_name || t('adminStats.unknownLibrary')}
               </p>
             </div>
           </div>
 
           <div className="grid grid-cols-3 gap-2 mt-4">
-            <CompactStat label="听众" value={formatNumber(item.listeners)} />
-            <CompactStat label="记录" value={formatNumber(item.progressUpdates)} />
-            <CompactStat label="收听" value={formatShortDuration(item.listenSeconds)} />
+            <CompactStat label={t('adminStats.listeners')} value={formatNumber(item.listeners)} />
+            <CompactStat label={t('adminStats.records')} value={formatNumber(item.progress_updates)} />
+            <CompactStat label={t('adminStats.listening')} value={formatShortDuration(item.listen_seconds)} />
           </div>
 
           <div className="mt-4">
             <div className="flex items-center justify-between gap-3 mb-2 text-xs">
-              <span className="text-slate-400 font-bold">综合热度</span>
+              <span className="text-slate-400 font-bold">{t('adminStats.heat')}</span>
               <span className="font-black text-slate-700 dark:text-slate-200">{formatNumber(heat)}</span>
             </div>
             <ProgressLine value={heat} max={maxHeat} color={accent.bar} />
           </div>
         </article>
       );
-    })}
-  </div>
-);
+      })}
+    </div>
+  );
+};
 
 const CompactStat = ({ label, value }: { label: string; value: string }) => (
   <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 px-3 py-2 min-w-0">
@@ -480,10 +520,10 @@ const EmptyState = ({ icon, text }: { icon: React.ReactNode; text: string }) => 
   </div>
 );
 
-const formatNumber = (value: number) => new Intl.NumberFormat('zh-CN').format(Math.round(value || 0));
+const formatNumber = (value: number) => formatLocalizedNumber(Math.round(value || 0));
 
 const getBookHeatScore = (item: BookActivityStatistics) => (
-  item.listeners * 20 + item.progressUpdates * 6 + Math.ceil((item.listenSeconds || 0) / 60)
+  item.listeners * 20 + item.progress_updates * 6 + Math.ceil((item.listen_seconds || 0) / 60)
 );
 
 const getRankAccent = (index: number) => {
@@ -508,12 +548,12 @@ const getRankAccent = (index: number) => {
   };
 };
 
-const formatDuration = (seconds?: number) => {
+const formatDuration = (seconds: number | undefined, t: Translate) => {
   const safeSeconds = Math.max(0, Math.round(seconds || 0));
   const hours = Math.floor(safeSeconds / 3600);
   const minutes = Math.round((safeSeconds % 3600) / 60);
-  if (hours > 0) return `${hours} 小时 ${minutes} 分钟`;
-  return `${minutes} 分钟`;
+  if (hours > 0) return t('adminStats.durationHoursMinutes', { hours, minutes });
+  return t('adminStats.durationMinutes', { minutes });
 };
 
 const formatShortDuration = (seconds?: number) => {
@@ -524,11 +564,11 @@ const formatShortDuration = (seconds?: number) => {
   return `${minutes}m`;
 };
 
-const formatDateTime = (value?: string) => {
-  if (!value) return '暂无记录';
+const formatDateTime = (value: string | undefined, t: Translate) => {
+  if (!value) return t('adminStats.noRecord');
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString('zh-CN', {
+  return date.toLocaleString(getCurrentLocale(), {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -539,7 +579,7 @@ const formatDateTime = (value?: string) => {
 const formatDay = (value: string) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value.slice(5);
-  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+  return date.toLocaleDateString(getCurrentLocale(), { month: '2-digit', day: '2-digit' });
 };
 
 export default AdminStatisticsPage;

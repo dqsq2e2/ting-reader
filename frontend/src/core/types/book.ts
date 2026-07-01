@@ -1,26 +1,26 @@
 export interface Book {
   id: string;
-  libraryId: string;
+  library_id: string;
   title: string;
   author?: string;
   narrator?: string;
   description?: string;
-  coverUrl?: string;
+  cover_url?: string;
   duration?: number;
   size?: number;
-  themeColor?: string;
+  theme_color?: string;
   path: string;
   hash: string;
-  createdAt: string;
-  updatedAt?: string;
-  isFavorite?: boolean;
-  libraryType?: 'webdav' | 'local';
-  skipIntro?: number;
-  skipOutro?: number;
+  created_at: string;
+  updated_at?: string;
+  is_favorite?: boolean;
+  library_type?: 'webdav' | 'local' | 'rss';
+  skip_intro?: number;
+  skip_outro?: number;
   tags?: string;
   genre?: string;
   year?: number;
-  chapterRegex?: string;
+  chapter_regex?: string;
 }
 
 export interface BookMetadata {

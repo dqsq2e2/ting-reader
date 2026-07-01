@@ -7,6 +7,7 @@ pub mod stats;
 
 use crate::core::error::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -61,7 +62,7 @@ pub struct PluginMetadata {
     pub author: String,
     pub description: String,
     #[serde(default)]
-    pub description_en: Option<String>,
+    pub description_i18n: LocalizedText,
     #[serde(default)]
     pub license: Option<String>,
     #[serde(default)]
@@ -81,12 +82,29 @@ pub struct PluginMetadata {
     #[serde(default)]
     pub min_core_version: Option<String>,
     #[serde(default)]
+    pub min_flutter_version: Option<String>,
+    #[serde(default)]
     pub supported_extensions: Option<Vec<String>>,
     #[serde(default)]
     pub scraper: Option<ScraperCapabilities>,
+    #[serde(default)]
+    pub capabilities: Vec<PluginCapability>,
 }
 
-/// Scraper-specific capability declaration from plugin.json.
+pub type LocalizedText = BTreeMap<String, String>;
+
+/// Generic capability declaration from plugin manifest.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct PluginCapability {
+    pub id: String,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invoke: Option<String>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
+}
+
+/// Scraper-specific capability declaration from plugin.yml.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ScraperCapabilities {
     #[serde(default)]
@@ -95,6 +113,8 @@ pub struct ScraperCapabilities {
     pub search_fields: Vec<ScraperSearchField>,
     #[serde(default)]
     pub result_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub result_field_labels: BTreeMap<String, LocalizedText>,
 }
 
 /// Search field shown in the manual scraping UI.
@@ -102,57 +122,18 @@ pub struct ScraperCapabilities {
 pub struct ScraperSearchField {
     pub key: String,
     pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_i18n: Option<LocalizedText>,
     #[serde(default)]
     pub required: bool,
     #[serde(default, rename = "type")]
     pub field_type: Option<String>,
     #[serde(default)]
     pub placeholder: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placeholder_i18n: Option<LocalizedText>,
     #[serde(default)]
     pub default_from: Option<String>,
-}
-
-impl ScraperCapabilities {
-    pub fn legacy_default() -> Self {
-        Self {
-            auto_scrape: true,
-            search_fields: vec![
-                ScraperSearchField {
-                    key: "title".to_string(),
-                    label: "书名".to_string(),
-                    required: true,
-                    field_type: Some("text".to_string()),
-                    placeholder: None,
-                    default_from: Some("book.title".to_string()),
-                },
-                ScraperSearchField {
-                    key: "author".to_string(),
-                    label: "作者".to_string(),
-                    required: false,
-                    field_type: Some("text".to_string()),
-                    placeholder: None,
-                    default_from: Some("book.author".to_string()),
-                },
-                ScraperSearchField {
-                    key: "narrator".to_string(),
-                    label: "演播".to_string(),
-                    required: false,
-                    field_type: Some("text".to_string()),
-                    placeholder: None,
-                    default_from: Some("book.narrator".to_string()),
-                },
-            ],
-            result_fields: vec![
-                "title".to_string(),
-                "author".to_string(),
-                "narrator".to_string(),
-                "cover_url".to_string(),
-                "description".to_string(),
-                "tags".to_string(),
-                "genre".to_string(),
-            ],
-        }
-    }
 }
 
 /// Plan for decrypting a file stream
@@ -197,7 +178,7 @@ impl PluginMetadata {
             plugin_type,
             author,
             description,
-            description_en: None,
+            description_i18n: BTreeMap::new(),
             license: None,
             repo: None,
             entry_point,
@@ -207,8 +188,10 @@ impl PluginMetadata {
             permissions: Vec::new(),
             config_schema: None,
             min_core_version: None,
+            min_flutter_version: None,
             supported_extensions: None,
             scraper: None,
+            capabilities: Vec::new(),
         }
     }
 
@@ -242,8 +225,47 @@ impl PluginMetadata {
         self
     }
 
+    pub fn effective_capabilities(&self) -> Vec<PluginCapability> {
+        self.capabilities.clone()
+    }
+
     pub fn instance_id(&self) -> PluginId {
         format!("{}@{}", self.id, self.version)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn effective_capabilities_uses_declared_capabilities_only() {
+        let metadata = PluginMetadata::new(
+            "assistant".to_string(),
+            "Assistant".to_string(),
+            "1.0.0".to_string(),
+            PluginType::Utility,
+            "Ting Reader".to_string(),
+            "Assistant".to_string(),
+            "plugin.js".to_string(),
+        );
+
+        assert!(metadata.effective_capabilities().is_empty());
+
+        let mut metadata = metadata;
+        metadata.capabilities.push(PluginCapability {
+            id: "assistant.ui".to_string(),
+            kind: "ui_extension".to_string(),
+            invoke: Some("open".to_string()),
+            extra: BTreeMap::new(),
+        });
+
+        let capabilities = metadata.effective_capabilities();
+
+        assert_eq!(capabilities.len(), 1);
+        assert_eq!(capabilities[0].id, "assistant.ui");
+        assert_eq!(capabilities[0].kind, "ui_extension");
+        assert_eq!(capabilities[0].invoke.as_deref(), Some("open"));
     }
 }
 

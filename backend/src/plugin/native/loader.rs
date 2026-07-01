@@ -9,6 +9,7 @@
 //! - Safe library unloading and resource cleanup
 //! - Thread-safe library management
 
+use super::host_api;
 use crate::core::error::{Result, TingError};
 use crate::plugin::types::{PluginId, PluginMetadata};
 use crate::plugin::wasm::ResourceLimits;
@@ -154,13 +155,14 @@ impl NativeLoader {
                 TingError::PluginLoadError(format!("Failed to load library {:?}: {}", path, e))
             })?
         };
+        Self::configure_host_api(&library, &plugin_id)?;
 
         tracing::info!(
             plugin_id = %plugin_id,
             path = ?path,
             max_memory = resource_limits.max_memory_bytes,
             max_cpu_time = ?resource_limits.max_cpu_time,
-            "原生库加载成功（已应用资源限制）"
+            "Native library loaded successfully with resource limits applied"
         );
 
         // Store the loaded library
@@ -179,6 +181,28 @@ impl NativeLoader {
 
         libraries.insert(plugin_id, loaded);
 
+        Ok(())
+    }
+
+    fn configure_host_api(library: &Library, plugin_id: &PluginId) -> Result<()> {
+        let setter: Symbol<host_api::SetHostApiFn> =
+            match unsafe { library.get(b"plugin_set_host_api") } {
+                Ok(setter) => setter,
+                Err(_) => return Ok(()),
+            };
+
+        let code = unsafe { setter(host_api::native_host_api()) };
+        if code != 0 {
+            return Err(TingError::PluginLoadError(format!(
+                "Native plugin {} rejected HostGateway API with code {}",
+                plugin_id, code
+            )));
+        }
+
+        tracing::debug!(
+            plugin_id = %plugin_id,
+            "Native HostGateway API registered"
+        );
         Ok(())
     }
 

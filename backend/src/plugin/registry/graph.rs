@@ -354,12 +354,22 @@ impl PluginRegistry {
     fn version_matches(&self, version: &str, requirement: &str) -> bool {
         // Parse version and requirement using semver crate
         let Ok(ver) = Version::parse(version) else {
-            tracing::warn!("无效的版本格式: {}", version);
+            tracing::warn!(
+                version = %version,
+                message_key = "plugin.version.invalid",
+                message_params = %serde_json::json!({ "version": version }),
+                "Invalid plugin version format"
+            );
             return false;
         };
 
         let Ok(req) = VersionReq::parse(requirement) else {
-            tracing::warn!("无效的版本要求格式: {}", requirement);
+            tracing::warn!(
+                requirement = %requirement,
+                message_key = "plugin.version_requirement.invalid",
+                message_params = %serde_json::json!({ "requirement": requirement }),
+                "Invalid plugin version requirement format"
+            );
             // Fallback to exact match for invalid requirements
             return version == requirement;
         };
@@ -390,7 +400,12 @@ impl PluginRegistry {
 
         // Parse version requirement
         let Ok(req) = VersionReq::parse(version_requirement) else {
-            tracing::warn!("无效的版本要求: {}", version_requirement);
+            tracing::warn!(
+                requirement = %version_requirement,
+                message_key = "plugin.version_requirement.invalid",
+                message_params = %serde_json::json!({ "requirement": version_requirement }),
+                "Invalid plugin version requirement format"
+            );
             return None;
         };
 

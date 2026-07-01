@@ -1,6 +1,6 @@
-# Native 格式插件开发指南
+# Native 插件开发指南
 
-Native 插件使用 Rust 语言编写，编译为动态链接库（`.dll`, `.so`, `.dylib`）。它是性能最强、功能最完整的插件类型，专门用于处理复杂的音频格式（如加密格式）。
+Native 插件使用 Rust 语言编写并编译为动态链接库（`.dll`, `.so`, `.dylib`），适合平台相关能力：格式处理、流式解密、系统库调用、FFmpeg 供应等。Native 插件通过 `capabilities` 声明能力，发布时需要按服务端平台分别打包。
 
 **注意**: Native 插件具有完全的系统访问权限，开发和使用时需谨慎。
 
@@ -28,7 +28,23 @@ serde_json = "1.0"
 # 其他依赖...
 ```
 
-提供插件配置文件 `plugin.json`（详情请参考 [插件开发指南](./plugin-dev.md)）。
+提供插件声明文件 `plugin.yml`（详情请参考 [插件开发指南](./plugin-dev.md)）。格式插件通过 `format_handler` 能力声明支持的扩展名：
+
+```yaml
+id: my-format-plugin
+name: My Format Plugin
+version: 1.0.0
+runtime: native
+entry_point: my_format_plugin.dll
+capabilities:
+  - id: format.handler
+    kind: format_handler
+    invoke: get_stream_url
+    extensions:
+      - m4a
+      - flac
+      - wav
+```
 
 ### 1.2 核心代码 (src/lib.rs)
 ```rust
@@ -113,9 +129,26 @@ cargo build --release
 ```
 编译产物位于 `target/release/` 目录下（Windows 为 `.dll`，Linux 为 `.so`，macOS 为 `.dylib`）。
 
+### 1.4 HostGateway（可选）
+
+Native 插件需要读取书籍、存储库文件、缓存或受控数据库实体时，应通过 HostGateway，而不是直接访问 Ting Reader 数据库文件。插件可选导出 `plugin_set_host_api` 接收宿主函数表；在 `plugin_invoke` 执行期间调用 `host_invoke(method, params_json, result_ptr)`，并使用 `host_free` 释放返回字符串。
+
+HostGateway 方法、权限、返回格式和错误码见 [HostGateway 能力调用详解](./hostgateway.md)。调用依赖当前认证用户上下文；公共路由、初始化和后台无用户上下文的场景会被拒绝。
+
 ## 2. 部署
-将编译好的动态库文件和 `plugin.json` 放入 `plugins/my-format-plugin/` 目录。
-注意：Native 插件必须与宿主程序的操作系统和架构匹配。
+将编译好的动态库文件放在 `plugin.yml` 同级，然后使用 `trpack build` 打包为 `.tr` 文件。Native 插件必须与宿主程序的操作系统和架构匹配，常用平台名包括 `windows-x86_64`、`linux-x86_64`、`linux-aarch64`。
+
+```bash
+trpack validate .
+trpack build . --platform-tag windows-x86_64 --output dist/my-format-plugin-1.0.0-windows-x86_64.tr
+trpack verify dist/my-format-plugin-1.0.0-windows-x86_64.tr
+```
+
+如果插件随包携带 FFmpeg 等二进制工具，建议放在 `bin/` 目录，并用 `tool_provider` 能力返回实际路径，不要让核心后端写死工具位置：
+
+```bash
+trpack build . --include bin --platform-tag windows-x86_64 --output dist/my-tool-plugin-1.0.0-windows-x86_64.tr
+```
 
 ## 3. 高级功能：流式解密
 为了支持大文件播放，建议实现 `get_decryption_plan` 和 `decrypt_chunk` 方法，允许播放器按需解密文件的特定部分，而不是一次性解密整个文件。

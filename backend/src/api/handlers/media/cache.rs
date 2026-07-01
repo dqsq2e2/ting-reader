@@ -60,16 +60,23 @@ pub async fn cache_chapter(
             })?
     } else {
         let temp_path = cache_path.with_extension("tmp");
-        let (mut reader, _) = state
-            .storage_service
-            .get_webdav_reader(&library, &chapter.path, None, state.encryption_key.as_ref())
-            .await
-            .map_err(|e| {
-                TingError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                ))
-            })?;
+        let (mut reader, _) = if library.library_type == "webdav" {
+            state
+                .storage_service
+                .get_webdav_reader(&library, &chapter.path, None, state.encryption_key.as_ref())
+                .await
+        } else {
+            state
+                .storage_service
+                .get_http_reader(&chapter.path, None)
+                .await
+        }
+        .map_err(|e| {
+            TingError::IoError(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            ))
+        })?;
 
         let mut file = tokio::fs::File::create(&temp_path).await?;
         tokio::io::copy(&mut reader, &mut file).await?;

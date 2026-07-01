@@ -1,7 +1,7 @@
 {
   "name": "ting-reader-frontend",
   "private": true,
-  "version": "1.4.7",
+  "version": "1.4.8",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,16 +12,17 @@
   "dependencies": {
     "@types/react-window": "^1.8.8",
     "axios": "^1.13.4",
-    "camelcase-keys": "^10.0.2",
     "clsx": "^2.1.1",
     "fast-average-color": "^9.5.0",
     "framer-motion": "^12.29.2",
+    "i18next": "^26.3.2",
+    "i18next-browser-languagedetector": "^8.2.1",
     "lucide-react": "^0.563.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-i18next": "^17.0.8",
     "react-router-dom": "^7.13.0",
     "react-window": "^2.2.7",
-    "snakecase-keys": "^9.0.2",
     "tailwind-merge": "^3.4.0",
     "zustand": "^5.0.10"
   },

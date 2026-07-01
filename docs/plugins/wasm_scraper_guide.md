@@ -1,6 +1,6 @@
-# WASM 刮削插件开发指南
+# WASM 插件开发指南
 
-WASM (WebAssembly) 插件使用 Rust 语言编写，编译为 `.wasm` 文件。它提供了比 JS 更好的性能、更强的类型安全和更好的工程化支持。
+WASM 插件使用 Rust 语言编写并编译为 `.wasm` 文件，适合可移植的元数据解析、内容处理和计算型工具。插件仍然通过 `capabilities` 暴露能力；网络请求、数据库、存储库文件、缓存和任务等宿主能力统一通过 `ting_env` 宿主函数访问，并受 manifest 权限和当前用户上下文约束。
 
 ## 1. 快速开始
 
@@ -26,18 +26,58 @@ serde_json = "1.0"
 # 其他依赖...
 ```
 
-提供插件配置文件 `plugin.json`（详情请参考 [插件开发指南](./plugin-dev.md)）。刮削插件应声明 `scraper.search_fields` 和 `scraper.result_fields`，例如：
+提供插件声明文件 `plugin.yml`（详情请参考 [插件开发指南](./plugin-dev.md)）。元数据插件应在 `capabilities` 中声明搜索字段和可返回字段，例如：
 
-```json
-"scraper": {
-  "auto_scrape": true,
-  "search_fields": [
-    { "key": "title", "label": "书名", "required": true, "default_from": "book.title" },
-    { "key": "author", "label": "作者", "required": false, "default_from": "book.author" },
-    { "key": "narrator", "label": "演播", "required": false, "default_from": "book.narrator" }
-  ],
-  "result_fields": ["title", "author", "narrator", "cover_url", "description", "tags"]
-}
+```yaml
+capabilities:
+  - id: metadata.search
+    kind: metadata_provider
+    invoke: search
+    auto_scrape: true
+    search_fields:
+      - key: title
+        label:
+          zh: 书名
+          en: Title
+        required: true
+        default_from: book.title
+      - key: author
+        label:
+          zh: 作者
+          en: Author
+        required: false
+        default_from: book.author
+      - key: narrator
+        label:
+          zh: 演播
+          en: Narrator
+        required: false
+        default_from: book.narrator
+    result_fields:
+      - key: title
+        label:
+          zh: 书名
+          en: Title
+      - key: author
+        label:
+          zh: 作者
+          en: Author
+      - key: narrator
+        label:
+          zh: 演播
+          en: Narrator
+      - key: cover_url
+        label:
+          zh: 封面
+          en: Cover
+      - key: intro
+        label:
+          zh: 简介
+          en: Description
+      - key: tags
+        label:
+          zh: 标签
+          en: Tags
 ```
 
 `auto_scrape: true` 表示该插件可以用于存储库自动刮削。自动刮削插件必须声明必填书名字段；仅用于手动刮削的插件可以省略或设为 `false`，但仍至少需要一个搜索字段。
@@ -110,8 +150,7 @@ pub extern "C" fn dealloc(ptr: *mut u8, len: usize) {
 
 #[derive(Deserialize)]
 struct SearchParams {
-    // title 来自 plugin.json 中 scraper.search_fields 的书名字段。
-    // query 会与 title 同步传入，用于兼容旧插件。
+    // title 来自 metadata_provider capability 中 search_fields 的书名字段。
     title: Option<String>,
     query: String,
     author: Option<String>,
@@ -149,12 +188,13 @@ fn handle_search(params_json: &str) -> Result<SearchResult, String> {
 
 ### 1.3 编译
 ```bash
-cargo build --target wasm32-wasip1 --release
+rustup target add wasm32-unknown-unknown
+cargo build --target wasm32-unknown-unknown --release
 ```
-编译产物位于 `target/wasm32-wasip1/release/my_scraper_wasm.wasm`。
+编译产物位于 `target/wasm32-unknown-unknown/release/my_scraper_wasm.wasm`。
 
 ## 2. 宿主函数
-WASM 插件可以通过 `extern "C"` 调用宿主提供的功能，由于沙箱隔离，插件必须通过宿主函数进行网络请求：
+WASM 插件可以通过 `extern "C"` 调用宿主提供的功能。由于沙箱隔离，插件不能绕过宿主函数直接访问网络、数据库或存储库文件。
 
 ```rust
 #[link(wasm_import_module = "ting_env")]
@@ -176,8 +216,17 @@ extern "C" {
     fn http_response_size(handle: i32) -> i32;
     /// 读取响应体到缓冲区，返回实际读取的字节数（≤ len）或错误码。
     fn http_read_body(handle: i32, ptr: *mut u8, len: i32) -> i32;
+
+    /// 调用 HostGateway，返回响应句柄（≥0）或错误码（<0）。
+    fn host_invoke(method_ptr: *const u8, method_len: i32, params_ptr: *const u8, params_len: i32) -> i32;
+    /// 获取 HostGateway 响应体长度（字节）。
+    fn host_response_size(handle: i32) -> i32;
+    /// 读取 HostGateway 响应体到缓冲区。
+    fn host_read_body(handle: i32, ptr: *mut u8, len: i32) -> i32;
 }
 ```
+
+`host_invoke` 的 `method` 使用 [HostGateway 能力调用详解](./hostgateway.md) 中的方法名，例如 `books.list`、`database.get`、`library.file.read`。返回体是 JSON；如果宿主拒绝调用，响应可能包含 `{ "error": "..." }`。
 
 ### 2.1 封装示例：发起自定义网络请求
 宿主提供的函数需要手动进行指针传递，在业务逻辑中，推荐像下面这样封装一层 Rust 函数，以方便直接使用 `&str` 等数据类型：
@@ -213,4 +262,10 @@ fn fetch_url_custom(url: &str, method: &str, headers_json: &str, body_data: &[u8
 ```
 
 ## 3. 部署
-将编译好的 `.wasm` 文件和 `plugin.json` 放入 `plugins/my-scraper-wasm/` 目录即可。
+将编译好的 `.wasm` 文件放在 `plugin.yml` 同级，然后使用 `trpack build` 打包为 `.tr` 文件：
+
+```bash
+trpack validate .
+trpack build . --output dist/my-scraper-wasm.tr
+trpack verify dist/my-scraper-wasm.tr
+```

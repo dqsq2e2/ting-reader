@@ -1,32 +1,27 @@
 use super::*;
 use crate::plugin::types::PluginDependency;
+use std::process::Command;
 use tempfile::TempDir;
 
 fn create_test_plugin(dir: &Path, name: &str, version: &str) -> Result<()> {
-    let metadata = PluginMetadata {
-        id: name.to_string(),
-        name: name.to_string(),
-        version: version.to_string(),
-        plugin_type: crate::plugin::types::PluginType::Utility,
-        author: "Test Author".to_string(),
-        description: "Test plugin".to_string(),
-        description_en: None,
-        license: Some("MIT".to_string()),
-        repo: None,
-        entry_point: "plugin.js".to_string(),
-        runtime: Some("javascript".to_string()),
-        dependencies: vec![],
-        npm_dependencies: vec![],
-        permissions: vec![],
-        config_schema: None,
-        min_core_version: None,
-        supported_extensions: None,
-        scraper: None,
-    };
+    let metadata = serde_json::json!({
+        "id": name,
+        "name": name,
+        "version": version,
+        "min_core_version": "1.4.8",
+        "author": "Test Author",
+        "description": "Test plugin",
+        "license": "MIT",
+        "entry_point": "plugin.js",
+        "runtime": "javascript",
+        "dependencies": [],
+        "permissions": [],
+        "capabilities": test_capabilities(),
+    });
 
-    let metadata_json = serde_json::to_string_pretty(&metadata)
+    let metadata_yaml = serde_yaml::to_string(&metadata)
         .map_err(|e| TingError::PluginLoadError(format!("Failed to serialize metadata: {}", e)))?;
-    fs::write(dir.join("plugin.json"), metadata_json)?;
+    fs::write(dir.join("plugin.yml"), metadata_yaml)?;
     fs::write(dir.join("plugin.js"), "// Test plugin")?;
 
     Ok(())
@@ -38,33 +33,37 @@ fn create_test_plugin_with_dependencies(
     version: &str,
     dependencies: Vec<PluginDependency>,
 ) -> Result<()> {
-    let metadata = PluginMetadata {
-        id: name.to_string(),
-        name: name.to_string(),
-        version: version.to_string(),
-        plugin_type: crate::plugin::types::PluginType::Utility,
-        author: "Test Author".to_string(),
-        description: "Test plugin with dependencies".to_string(),
-        description_en: None,
-        license: Some("MIT".to_string()),
-        repo: None,
-        entry_point: "plugin.js".to_string(),
-        runtime: Some("javascript".to_string()),
-        dependencies,
-        npm_dependencies: vec![],
-        permissions: vec![],
-        config_schema: None,
-        min_core_version: None,
-        supported_extensions: None,
-        scraper: None,
-    };
+    let metadata = serde_json::json!({
+        "id": name,
+        "name": name,
+        "version": version,
+        "min_core_version": "1.4.8",
+        "author": "Test Author",
+        "description": "Test plugin with dependencies",
+        "license": "MIT",
+        "entry_point": "plugin.js",
+        "runtime": "javascript",
+        "dependencies": dependencies,
+        "permissions": [],
+        "capabilities": test_capabilities(),
+    });
 
-    let metadata_json = serde_json::to_string_pretty(&metadata)
+    let metadata_yaml = serde_yaml::to_string(&metadata)
         .map_err(|e| TingError::PluginLoadError(format!("Failed to serialize metadata: {}", e)))?;
-    fs::write(dir.join("plugin.json"), metadata_json)?;
+    fs::write(dir.join("plugin.yml"), metadata_yaml)?;
     fs::write(dir.join("plugin.js"), "// Test plugin with dependencies")?;
 
     Ok(())
+}
+
+fn test_capabilities() -> serde_json::Value {
+    serde_json::json!([
+        {
+            "id": "test.tools",
+            "kind": "tool_provider",
+            "invoke": "execute"
+        }
+    ])
 }
 
 #[tokio::test]
@@ -83,14 +82,14 @@ async fn test_install_plugin_success() {
         .install_plugin(&source_dir, |_metadata| Ok(()))
         .await;
 
-    assert!(result.is_ok());
+    assert!(result.is_ok(), "install failed: {:?}", result);
     let plugin_id = result.unwrap();
     assert_eq!(plugin_id, "test-plugin@1.0.0");
 
     // Verify plugin was installed
     let installed_path = plugin_dir.join(&plugin_id);
     assert!(installed_path.exists());
-    assert!(installed_path.join("plugin.json").exists());
+    assert!(installed_path.join("plugin.yml").exists());
     assert!(installed_path.join("plugin.js").exists());
 }
 
@@ -134,7 +133,7 @@ async fn test_install_plugin_rollback() {
     fs::create_dir_all(&existing_plugin_dir).unwrap();
     fs::write(existing_plugin_dir.join("old_file.txt"), "old content").unwrap();
 
-    // Create invalid source (missing plugin.json)
+    // Create invalid source (missing plugin.yml)
     fs::write(source_dir.join("invalid.txt"), "invalid").unwrap();
 
     let installer = PluginInstaller::new(plugin_dir.clone(), temp_extract).unwrap();
@@ -217,7 +216,7 @@ async fn test_validate_package_missing_plugin_json() {
     let source_dir = temp_dir.path().join("source");
 
     fs::create_dir_all(&source_dir).unwrap();
-    // Create plugin without plugin.json
+    // Create plugin without plugin.yml
     fs::write(source_dir.join("plugin.js"), "// Test plugin").unwrap();
 
     let installer = PluginInstaller::new(plugin_dir, temp_extract).unwrap();
@@ -229,7 +228,7 @@ async fn test_validate_package_missing_plugin_json() {
     assert!(result.is_err());
     match result.unwrap_err() {
         TingError::PluginLoadError(msg) => {
-            assert!(msg.contains("plugin.json not found"));
+            assert!(msg.contains("plugin.yml not found"));
         }
         _ => panic!("Expected PluginLoadError"),
     }
@@ -243,8 +242,8 @@ async fn test_validate_package_invalid_json() {
     let source_dir = temp_dir.path().join("source");
 
     fs::create_dir_all(&source_dir).unwrap();
-    // Create invalid plugin.json
-    fs::write(source_dir.join("plugin.json"), "{ invalid json }").unwrap();
+    // Create invalid plugin.yml
+    fs::write(source_dir.join("plugin.yml"), "{ invalid yaml").unwrap();
     fs::write(source_dir.join("plugin.js"), "// Test plugin").unwrap();
 
     let installer = PluginInstaller::new(plugin_dir, temp_extract).unwrap();
@@ -256,7 +255,7 @@ async fn test_validate_package_invalid_json() {
     assert!(result.is_err());
     match result.unwrap_err() {
         TingError::PluginLoadError(msg) => {
-            assert!(msg.contains("Invalid plugin.json"));
+            assert!(msg.contains("Invalid YAML"));
         }
         _ => panic!("Expected PluginLoadError"),
     }
@@ -282,6 +281,84 @@ async fn test_validate_package_nonexistent_path() {
         }
         _ => panic!("Expected PluginLoadError"),
     }
+}
+
+#[tokio::test]
+async fn test_install_tr_package_success() {
+    let Some(trpack) = local_trpack_binary() else {
+        eprintln!("skipping .tr install test: trpack binary not found");
+        return;
+    };
+
+    let temp_dir = TempDir::new().unwrap();
+    let plugin_dir = temp_dir.path().join("plugins");
+    let temp_extract = temp_dir.path().join("temp");
+    let source_dir = temp_dir.path().join("source");
+    let package_path = temp_dir.path().join("test-plugin.tr");
+
+    fs::create_dir_all(&source_dir).unwrap();
+    create_test_plugin(&source_dir, "test-plugin", "1.0.0").unwrap();
+
+    let output = Command::new(trpack)
+        .arg("build")
+        .arg(&source_dir)
+        .arg("--output")
+        .arg(&package_path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "trpack build failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let installer = PluginInstaller::new(plugin_dir.clone(), temp_extract).unwrap();
+    let plugin_id = installer
+        .install_plugin(&package_path, |_metadata| Ok(()))
+        .await
+        .unwrap();
+
+    assert_eq!(plugin_id, "test-plugin@1.0.0");
+    assert!(plugin_dir.join(&plugin_id).join("plugin.yml").exists());
+    assert!(plugin_dir.join(&plugin_id).join("plugin.js").exists());
+}
+
+#[tokio::test]
+async fn test_renamed_zip_tr_package_is_rejected() {
+    let temp_dir = TempDir::new().unwrap();
+    let plugin_dir = temp_dir.path().join("plugins");
+    let temp_extract = temp_dir.path().join("temp");
+    let package_path = temp_dir.path().join("renamed.tr");
+
+    fs::write(&package_path, b"PK\x03\x04not really a tr package").unwrap();
+
+    let installer = PluginInstaller::new(plugin_dir, temp_extract).unwrap();
+    let result = installer
+        .install_plugin(&package_path, |_metadata| Ok(()))
+        .await;
+
+    assert!(result.is_err());
+    let error = result.unwrap_err().to_string();
+    assert!(
+        error.contains("is not a valid Ting Reader .tr package"),
+        "{error}"
+    );
+}
+
+fn local_trpack_binary() -> Option<std::path::PathBuf> {
+    let exe = if cfg!(windows) {
+        "trpack.exe"
+    } else {
+        "trpack"
+    };
+    let candidate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()?
+        .parent()?
+        .join("trpack")
+        .join("target")
+        .join("debug")
+        .join(exe);
+    candidate.exists().then_some(candidate)
 }
 
 #[test]
@@ -415,7 +492,7 @@ async fn test_dependency_check_success() {
         })
         .await;
 
-    assert!(result.is_ok());
+    assert!(result.is_ok(), "install failed: {:?}", result);
 }
 
 #[tokio::test]
@@ -556,12 +633,12 @@ async fn test_rollback_on_validation_failure() {
     fs::create_dir_all(&existing_plugin_dir).unwrap();
     fs::write(existing_plugin_dir.join("old_file.txt"), "old content").unwrap();
     fs::write(
-        existing_plugin_dir.join("plugin.json"),
+        existing_plugin_dir.join("plugin.yml"),
         r#"{"name":"test-plugin","version":"1.0.0"}"#,
     )
     .unwrap();
 
-    // Create invalid source (missing plugin.json)
+    // Create invalid source (missing plugin.yml)
     fs::write(source_dir.join("invalid.txt"), "invalid").unwrap();
 
     let installer = PluginInstaller::new(plugin_dir.clone(), temp_extract).unwrap();

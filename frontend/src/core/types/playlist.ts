@@ -3,19 +3,19 @@ import type { Series } from './series';
 
 export interface Playlist {
   id: string;
-  userId: string;
+  user_id: string;
   title: string;
   description?: string;
-  createdAt: string;
-  updatedAt: string;
-  bookIds: string[];
+  created_at: string;
+  updated_at: string;
+  book_ids: string[];
   books: Book[];
   items?: PlaylistItem[];
 }
 
 export interface PlaylistItem {
-  itemType: 'book' | 'series';
-  itemId: string;
+  item_type: 'book' | 'series';
+  item_id: string;
   order: number;
   book?: Book;
   series?: Series;

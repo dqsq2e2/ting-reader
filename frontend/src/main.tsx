@@ -2,17 +2,18 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { registerSW } from 'virtual:pwa-register'
 import './index.css'
+import i18n from './core/i18n'
 import App from './App.tsx'
 
 // 注册 Service Worker
 const updateSW = registerSW({
   onNeedRefresh() {
-    if (confirm('新版本可用，是否刷新？')) {
+    if (confirm(i18n.t('pwa.refreshPrompt'))) {
       updateSW(true)
     }
   },
   onOfflineReady() {
-    console.log('应用已准备好离线使用')
+    console.log(i18n.t('pwa.offlineReady'))
   },
 })
 

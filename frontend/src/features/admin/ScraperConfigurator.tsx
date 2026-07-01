@@ -1,26 +1,28 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowDown, ArrowUp, Plus, X } from 'lucide-react';
 import type { ScraperSource } from '../../core/types';
 import HelpHint from '../../shared/ui/HelpHint';
 
 interface Props {
   configStr: string;
-  sources: Pick<ScraperSource, 'id' | 'name' | 'autoScrape'>[];
+  sources: Pick<ScraperSource, 'id' | 'name' | 'auto_scrape'>[];
   onChange: (newConfigStr: string) => void;
   libraryType: string;
 }
 
 const ScraperConfigurator: React.FC<Props> = ({ configStr, sources, onChange, libraryType }) => {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('default');
 
   const tabs = [
-    { id: 'priority', label: '优先级', key: 'metadataPriority' },
-    { id: 'default', label: '默认', key: 'defaultSources' },
-    { id: 'cover', label: '封面', key: 'coverSources' },
-    { id: 'intro', label: '简介', key: 'introSources' },
-    { id: 'author', label: '作者', key: 'authorSources' },
-    { id: 'narrator', label: '演播', key: 'narratorSources' },
-    { id: 'tags', label: '标签', key: 'tagsSources' },
+    { id: 'priority', label: t('scraperConfig.priority'), key: 'metadata_priority' },
+    { id: 'default', label: t('scraperConfig.default'), key: 'default_sources' },
+    { id: 'cover', label: t('scraperConfig.cover'), key: 'cover_sources' },
+    { id: 'intro', label: t('scraperConfig.intro'), key: 'intro_sources' },
+    { id: 'author', label: t('scraperConfig.author'), key: 'author_sources' },
+    { id: 'narrator', label: t('scraperConfig.narrator'), key: 'narrator_sources' },
+    { id: 'tags', label: t('scraperConfig.tags'), key: 'tags_sources' },
   ];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -34,25 +36,14 @@ const ScraperConfigurator: React.FC<Props> = ({ configStr, sources, onChange, li
   const currentTab = tabs.find(t => t.id === activeTab) || tabs[0];
   const currentKey = currentTab.key;
 
-  // Handle snake_case vs camelCase from legacy data
-  const snakeCaseMap: Record<string, string> = {
-    'metadataPriority': 'metadata_priority',
-    'defaultSources': 'default_sources',
-    'coverSources': 'cover_sources',
-    'introSources': 'intro_sources',
-    'authorSources': 'author_sources',
-    'narratorSources': 'narrator_sources',
-    'tagsSources': 'tags_sources',
-  };
-
   // Special handling for priority tab
   const PRIORITY_SOURCES = [
-    { id: 'local_metadata', name: '本地元数据 (JSON/NFO)' },
-    { id: 'audio_metadata', name: '音频文件元数据 (ID3)' },
-    { id: 'scraper', name: '刮削器 (Plugins)' }
+    { id: 'local_metadata', name: t('scraperConfig.localMetadata') },
+    { id: 'audio_metadata', name: t('scraperConfig.audioMetadata') },
+    { id: 'scraper', name: t('scraperConfig.scraper') }
   ];
 
-  let activeIds: string[] = config[currentKey] ?? config[snakeCaseMap[currentKey]] ?? [];
+  let activeIds: string[] = config[currentKey] ?? [];
 
   // Initialize default priority if empty
   if (activeTab === 'priority' && activeIds.length === 0) {
@@ -63,60 +54,52 @@ const ScraperConfigurator: React.FC<Props> = ({ configStr, sources, onChange, li
     activeIds = activeIds.filter(id => autoSourceIds.has(id));
   }
 
-  const nfoEnabled = config.nfoWritingEnabled ?? config.nfo_writing_enabled ?? false;
-  const metadataWritingEnabled = config.metadataWritingEnabled ?? config.metadata_writing_enabled ?? false;
-  const preferAudioTitle = config.preferAudioTitle ?? config.prefer_audio_title ?? true;
-  const extractAudioCover = config.extractAudioCover ?? config.extract_audio_cover ?? true;
-  const disableWatcher = config.disableWatcher ?? config.disable_watcher ?? false;
-  const cloudMode = config.cloudMode ?? config.cloud_mode ?? false;
+  const nfoEnabled = config.nfo_writing_enabled ?? false;
+  const metadataWritingEnabled = config.metadata_writing_enabled ?? false;
+  const useFilenameAsTitle = config.use_filename_as_title ?? true;
+  const extractAudioCover = config.extract_audio_cover ?? true;
+  const disableWatcher = config.disable_watcher ?? false;
+  const cloudMode = config.cloud_mode ?? false;
 
   const handleNfoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const newConfig: Record<string, unknown> = { ...config, nfoWritingEnabled: e.target.checked };
-      delete newConfig.nfo_writing_enabled;
+      const newConfig: Record<string, unknown> = { ...config, nfo_writing_enabled: e.target.checked };
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handleMetadataWritingChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const newConfig: Record<string, unknown> = { ...config, metadataWritingEnabled: e.target.checked };
-      delete newConfig.metadata_writing_enabled;
+      const newConfig: Record<string, unknown> = { ...config, metadata_writing_enabled: e.target.checked };
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handlePreferAudioTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const newConfig: Record<string, unknown> = { ...config, preferAudioTitle: e.target.checked };
-      delete newConfig.prefer_audio_title;
+      const newConfig: Record<string, unknown> = { ...config, use_filename_as_title: e.target.checked };
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handleExtractAudioCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const newConfig: Record<string, unknown> = { ...config, extractAudioCover: e.target.checked };
-      delete newConfig.extract_audio_cover;
+      const newConfig: Record<string, unknown> = { ...config, extract_audio_cover: e.target.checked };
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handleDisableWatcherChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       // e.target.checked is true when user wants to ENABLE watcher
-      // so disableWatcher should be the opposite (!e.target.checked)
-      const newConfig: Record<string, unknown> = { ...config, disableWatcher: !e.target.checked };
-      delete newConfig.disable_watcher;
+      // so disable_watcher should be the opposite (!e.target.checked)
+      const newConfig: Record<string, unknown> = { ...config, disable_watcher: !e.target.checked };
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handleCloudModeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const newConfig: Record<string, unknown> = { ...config, cloudMode: e.target.checked };
-      delete newConfig.cloud_mode;
+      const newConfig: Record<string, unknown> = { ...config, cloud_mode: e.target.checked };
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handleAdd = (sourceId: string) => {
     const newConfig = { ...config, [currentKey]: [...activeIds, sourceId] };
-    delete newConfig[snakeCaseMap[currentKey]];
     onChange(JSON.stringify(newConfig, null, 2));
   };
 
   const handleRemove = (sourceId: string) => {
     const newConfig = { ...config, [currentKey]: activeIds.filter(id => id !== sourceId) };
-    delete newConfig[snakeCaseMap[currentKey]];
     onChange(JSON.stringify(newConfig, null, 2));
   };
 
@@ -128,7 +111,6 @@ const ScraperConfigurator: React.FC<Props> = ({ configStr, sources, onChange, li
       [newList[index], newList[index + 1]] = [newList[index + 1], newList[index]];
     }
     const newConfig = { ...config, [currentKey]: newList };
-    delete newConfig[snakeCaseMap[currentKey]];
     onChange(JSON.stringify(newConfig, null, 2));
   };
 
@@ -157,9 +139,9 @@ const ScraperConfigurator: React.FC<Props> = ({ configStr, sources, onChange, li
           />
           <div className="flex min-w-0 items-center gap-1.5">
             <label htmlFor="nfo-writing" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
-              启用 NFO 元数据写入
+              {t('scraperConfig.enableNfo')}
             </label>
-            <HelpHint text="开启后，刮削或修改元数据时将同步写入 book.nfo 文件" />
+            <HelpHint text={t('scraperConfig.enableNfoHelp')} />
           </div>
         </div>
 
@@ -174,9 +156,9 @@ const ScraperConfigurator: React.FC<Props> = ({ configStr, sources, onChange, li
           />
           <div className="flex min-w-0 items-center gap-1.5">
             <label htmlFor="metadata-writing" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
-              写入 metadata.json
+              {t('scraperConfig.writeMetadataJson')}
             </label>
-            <HelpHint text="开启后，生成 Audiobookshelf 兼容的 metadata.json 元数据文件" />
+            <HelpHint text={t('scraperConfig.writeMetadataJsonHelp')} />
           </div>
         </div>
 
@@ -185,15 +167,15 @@ const ScraperConfigurator: React.FC<Props> = ({ configStr, sources, onChange, li
           <input
             type="checkbox"
             id="prefer-audio-title"
-            checked={preferAudioTitle}
+            checked={useFilenameAsTitle}
             onChange={handlePreferAudioTitleChange}
             className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500 cursor-pointer"
           />
           <div className="flex min-w-0 items-center gap-1.5">
             <label htmlFor="prefer-audio-title" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
-              优先使用文件/文件夹名作为标题
+              {t('scraperConfig.preferAudioTitle')}
             </label>
-            <HelpHint text="开启后，忽略优先级配置，强制使用文件夹名作为书名、文件名作为章节名" />
+            <HelpHint text={t('scraperConfig.preferAudioTitleHelp')} />
           </div>
         </div>
 
@@ -208,9 +190,9 @@ const ScraperConfigurator: React.FC<Props> = ({ configStr, sources, onChange, li
           />
           <div className="flex min-w-0 items-center gap-1.5">
             <label htmlFor="extract-audio-cover" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
-              提取音频封面
+              {t('scraperConfig.extractAudioCover')}
             </label>
-            <HelpHint text="开启后，系统/插件将尝试从音频文件中提取并保存封面" />
+            <HelpHint text={t('scraperConfig.extractAudioCoverHelp')} />
           </div>
         </div>
 
@@ -226,9 +208,9 @@ const ScraperConfigurator: React.FC<Props> = ({ configStr, sources, onChange, li
             />
             <div className="flex min-w-0 items-center gap-1.5">
               <label htmlFor="disable-watcher" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
-                自动检测媒体库变化
+                {t('scraperConfig.autoDetectChanges')}
               </label>
-              <HelpHint text="开启后，将监控该媒体库目录的文件变化并自动触发扫描（修改后即时生效）" />
+              <HelpHint text={t('scraperConfig.autoDetectChangesHelp')} />
             </div>
           </div>
         )}
@@ -244,9 +226,9 @@ const ScraperConfigurator: React.FC<Props> = ({ configStr, sources, onChange, li
           />
           <div className="flex min-w-0 items-center gap-1.5">
             <label htmlFor="cloud-mode" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
-              网盘模式（减少远程音频探测）
+              {t('scraperConfig.cloudMode')}
             </label>
-            <HelpHint text="WebDAV 库开启后，仅使用 book.nfo / metadata.json / 封面等刮削文件，不再从音频文件读取元数据；本地库开启后，.strm 文件将不再探测远程音频时长。" />
+            <HelpHint text={t('scraperConfig.cloudModeHelp')} />
           </div>
         </div>
       </div>
@@ -274,8 +256,8 @@ const ScraperConfigurator: React.FC<Props> = ({ configStr, sources, onChange, li
         <div className="space-y-2">
           <div className="text-xs font-bold text-slate-500 uppercase tracking-wider flex justify-between">
             <span className="flex min-w-0 items-center gap-1.5">
-              <span>{activeTab === 'priority' ? '元数据来源优先级排序 (拖动调整)' : '已启用 (按优先级排序)'}</span>
-              <HelpHint text="系统将按照列表顺序依次尝试获取信息。如果是“默认”配置，将应用于所有未单独配置的字段。" />
+              <span>{activeTab === 'priority' ? t('scraperConfig.activePriorityTitle') : t('scraperConfig.activeTitle')}</span>
+              <HelpHint text={t('scraperConfig.activeHelp')} />
             </span>
             <span className="text-primary-600">{activeSources.length}</span>
           </div>
@@ -314,8 +296,8 @@ const ScraperConfigurator: React.FC<Props> = ({ configStr, sources, onChange, li
               ))
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-slate-400 text-xs italic p-4">
-                <span>暂无启用的源</span>
-                <span>请从右侧添加</span>
+                <span>{t('scraperConfig.noActiveSources')}</span>
+                <span>{t('scraperConfig.addFromRight')}</span>
               </div>
             )}
           </div>
@@ -325,7 +307,7 @@ const ScraperConfigurator: React.FC<Props> = ({ configStr, sources, onChange, li
         {activeTab !== 'priority' && (
           <div className="space-y-2">
             <div className="text-xs font-bold text-slate-500 uppercase tracking-wider flex justify-between">
-              <span>可用插件</span>
+              <span>{t('scraperConfig.availablePlugins')}</span>
               <span className="text-slate-400">{availableSources.length}</span>
             </div>
             <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 min-h-[120px] p-2 space-y-2">
@@ -343,7 +325,7 @@ const ScraperConfigurator: React.FC<Props> = ({ configStr, sources, onChange, li
                 ))
               ) : (
                 <div className="h-full flex items-center justify-center text-slate-400 text-xs italic p-4">
-                  {sources.length === 0 ? '未检测到插件' : '已全部添加'}
+                  {sources.length === 0 ? t('scraperConfig.noPluginsDetected') : t('scraperConfig.allAdded')}
                 </div>
               )}
             </div>

@@ -14,8 +14,11 @@ pub async fn security_headers_middleware(request: Request, next: Next) -> Respon
     // Get security configuration from request extensions
     let security_config = request.extensions().get::<SecurityHeadersConfig>().cloned();
 
-    // Check if request is for widget
-    let is_widget = request.uri().path().starts_with("/widget");
+    let path = request.uri().path().to_string();
+    // Check if request is for widget or a sandboxed plugin UI asset.
+    let is_widget = path.starts_with("/widget");
+    let is_plugin_asset =
+        path.starts_with("/api/v1/plugin-assets/") || path.starts_with("/api/plugin-assets/");
 
     // Process the request
     let response = next.run(request).await;
@@ -29,7 +32,18 @@ pub async fn security_headers_middleware(request: Request, next: Next) -> Respon
         HeaderValue::from_static("nosniff"),
     );
 
-    if !is_widget {
+    if is_widget {
+        // Allow framing for widget pages
+        parts.headers.insert(
+            "Content-Security-Policy",
+            HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; media-src 'self'; object-src 'none'; frame-ancestors *;"),
+        );
+    } else if is_plugin_asset {
+        parts.headers.insert(
+            "Content-Security-Policy",
+            HeaderValue::from_static("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'none'; media-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self';"),
+        );
+    } else {
         parts
             .headers
             .insert("X-Frame-Options", HeaderValue::from_static("DENY"));
@@ -37,12 +51,6 @@ pub async fn security_headers_middleware(request: Request, next: Next) -> Respon
         parts.headers.insert(
             "Content-Security-Policy",
             HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; media-src 'self'; object-src 'none'; frame-ancestors 'none';"),
-        );
-    } else {
-        // Allow framing for widget pages
-        parts.headers.insert(
-            "Content-Security-Policy",
-            HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; media-src 'self'; object-src 'none'; frame-ancestors *;"),
         );
     }
 

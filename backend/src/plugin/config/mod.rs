@@ -44,6 +44,8 @@ pub struct PluginConfigManager {
     encryption_key: Arc<[u8; 32]>,
 }
 
+pub const SECRET_UNCHANGED_PLACEHOLDER: &str = "__TING_READER_SECRET_UNCHANGED__";
+
 impl PluginConfigManager {
     pub fn new(config_dir: PathBuf, encryption_key: [u8; 32]) -> Result<Self> {
         std::fs::create_dir_all(&config_dir).map_err(|e| {
@@ -107,6 +109,62 @@ impl PluginConfigManager {
         Ok(())
     }
 
+    pub fn ensure_config(
+        &self,
+        plugin_id: PluginId,
+        plugin_name: String,
+        schema: Option<Value>,
+        default_config: Value,
+    ) -> Result<()> {
+        let existing = {
+            let configs = self.configs.read().map_err(|e| {
+                TingError::ConfigError(format!("Failed to acquire config lock: {}", e))
+            })?;
+            configs.get(&plugin_id).cloned()
+        };
+
+        let Some(existing) = existing else {
+            return self.initialize_config(plugin_id, plugin_name, schema, default_config);
+        };
+
+        let encrypted_fields = schema
+            .as_ref()
+            .map(encryption::extract_encrypted_fields)
+            .unwrap_or_default();
+        let mut config = encryption::decrypt_sensitive_fields(
+            &self.encryption_key,
+            &existing.config,
+            &existing.encrypted_fields,
+        )?;
+        merge_missing_defaults(&mut config, &default_config);
+
+        if let Some(ref schema_value) = schema {
+            encryption::validate_config(schema_value, &config)?;
+        }
+
+        let encrypted_config =
+            encryption::encrypt_sensitive_fields(&self.encryption_key, &config, &encrypted_fields)?;
+
+        let updated_entry = PluginConfigEntry {
+            plugin_id: plugin_id.clone(),
+            plugin_name,
+            schema,
+            config: encrypted_config,
+            encrypted_fields,
+            updated_at: chrono::Utc::now().timestamp(),
+        };
+
+        {
+            let mut configs = self.configs.write().map_err(|e| {
+                TingError::ConfigError(format!("Failed to acquire config lock: {}", e))
+            })?;
+            configs.insert(plugin_id, updated_entry.clone());
+        }
+
+        self.save_config(&updated_entry)?;
+        Ok(())
+    }
+
     pub fn get_config(&self, plugin_id: &PluginId) -> Result<Value> {
         let configs = self
             .configs
@@ -124,6 +182,55 @@ impl PluginConfigManager {
         )
     }
 
+    pub fn get_redacted_config(&self, plugin_id: &PluginId) -> Result<Value> {
+        let configs = self
+            .configs
+            .read()
+            .map_err(|e| TingError::ConfigError(format!("Failed to acquire config lock: {}", e)))?;
+
+        let entry = configs.get(plugin_id).ok_or_else(|| {
+            TingError::ConfigError(format!("Configuration not found for plugin: {}", plugin_id))
+        })?;
+
+        let mut config = encryption::decrypt_sensitive_fields(
+            &self.encryption_key,
+            &entry.config,
+            &entry.encrypted_fields,
+        )?;
+        redact_sensitive_fields(&mut config, &entry.encrypted_fields);
+        Ok(config)
+    }
+
+    pub fn merge_preserved_sensitive_fields(
+        &self,
+        plugin_id: &PluginId,
+        incoming_config: Value,
+    ) -> Result<Value> {
+        let configs = self
+            .configs
+            .read()
+            .map_err(|e| TingError::ConfigError(format!("Failed to acquire config lock: {}", e)))?;
+
+        let Some(entry) = configs.get(plugin_id) else {
+            return Ok(incoming_config);
+        };
+        if entry.encrypted_fields.is_empty() {
+            return Ok(incoming_config);
+        }
+
+        let current_config = encryption::decrypt_sensitive_fields(
+            &self.encryption_key,
+            &entry.config,
+            &entry.encrypted_fields,
+        )?;
+
+        Ok(merge_sensitive_placeholders(
+            incoming_config,
+            &current_config,
+            &entry.encrypted_fields,
+        ))
+    }
+
     pub fn update_config(&self, plugin_id: &PluginId, new_config: Value) -> Result<()> {
         tracing::info!(plugin_id = %plugin_id, "Updating plugin configuration");
 
@@ -134,8 +241,13 @@ impl PluginConfigManager {
             let entry = configs.get(plugin_id).ok_or_else(|| {
                 TingError::ConfigError(format!("Configuration not found for plugin: {}", plugin_id))
             })?;
+            let old_config = encryption::decrypt_sensitive_fields(
+                &self.encryption_key,
+                &entry.config,
+                &entry.encrypted_fields,
+            )?;
             (
-                entry.config.clone(),
+                old_config,
                 entry.schema.clone(),
                 entry.encrypted_fields.clone(),
                 entry.plugin_name.clone(),
@@ -498,5 +610,67 @@ impl PluginConfigManager {
                 subscriber(event.clone());
             }
         }
+    }
+}
+
+fn redact_sensitive_fields(config: &mut Value, encrypted_fields: &[String]) {
+    let Some(object) = config.as_object_mut() else {
+        return;
+    };
+    for field in encrypted_fields {
+        if object.contains_key(field) {
+            object.insert(
+                field.clone(),
+                Value::String(SECRET_UNCHANGED_PLACEHOLDER.to_string()),
+            );
+        }
+    }
+}
+
+fn merge_sensitive_placeholders(
+    incoming_config: Value,
+    current_config: &Value,
+    encrypted_fields: &[String],
+) -> Value {
+    let mut incoming = match incoming_config {
+        Value::Object(map) => map,
+        other => return other,
+    };
+    let current = current_config.as_object();
+
+    for field in encrypted_fields {
+        let should_preserve = incoming
+            .get(field)
+            .map(is_preserve_sensitive_marker)
+            .unwrap_or(true);
+        if should_preserve {
+            if let Some(value) = current.and_then(|object| object.get(field)).cloned() {
+                incoming.insert(field.clone(), value);
+            }
+        }
+    }
+
+    Value::Object(incoming)
+}
+
+fn is_preserve_sensitive_marker(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::String(text) => {
+            text.is_empty()
+                || text == SECRET_UNCHANGED_PLACEHOLDER
+                || text.chars().all(|ch| ch == '*')
+        }
+        _ => false,
+    }
+}
+
+fn merge_missing_defaults(config: &mut Value, defaults: &Value) {
+    let (Some(config), Some(defaults)) = (config.as_object_mut(), defaults.as_object()) else {
+        return;
+    };
+
+    for (key, value) in defaults {
+        config.entry(key.clone()).or_insert_with(|| value.clone());
     }
 }

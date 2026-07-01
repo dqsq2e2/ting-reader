@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import apiClient from '../../core/api/client';
 import type { Book, Series } from '../../core/types';
 import BookCard from '../../shared/cards/BookCard';
@@ -7,6 +8,7 @@ import BookSelector from '../../shared/modals/BookSelector';
 import DisplaySettingsMenu from '../../shared/widgets/DisplaySettingsMenu';
 import { ArrowLeft, Trash2, Save, Settings, X, Plus } from 'lucide-react';
 import { getCoverUrl } from '../../core/utils/image';
+import { localeCompare } from '../../core/utils/locale';
 import { usePlayerStore } from '../../core/stores/playerStore';
 import { useAuthStore } from '../../core/stores/authStore';
 import { getCoverAspectClass, useBookshelfCoverShape } from '../../core/hooks/useBookshelfCoverShape';
@@ -14,6 +16,7 @@ import { getCoverAspectClass, useBookshelfCoverShape } from '../../core/hooks/us
 type SeriesSortBy = 'default' | 'title' | 'author';
 
 const SeriesDetailPage: React.FC = () => {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
@@ -47,9 +50,9 @@ const SeriesDetailPage: React.FC = () => {
       setAuthor(res.data.author || '');
       setNarrator(res.data.narrator || '');
       setDescription(res.data.description || '');
-      setCoverUrl(res.data.coverUrl || '');
+      setCoverUrl(res.data.cover_url || '');
     } catch (err) {
-      console.error('获取系列失败', err);
+      console.error('Failed to fetch series', err);
     } finally {
       setLoading(false);
     }
@@ -59,16 +62,16 @@ const SeriesDetailPage: React.FC = () => {
     const loadSettings = async () => {
       try {
         const res = await apiClient.get('/api/settings');
-        const settings = res.data.settingsJson || {};
+        const settings = res.data.settings_json || {};
         
-        if (settings.seriesSortBy === 'default' || settings.seriesSortBy === 'title' || settings.seriesSortBy === 'author') {
-          setSortBy(settings.seriesSortBy);
+        if (settings.series_sort_by === 'default' || settings.series_sort_by === 'title' || settings.series_sort_by === 'author') {
+          setSortBy(settings.series_sort_by);
         }
-        if (settings.seriesIconSize === 'small' || settings.seriesIconSize === 'medium' || settings.seriesIconSize === 'large') {
-          setIconSize(settings.seriesIconSize);
+        if (settings.series_icon_size === 'small' || settings.series_icon_size === 'medium' || settings.series_icon_size === 'large') {
+          setIconSize(settings.series_icon_size);
         }
       } catch (err) {
-        console.error('加载设置失败', err);
+        console.error('Failed to load series settings', err);
       }
     };
     loadSettings();
@@ -89,13 +92,13 @@ const SeriesDetailPage: React.FC = () => {
   const handleSortChange = (newSort: SeriesSortBy) => {
     setSortBy(newSort);
     setShowFilterMenu(false);
-    apiClient.post('/api/settings', { seriesSortBy: newSort });
+    apiClient.post('/api/settings', { series_sort_by: newSort });
   };
 
   const handleIconSizeChange = (newSize: 'small' | 'medium' | 'large') => {
     setIconSize(newSize);
     setShowFilterMenu(false);
-    apiClient.post('/api/settings', { seriesIconSize: newSize });
+    apiClient.post('/api/settings', { series_icon_size: newSize });
   };
 
   const getGridCols = () => {
@@ -113,8 +116,8 @@ const SeriesDetailPage: React.FC = () => {
     if (sortBy === 'default') return books;
     
     return [...books].sort((a, b) => {
-      if (sortBy === 'title') return a.title.localeCompare(b.title, 'zh-CN');
-      if (sortBy === 'author') return (a.author || '').localeCompare(b.author || '', 'zh-CN');
+      if (sortBy === 'title') return localeCompare(a.title, b.title);
+      if (sortBy === 'author') return localeCompare(a.author || '', b.author || '');
       return 0;
     });
   };
@@ -132,18 +135,18 @@ const SeriesDetailPage: React.FC = () => {
       setIsEditing(false);
       fetchSeries();
     } catch (err) {
-      console.error('更新系列失败', err);
-      alert('更新系列失败');
+      console.error('Failed to update series', err);
+      alert(t('bookshelf.updateSeriesFailed'));
     }
   };
 
   const handleDelete = async () => {
-    if (!window.confirm('确定要删除此系列吗？系列中的书籍不会被删除。')) return;
+    if (!window.confirm(t('bookshelf.deleteSeriesConfirm'))) return;
     try {
       await apiClient.delete(`/api/v1/series/${id}`);
       navigate('/bookshelf');
     } catch (err) {
-      console.error('删除系列失败', err);
+      console.error('Failed to delete series', err);
     }
   };
 
@@ -154,8 +157,8 @@ const SeriesDetailPage: React.FC = () => {
     setBooks(updatedBooks);
   };
 
-  if (loading) return <div className="p-8 text-center">加载中...</div>;
-  if (!series) return <div className="p-8 text-center">系列未找到</div>;
+  if (loading) return <div className="p-8 text-center">{t('common.loading')}</div>;
+  if (!series) return <div className="p-8 text-center">{t('bookshelf.seriesNotFound')}</div>;
 
   return (
     <div className="flex-1 p-4 sm:p-6 md:p-8 space-y-8">
@@ -169,7 +172,7 @@ const SeriesDetailPage: React.FC = () => {
             <ArrowLeft size={24} />
           </button>
           <h1 className="text-2xl font-bold dark:text-white">
-            {isEditing ? '管理系列' : series.title}
+            {isEditing ? t('bookshelf.manageSeries') : series.title}
           </h1>
         </div>
         {!isEditing && (
@@ -177,25 +180,25 @@ const SeriesDetailPage: React.FC = () => {
             <DisplaySettingsMenu
               open={showFilterMenu}
               onOpenChange={setShowFilterMenu}
-              sheetLabel="关闭系列展示设置"
+              sheetLabel={t('bookshelf.closeSeriesDisplaySettings')}
               sections={[
                 {
-                  title: '排序方式',
+                  title: t('bookshelf.sortBy'),
                   value: sortBy,
                   options: [
-                    { value: 'default', label: '默认排序' },
-                    { value: 'title', label: '书名排序' },
-                    { value: 'author', label: '作者排序' },
+                    { value: 'default', label: t('bookshelf.defaultSort') },
+                    { value: 'title', label: t('bookshelf.sortTitle') },
+                    { value: 'author', label: t('bookshelf.sortAuthor') },
                   ],
                   onChange: (value) => handleSortChange(value as SeriesSortBy),
                 },
                 {
-                  title: '图标大小',
+                  title: t('bookshelf.iconSize'),
                   value: iconSize,
                   options: [
-                    { value: 'large', label: '大图标' },
-                    { value: 'medium', label: '中图标（默认）' },
-                    { value: 'small', label: '小图标' },
+                    { value: 'large', label: t('bookshelf.largeIcon') },
+                    { value: 'medium', label: t('bookshelf.mediumIconDefault') },
+                    { value: 'small', label: t('bookshelf.smallIcon') },
                   ],
                   onChange: (value) => handleIconSizeChange(value as 'small' | 'medium' | 'large'),
                 },
@@ -221,7 +224,7 @@ const SeriesDetailPage: React.FC = () => {
           <div className="space-y-6">
             <div className={`${getCoverAspectClass(coverShape)} rounded-2xl overflow-hidden shadow-lg`}>
               <img 
-                src={getCoverUrl(coverUrl, series.libraryId)} 
+                src={getCoverUrl(coverUrl, series.library_id)}
                 className="w-full h-full object-cover"
                 alt={series.title}
               />
@@ -232,42 +235,42 @@ const SeriesDetailPage: React.FC = () => {
                 value={title} 
                 onChange={e => setTitle(e.target.value)}
                 className="w-full p-2 bg-white dark:bg-slate-800 border rounded"
-                placeholder="标题"
+                placeholder={t('bookshelf.titlePlaceholder')}
               />
               <input 
                 value={author} 
                 onChange={e => setAuthor(e.target.value)}
                 className="w-full p-2 bg-white dark:bg-slate-800 border rounded"
-                placeholder="作者"
+                placeholder={t('bookshelf.authorField')}
               />
               <input 
                 value={narrator} 
                 onChange={e => setNarrator(e.target.value)}
                 className="w-full p-2 bg-white dark:bg-slate-800 border rounded"
-                placeholder="演播"
+                placeholder={t('bookshelf.narratorPlaceholder')}
               />
               <input 
                 value={coverUrl} 
                 onChange={e => setCoverUrl(e.target.value)}
                 className="w-full p-2 bg-white dark:bg-slate-800 border rounded"
-                placeholder="封面URL"
+                placeholder={t('bookshelf.coverUrlCompact')}
               />
               <textarea 
                 value={description} 
                 onChange={e => setDescription(e.target.value)}
                 className="w-full p-2 bg-white dark:bg-slate-800 border rounded"
-                placeholder="简介"
+                placeholder={t('bookshelf.descriptionField')}
               />
               <div className="flex gap-2">
                 <button onClick={handleUpdate} className="flex-1 bg-primary-600 text-white py-2 rounded flex items-center justify-center gap-2">
-                  <Save size={18} /> 保存
+                  <Save size={18} /> {t('common.save')}
                 </button>
                 <button onClick={() => setIsEditing(false)} className="flex-1 bg-slate-200 dark:bg-slate-700 py-2 rounded">
-                  取消
+                  {t('common.cancel')}
                 </button>
               </div>
               <button onClick={handleDelete} className="w-full p-2 bg-red-50 text-red-600 rounded hover:bg-red-100 flex items-center justify-center gap-2">
-                  <Trash2 size={18} /> 删除系列
+                  <Trash2 size={18} /> {t('bookshelf.deleteSeries')}
               </button>
             </div>
           </div>
@@ -275,16 +278,16 @@ const SeriesDetailPage: React.FC = () => {
           {/* Book List / Reordering */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-xl font-bold dark:text-white">包含书籍 ({books.length})</h3>
+              <h3 className="text-xl font-bold dark:text-white">{t('bookshelf.includedBooks', { count: books.length })}</h3>
               <div className="flex items-center gap-2">
                 {books.length > 1 && (
-                    <p className="text-xs text-slate-400 mr-2">使用箭头调整顺序</p>
+                    <p className="text-xs text-slate-400 mr-2">{t('bookshelf.reorderWithArrows')}</p>
                 )}
                 <button 
                     onClick={() => setShowBookSelector(true)}
                     className="p-1.5 bg-primary-50 dark:bg-primary-900/20 text-primary-600 rounded-lg hover:bg-primary-100 transition-colors flex items-center gap-1 text-sm font-bold px-3"
                 >
-                    <Plus size={16} /> 添加书籍
+                    <Plus size={16} /> {t('bookshelf.addBook')}
                 </button>
               </div>
             </div>
@@ -310,7 +313,7 @@ const SeriesDetailPage: React.FC = () => {
                   </div>
                   
                   <div className={`w-12 ${getCoverAspectClass(coverShape)} rounded overflow-hidden flex-shrink-0`}>
-                    <img src={getCoverUrl(book.coverUrl, book.libraryId, book.id)} className="w-full h-full object-cover" alt="" />
+                    <img src={getCoverUrl(book.cover_url, book.library_id, book.id)} className="w-full h-full object-cover" alt="" />
                   </div>
                   
                   <div className="flex-1 min-w-0">
@@ -338,7 +341,7 @@ const SeriesDetailPage: React.FC = () => {
            {/* Books Grid */}
              <div className="flex-1 w-full">
                 <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-bold dark:text-white">包含书籍 ({books.length})</h3>
+                    <h3 className="text-lg font-bold dark:text-white">{t('bookshelf.includedBooks', { count: books.length })}</h3>
                 </div>
                 
                 {books.length > 0 ? (
@@ -349,7 +352,7 @@ const SeriesDetailPage: React.FC = () => {
                     </div>
                 ) : (
                   <div className="py-20 text-center bg-slate-50 dark:bg-slate-900 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
-                      <p className="text-slate-500">系列中暂无书籍</p>
+                      <p className="text-slate-500">{t('bookshelf.noSeriesBooks')}</p>
                   </div>
               )}
            </div>

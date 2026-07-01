@@ -69,7 +69,7 @@ impl TaskRepository {
         let status = status.to_string();
         self.db.execute(move |conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, type, status, payload, message, error, retries, max_retries, created_at, updated_at \
+                "SELECT id, type, status, payload, message, message_key, message_params, error, retries, max_retries, created_at, updated_at \
                  FROM tasks WHERE status = ? ORDER BY created_at DESC"
             ).map_err(TingError::DatabaseError)?;
 
@@ -80,11 +80,13 @@ impl TaskRepository {
                     status: row.get(2)?,
                     payload: row.get(3)?,
                     message: row.get(4)?,
-                    error: row.get(5)?,
-                    retries: row.get(6)?,
-                    max_retries: row.get(7)?,
-                    created_at: Self::normalize_date(row.get(8)?),
-                    updated_at: Self::normalize_date(row.get(9)?),
+                    message_key: row.get(5)?,
+                    message_params: row.get(6)?,
+                    error: row.get(7)?,
+                    retries: row.get(8)?,
+                    max_retries: row.get(9)?,
+                    created_at: Self::normalize_date(row.get(10)?),
+                    updated_at: Self::normalize_date(row.get(11)?),
                 })
             }).map_err(TingError::DatabaseError)?
             .collect::<std::result::Result<Vec<_>, _>>()
@@ -99,7 +101,7 @@ impl TaskRepository {
         let task_type = task_type.to_string();
         self.db.execute(move |conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, type, status, payload, message, error, retries, max_retries, created_at, updated_at \
+                "SELECT id, type, status, payload, message, message_key, message_params, error, retries, max_retries, created_at, updated_at \
                  FROM tasks WHERE type = ? ORDER BY created_at DESC"
             ).map_err(TingError::DatabaseError)?;
 
@@ -110,11 +112,13 @@ impl TaskRepository {
                     status: row.get(2)?,
                     payload: row.get(3)?,
                     message: row.get(4)?,
-                    error: row.get(5)?,
-                    retries: row.get(6)?,
-                    max_retries: row.get(7)?,
-                    created_at: Self::normalize_date(row.get(8)?),
-                    updated_at: Self::normalize_date(row.get(9)?),
+                    message_key: row.get(5)?,
+                    message_params: row.get(6)?,
+                    error: row.get(7)?,
+                    retries: row.get(8)?,
+                    max_retries: row.get(9)?,
+                    created_at: Self::normalize_date(row.get(10)?),
+                    updated_at: Self::normalize_date(row.get(11)?),
                 })
             }).map_err(TingError::DatabaseError)?
             .collect::<std::result::Result<Vec<_>, _>>()
@@ -171,7 +175,7 @@ impl TaskRepository {
 
             // Build the main query with pagination
             let query = format!(
-                "SELECT id, type, status, payload, message, error, retries, max_retries, created_at, updated_at \
+                "SELECT id, type, status, payload, message, message_key, message_params, error, retries, max_retries, created_at, updated_at \
                  FROM tasks {} ORDER BY {} {} LIMIT ? OFFSET ?",
                 where_clause, sort_field, order
             );
@@ -188,11 +192,13 @@ impl TaskRepository {
                             status: row.get(2)?,
                             payload: row.get(3)?,
                             message: row.get(4)?,
-                            error: row.get(5)?,
-                            retries: row.get(6)?,
-                            max_retries: row.get(7)?,
-                            created_at: Self::normalize_date(row.get(8)?),
-                            updated_at: Self::normalize_date(row.get(9)?),
+                            message_key: row.get(5)?,
+                            message_params: row.get(6)?,
+                            error: row.get(7)?,
+                            retries: row.get(8)?,
+                            max_retries: row.get(9)?,
+                            created_at: Self::normalize_date(row.get(10)?),
+                            updated_at: Self::normalize_date(row.get(11)?),
                         })
                     }
                 ).map_err(TingError::DatabaseError)?
@@ -208,11 +214,13 @@ impl TaskRepository {
                             status: row.get(2)?,
                             payload: row.get(3)?,
                             message: row.get(4)?,
-                            error: row.get(5)?,
-                            retries: row.get(6)?,
-                            max_retries: row.get(7)?,
-                            created_at: Self::normalize_date(row.get(8)?),
-                            updated_at: Self::normalize_date(row.get(9)?),
+                            message_key: row.get(5)?,
+                            message_params: row.get(6)?,
+                            error: row.get(7)?,
+                            retries: row.get(8)?,
+                            max_retries: row.get(9)?,
+                            created_at: Self::normalize_date(row.get(10)?),
+                            updated_at: Self::normalize_date(row.get(11)?),
                         })
                     }
                 ).map_err(TingError::DatabaseError)?
@@ -230,8 +238,27 @@ impl TaskRepository {
         let message = message.to_string();
         self.db.execute(move |conn| {
             conn.execute(
-                "UPDATE tasks SET message = ?, updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+                "UPDATE tasks SET message = ?, message_key = NULL, message_params = NULL, updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
                 rusqlite::params![&message, &id],
+            ).map_err(TingError::DatabaseError)?;
+            Ok(())
+        }).await
+    }
+
+    /// Update task progress with a frontend-localizable key.
+    pub async fn update_progress_key(
+        &self,
+        id: &str,
+        message_key: &str,
+        message_params: serde_json::Value,
+    ) -> Result<()> {
+        let id = id.to_string();
+        let message_key = message_key.to_string();
+        let message_params = message_params.to_string();
+        self.db.execute(move |conn| {
+            conn.execute(
+                "UPDATE tasks SET message = NULL, message_key = ?, message_params = ?, updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+                rusqlite::params![&message_key, &message_params, &id],
             ).map_err(TingError::DatabaseError)?;
             Ok(())
         }).await
@@ -303,7 +330,7 @@ impl Repository<TaskRecord> for TaskRepository {
         let id = id.to_string();
         self.db.execute(move |conn| {
             conn.query_row(
-                "SELECT id, type, status, payload, message, error, retries, max_retries, created_at, updated_at \
+                "SELECT id, type, status, payload, message, message_key, message_params, error, retries, max_retries, created_at, updated_at \
                  FROM tasks WHERE id = ?",
                 [&id],
                 |row| {
@@ -313,11 +340,13 @@ impl Repository<TaskRecord> for TaskRepository {
                         status: row.get(2)?,
                         payload: row.get(3)?,
                         message: row.get(4)?,
-                        error: row.get(5)?,
-                        retries: row.get(6)?,
-                        max_retries: row.get(7)?,
-                        created_at: Self::normalize_date(row.get(8)?),
-                        updated_at: Self::normalize_date(row.get(9)?),
+                        message_key: row.get(5)?,
+                        message_params: row.get(6)?,
+                        error: row.get(7)?,
+                        retries: row.get(8)?,
+                        max_retries: row.get(9)?,
+                        created_at: Self::normalize_date(row.get(10)?),
+                        updated_at: Self::normalize_date(row.get(11)?),
                     })
                 }
             ).optional()
@@ -328,7 +357,7 @@ impl Repository<TaskRecord> for TaskRepository {
     async fn find_all(&self) -> Result<Vec<TaskRecord>> {
         self.db.execute(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, type, status, payload, message, error, retries, max_retries, created_at, updated_at \
+                "SELECT id, type, status, payload, message, message_key, message_params, error, retries, max_retries, created_at, updated_at \
                  FROM tasks ORDER BY created_at DESC"
             ).map_err(TingError::DatabaseError)?;
 
@@ -339,11 +368,13 @@ impl Repository<TaskRecord> for TaskRepository {
                     status: row.get(2)?,
                     payload: row.get(3)?,
                     message: row.get(4)?,
-                    error: row.get(5)?,
-                    retries: row.get(6)?,
-                    max_retries: row.get(7)?,
-                    created_at: Self::normalize_date(row.get(8)?),
-                    updated_at: Self::normalize_date(row.get(9)?),
+                    message_key: row.get(5)?,
+                    message_params: row.get(6)?,
+                    error: row.get(7)?,
+                    retries: row.get(8)?,
+                    max_retries: row.get(9)?,
+                    created_at: Self::normalize_date(row.get(10)?),
+                    updated_at: Self::normalize_date(row.get(11)?),
                 })
             }).map_err(TingError::DatabaseError)?
             .collect::<std::result::Result<Vec<_>, _>>()
@@ -357,14 +388,16 @@ impl Repository<TaskRecord> for TaskRepository {
         let task = task.clone();
         self.db.execute(move |conn| {
             conn.execute(
-                "INSERT INTO tasks (id, type, status, payload, message, error, retries, max_retries, created_at, updated_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO tasks (id, type, status, payload, message, message_key, message_params, error, retries, max_retries, created_at, updated_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rusqlite::params![
                     &task.id,
                     &task.task_type,
                     &task.status,
                     &task.payload,
                     &task.message,
+                    &task.message_key,
+                    &task.message_params,
                     &task.error,
                     &task.retries,
                     &task.max_retries,
@@ -381,13 +414,15 @@ impl Repository<TaskRecord> for TaskRepository {
         self.db
             .execute(move |conn| {
                 conn.execute(
-                    "UPDATE tasks SET type = ?, status = ?, payload = ?, message = ?, error = ?, \
+                    "UPDATE tasks SET type = ?, status = ?, payload = ?, message = ?, message_key = ?, message_params = ?, error = ?, \
                  retries = ?, max_retries = ?, updated_at = ? WHERE id = ?",
                     rusqlite::params![
                         &task.task_type,
                         &task.status,
                         &task.payload,
                         &task.message,
+                        &task.message_key,
+                        &task.message_params,
                         &task.error,
                         &task.retries,
                         &task.max_retries,

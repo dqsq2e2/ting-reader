@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import apiClient from '../../core/api/client';
 import { 
   BellRing,
@@ -22,38 +23,41 @@ import {
   Eraser
 } from 'lucide-react';
 import { formatDate } from '../../core/utils/date';
-import { getTaskStatusText } from '../../core/utils/task';
 
 interface LogEntry {
   timestamp: string;
   level: string;
   module: string;
   message: string;
+  raw_message?: string;
+  message_key?: string;
+  message_params?: Record<string, unknown>;
   fields?: Record<string, unknown>;
   task_id?: string;
   task_status?: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   task_type?: string;
 }
 
-const MODULE_OPTIONS = [
-  { label: '全部核心日志', value: 'audit' },
-  { label: '登录记录', value: 'audit::login' },
-  { label: '播放记录', value: 'audit::playback' },
-  { label: '扫描记录', value: 'audit::scan' },
-  { label: '元数据记录', value: 'audit::metadata' },
-  { label: '存储库记录', value: 'audit::library' },
-  { label: '通知记录', value: 'audit::notification' },
-  { label: '系统所有日志', value: 'all' }
+const MODULE_OPTIONS: Array<{ labelKey: string; value: string }> = [
+  { labelKey: 'adminLogs.moduleAllCore', value: 'audit' },
+  { labelKey: 'adminLogs.loginRecords', value: 'audit::login' },
+  { labelKey: 'adminLogs.playbackRecords', value: 'audit::playback' },
+  { labelKey: 'adminLogs.scanRecords', value: 'audit::scan' },
+  { labelKey: 'adminLogs.metadataRecords', value: 'audit::metadata' },
+  { labelKey: 'adminLogs.libraryRecords', value: 'audit::library' },
+  { labelKey: 'adminLogs.notificationRecords', value: 'audit::notification' },
+  { labelKey: 'adminLogs.allSystemLogs', value: 'all' }
 ];
 
-const LEVEL_OPTIONS = [
-  { label: '全部', value: '' },
+const LEVEL_OPTIONS: Array<{ label?: string; labelKey?: string; value: string }> = [
+  { labelKey: 'adminLogs.allLevels', value: '' },
   { label: 'INFO', value: 'INFO' },
   { label: 'WARN', value: 'WARN' },
   { label: 'ERROR', value: 'ERROR' }
 ];
 
 const LogsPage: React.FC = () => {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
   
@@ -78,20 +82,11 @@ const LogsPage: React.FC = () => {
         }
       });
       
-      const newLogs: LogEntry[] = (response.data.logs || []).map((log: LogEntry & {
-        taskId?: string;
-        taskStatus?: LogEntry['task_status'];
-        taskType?: string;
-      }) => ({
-        ...log,
-        task_id: log.task_id || log.taskId,
-        task_status: log.task_status || log.taskStatus,
-        task_type: log.task_type || log.taskType,
-      }));
+      const newLogs: LogEntry[] = response.data.logs || [];
       setLogs(newLogs);
 
     } catch (err) {
-      console.error('获取日志数据失败', err);
+      console.error('Failed to fetch logs', err);
     } finally {
       setLoading(false);
     }
@@ -126,7 +121,7 @@ const LogsPage: React.FC = () => {
   };
 
   const handleDeleteTask = async (taskId: string) => {
-    if (!confirm('确定要删除这条任务日志吗？')) return;
+    if (!confirm(t('adminLogs.deleteTaskConfirm'))) return;
     try {
       await apiClient.delete(`/api/tasks/${taskId}`);
       manualFetchData();
@@ -153,7 +148,7 @@ const LogsPage: React.FC = () => {
       const response = await apiClient.get('/api/v1/system/logs/export');
       downloadFile(response.data, 'system_logs.txt');
     } catch (err) {
-      console.error('导出日志失败', err);
+      console.error('Failed to export logs', err);
     }
   };
 
@@ -164,12 +159,12 @@ const LogsPage: React.FC = () => {
       });
       downloadFile(response.data, 'error_logs.txt');
     } catch (err) {
-      console.error('导出错误日志失败', err);
+      console.error('Failed to export error logs', err);
     }
   };
 
   const handleClearLogs = async () => {
-    if (!confirm('确定要清空所有日志和任务日志吗？')) return;
+    if (!confirm(t('adminLogs.clearConfirm'))) return;
     try {
       await Promise.all([
         apiClient.delete('/api/tasks'),
@@ -177,24 +172,35 @@ const LogsPage: React.FC = () => {
       ]);
       manualFetchData();
     } catch (err) {
-      console.error('清空日志失败', err);
+      console.error('Failed to clear logs', err);
     }
   };
 
   // ---------------- UI Helpers ----------------
   const getModuleName = (module: string) => {
-    if (module.startsWith('audit::login')) return '登录记录';
-    if (module.startsWith('audit::playback')) return '播放记录';
-    if (module.startsWith('audit::scan')) return '扫描记录';
-    if (module.startsWith('audit::metadata')) return '元数据记录';
-    if (module.startsWith('audit::library')) return '存储库记录';
-    if (module.startsWith('audit::notification')) return '通知记录';
-    if (module.startsWith('audit::task')) return '任务记录';
-    if (module === 'audit') return '核心业务';
-    if (module.startsWith('auth')) return '鉴权系统';
-    if (module.startsWith('ting_reader::core::error')) return '核心错误';
-    if (module.startsWith('ting_reader::api')) return 'API服务';
+    if (module.startsWith('audit::login')) return t('adminLogs.loginRecords');
+    if (module.startsWith('audit::playback')) return t('adminLogs.playbackRecords');
+    if (module.startsWith('audit::scan')) return t('adminLogs.scanRecords');
+    if (module.startsWith('audit::metadata')) return t('adminLogs.metadataRecords');
+    if (module.startsWith('audit::library')) return t('adminLogs.libraryRecords');
+    if (module.startsWith('audit::notification')) return t('adminLogs.notificationRecords');
+    if (module.startsWith('audit::task')) return t('adminLogs.taskRecords');
+    if (module === 'audit') return t('adminLogs.coreBusiness');
+    if (module.startsWith('auth')) return t('adminLogs.authSystem');
+    if (module.startsWith('ting_reader::core::error')) return t('adminLogs.coreErrors');
+    if (module.startsWith('ting_reader::api')) return t('adminLogs.apiService');
     return module;
+  };
+
+  const getTaskStatusText = (status?: string) => {
+    switch (status) {
+      case 'completed': return t('adminLogs.completed');
+      case 'failed': return t('adminLogs.failed');
+      case 'running': return t('adminLogs.running');
+      case 'cancelled': return t('adminLogs.cancelled');
+      case 'queued': return t('adminLogs.queued');
+      default: return t('adminLogs.unknownStatus');
+    }
   };
 
   const getLogIcon = (module: string) => {
@@ -222,6 +228,15 @@ const LogsPage: React.FC = () => {
       return String(value);
     }
     return JSON.stringify(value);
+  };
+
+  const getLogMessage = (log: LogEntry) => {
+    if (!log.message_key) return log.message || log.raw_message || '';
+    const translated = t(`adminLogs.messages.${log.message_key}`, {
+      ...(log.message_params || {}),
+      defaultValue: '',
+    });
+    return translated || log.message || log.raw_message || log.message_key;
   };
 
   const getLogKey = (log: LogEntry, index: number) => {
@@ -256,35 +271,35 @@ const LogsPage: React.FC = () => {
         <div className="text-center md:text-left">
           <h1 className="text-2xl md:text-3xl font-bold dark:text-white flex items-center justify-center md:justify-start gap-3">
             <Terminal size={28} className="text-primary-600 md:w-8 md:h-8" />
-            系统日志
+            {t('adminLogs.title')}
           </h1>
-          <p className="text-sm md:text-base text-slate-500 mt-1">实时监控系统后台运行状态与任务进度</p>
+          <p className="text-sm md:text-base text-slate-500 mt-1">{t('adminLogs.subtitle')}</p>
         </div>
         
         <div className="flex flex-wrap items-center justify-center md:justify-end gap-3 sm:gap-4">
           
           <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
-            <span className="text-sm text-slate-500 ml-2">模块</span>
+            <span className="text-sm text-slate-500 ml-2">{t('adminLogs.module')}</span>
             <select 
               value={moduleFilter} 
               onChange={(e) => setModuleFilter(e.target.value)}
               className="bg-transparent border-none text-sm focus:ring-0 text-slate-700 dark:text-slate-300 cursor-pointer"
             >
               {MODULE_OPTIONS.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                <option key={opt.value} value={opt.value}>{t(opt.labelKey)}</option>
               ))}
             </select>
           </div>
 
           <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
-            <span className="text-sm text-slate-500 ml-2">等级</span>
+            <span className="text-sm text-slate-500 ml-2">{t('adminLogs.level')}</span>
             <select 
               value={levelFilter} 
               onChange={(e) => setLevelFilter(e.target.value)}
               className="bg-transparent border-none text-sm focus:ring-0 text-slate-700 dark:text-slate-300 cursor-pointer"
             >
               {LEVEL_OPTIONS.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                <option key={opt.value} value={opt.value}>{opt.labelKey ? t(opt.labelKey) : opt.label}</option>
               ))}
             </select>
           </div>
@@ -294,7 +309,7 @@ const LogsPage: React.FC = () => {
             className="flex items-center gap-1.5 sm:gap-2 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-50 transition-colors shadow-sm text-sm"
           >
             <Eraser size={16} />
-            <span className="hidden xl:inline">清空</span>
+            <span className="hidden xl:inline">{t('adminLogs.clear')}</span>
           </button>
 
           <div className="relative">
@@ -303,7 +318,7 @@ const LogsPage: React.FC = () => {
               className="flex items-center gap-1.5 sm:gap-2 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-50 transition-colors shadow-sm text-sm"
             >
               <MoreHorizontal size={16} />
-              <span className="hidden xl:inline">更多</span>
+              <span className="hidden xl:inline">{t('adminLogs.more')}</span>
             </button>
 
             {showMoreMenu && (
@@ -321,7 +336,7 @@ const LogsPage: React.FC = () => {
                     className="w-full flex items-center justify-center sm:justify-start gap-3 px-4 py-4 sm:py-3 text-sm sm:text-base text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
                   >
                     <Download size={18} className="sm:w-4 sm:h-4" />
-                    导出所有日志
+                    {t('adminLogs.exportAll')}
                   </button>
                   <button
                     onClick={() => {
@@ -331,7 +346,7 @@ const LogsPage: React.FC = () => {
                     className="w-full flex items-center justify-center sm:justify-start gap-3 px-4 py-4 sm:py-3 text-sm sm:text-base text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors border-t border-slate-100 dark:border-slate-800"
                   >
                     <Download size={18} className="sm:w-4 sm:h-4" />
-                    导出错误日志
+                    {t('adminLogs.exportErrors')}
                   </button>
                 </div>
               </>
@@ -339,7 +354,7 @@ const LogsPage: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-slate-500 bg-white dark:bg-slate-900 p-2 sm:p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
-            <span className="whitespace-nowrap">自动刷新</span>
+            <span className="whitespace-nowrap">{t('adminLogs.autoRefresh')}</span>
             <button
               onClick={() => setAutoRefresh(!autoRefresh)}
               className={`w-9 h-5 sm:w-10 sm:h-5 rounded-full transition-all relative ${
@@ -366,6 +381,7 @@ const LogsPage: React.FC = () => {
           {logs.map((log, index) => {
             const isTask = !!log.task_id;
             const logKey = getLogKey(log, index);
+            const logMessage = getLogMessage(log);
             const fieldEntries = log.fields ? Object.entries(log.fields) : [];
             const hasDetails = fieldEntries.length > 0;
             const isExpanded = expandedLogKeys.has(logKey);
@@ -413,7 +429,7 @@ const LogsPage: React.FC = () => {
                             className="inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-[11px] font-medium text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
                           >
                             {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                            详情
+                            {t('adminLogs.details')}
                           </button>
                         )}
                         
@@ -421,7 +437,7 @@ const LogsPage: React.FC = () => {
 
                       {/* Display Log message or Task message */}
                       <p className={`text-sm break-all font-mono whitespace-pre-wrap mt-2 ${isTask ? 'text-slate-500' : 'text-slate-600 dark:text-slate-300'}`}>
-                        {log.message}
+                        {logMessage}
                       </p>
 
                       {hasDetails && isExpanded && (
@@ -444,9 +460,9 @@ const LogsPage: React.FC = () => {
                       )}
 
                       {/* Task error state if present */}
-                      {isTask && log.level === 'ERROR' && log.message.includes('错误') && (
+                      {isTask && log.level === 'ERROR' && (
                         <p className="text-xs text-red-500 mt-2 bg-red-50 dark:bg-red-900/10 p-2 rounded-lg border border-red-100 dark:border-red-900/20 break-all">
-                          {log.message}
+                          {logMessage}
                         </p>
                       )}
                     </div>
@@ -456,7 +472,7 @@ const LogsPage: React.FC = () => {
                     {isTask ? (
                       <>
                         <div className="flex items-center gap-2 sm:mb-1 order-2 sm:order-1">
-                          <span className="text-xs text-slate-500 sm:hidden">{getTaskStatusText(log.task_status as string)}</span>
+                          <span className="text-xs text-slate-500 sm:hidden">{getTaskStatusText(log.task_status)}</span>
                           {getStatusIcon(log.task_status)}
                         </div>
                         
@@ -465,7 +481,7 @@ const LogsPage: React.FC = () => {
                             <button
                               onClick={() => handleCancelTask(log.task_id as string)}
                               className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                              title="停止任务"
+                              title={t('adminLogs.stopTask')}
                             >
                               <StopCircle size={18} />
                             </button>
@@ -473,7 +489,7 @@ const LogsPage: React.FC = () => {
                             <button
                               onClick={() => handleDeleteTask(log.task_id as string)}
                               className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                              title="删除记录"
+                              title={t('adminLogs.deleteRecord')}
                             >
                               <Trash2 size={18} />
                             </button>
@@ -497,7 +513,7 @@ const LogsPage: React.FC = () => {
         {logs.length === 0 && !loading && (
           <div className="py-20 text-center">
             <Terminal size={48} className="mx-auto text-slate-200 mb-4" />
-            <p className="text-slate-500 font-medium">暂无记录</p>
+            <p className="text-slate-500 font-medium">{t('adminLogs.empty')}</p>
           </div>
         )}
 

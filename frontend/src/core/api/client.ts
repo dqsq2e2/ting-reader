@@ -1,7 +1,6 @@
 import axios from 'axios';
-import camelcaseKeys from 'camelcase-keys';
-import snakecaseKeys from 'snakecase-keys';
 import { useAuthStore } from '../stores/authStore';
+import i18n from '../i18n';
 import { safeStorage } from '../utils/storage';
 
 // Initial base URL
@@ -25,16 +24,7 @@ apiClient.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
-
-  // Transform request data to snake_case
-  if (config.data && config.headers['Content-Type'] === 'application/json') {
-    config.data = snakecaseKeys(config.data, { deep: true });
-  }
-
-  // Transform params to snake_case
-  if (config.params) {
-    config.params = snakecaseKeys(config.params, { deep: true });
-  }
+  config.headers['Accept-Language'] = i18n.resolvedLanguage || i18n.language || 'zh-CN';
 
   return config;
 });
@@ -44,11 +34,6 @@ apiClient.interceptors.response.use(
     // Check if we were redirected and update activeUrl if needed
     if (response.request && response.request.responseURL) {
       // ... (existing logic if needed)
-    }
-
-    // Transform response data to camelCase
-    if (response.data && String(response.headers['content-type'] ?? '').includes('application/json')) {
-      response.data = camelcaseKeys(response.data, { deep: true });
     }
 
     return response;

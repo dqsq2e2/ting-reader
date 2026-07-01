@@ -163,7 +163,10 @@ impl TaskQueue {
 
     /// Recover incomplete tasks from database after system restart
     pub async fn recover_tasks(&self) -> Result<usize> {
-        info!("正在从数据库恢复未完成的任务");
+        info!(
+            message_key = "task.recovery.started",
+            "Restoring unfinished tasks"
+        );
 
         // Find all tasks that were queued or running when system shut down
         let mut recovered_count = 0;
@@ -224,7 +227,12 @@ impl TaskQueue {
             }
         }
 
-        info!(recovered_count = recovered_count, "任务恢复完成");
+        info!(
+            message_key = "task.recovery.completed",
+            message_params = %serde_json::json!({ "count": recovered_count }),
+            recovered_count = recovered_count,
+            "Task recovery completed"
+        );
 
         Ok(recovered_count)
     }
@@ -458,6 +466,11 @@ impl TaskQueue {
         }
 
         info!(
+            message_key = "task.submitted",
+            message_params = %serde_json::json!({
+                "task_id": task_id,
+                "task_name": task.name,
+            }),
             task_id = %task_id,
             task_name = %task.name,
             priority = ?task.priority,
@@ -611,7 +624,10 @@ impl TaskQueue {
 
     /// Start the task executor
     pub async fn start(self: Arc<Self>) {
-        info!("任务队列执行器已启动");
+        info!(
+            message_key = "task.executor.started",
+            "Task queue executor started"
+        );
 
         let mut shutdown_rx = {
             let mut guard = self.shutdown_rx.write().await;
@@ -696,6 +712,11 @@ impl TaskQueue {
         let task_id = task.id.clone();
 
         info!(
+            message_key = "task.executing",
+            message_params = %serde_json::json!({
+                "task_id": task_id,
+                "task_name": task.name,
+            }),
             task_id = %task_id,
             task_name = %task.name,
             "Executing task"
@@ -720,11 +741,25 @@ impl TaskQueue {
                     error!(task_id = %task_id, error = %e, "Failed to update task status");
                 }
 
-                info!(task_id = %task_id, "Task completed successfully");
+                info!(
+                    message_key = "task.completed",
+                    message_params = %serde_json::json!({ "task_id": task_id }),
+                    task_id = %task_id,
+                    "Task completed successfully"
+                );
             }
             Ok(Err(e)) => {
                 // Task failed
-                error!(task_id = %task_id, error = %e, "Task execution failed");
+                error!(
+                    message_key = "task.failed",
+                    message_params = %serde_json::json!({
+                        "task_id": task_id,
+                        "error": e.to_string(),
+                    }),
+                    task_id = %task_id,
+                    error = %e,
+                    "Task execution failed"
+                );
 
                 task.retries += 1;
                 task.error = Some(e.to_string());
@@ -734,6 +769,13 @@ impl TaskQueue {
                     let delay = task.retry_policy.backoff.calculate_delay(task.retries);
 
                     warn!(
+                        message_key = "task.retrying",
+                        message_params = %serde_json::json!({
+                            "task_id": task_id,
+                            "retry": task.retries,
+                            "max_retries": task.retry_policy.max_retries,
+                            "delay_secs": delay.as_secs(),
+                        }),
                         task_id = %task_id,
                         retry = task.retries,
                         max_retries = task.retry_policy.max_retries,
@@ -760,6 +802,11 @@ impl TaskQueue {
                     }
 
                     error!(
+                        message_key = "task.max_retries_failed",
+                        message_params = %serde_json::json!({
+                            "task_id": task_id,
+                            "retries": task.retries,
+                        }),
                         task_id = %task_id,
                         retries = task.retries,
                         "Task failed after max retries"
@@ -769,6 +816,11 @@ impl TaskQueue {
             Err(_) => {
                 // Timeout
                 error!(
+                    message_key = "task.timed_out",
+                    message_params = %serde_json::json!({
+                        "task_id": task_id,
+                        "timeout_secs": task.timeout.as_secs(),
+                    }),
                     task_id = %task_id,
                     timeout_secs = task.timeout.as_secs(),
                     "Task execution timed out"
@@ -815,6 +867,8 @@ impl TaskQueue {
             status: task.status.as_str().to_string(),
             payload: Some(payload_json),
             message: None,
+            message_key: None,
+            message_params: None,
             error: task.error.clone(),
             retries: task.retries as i32,
             max_retries: task.retry_policy.max_retries as i32,

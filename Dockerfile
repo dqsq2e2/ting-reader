@@ -62,7 +62,10 @@ COPY backend/config.toml /app/config.toml
 COPY --from=frontend-builder /app/frontend/dist /app/static
 
 # Create necessary directories
-RUN mkdir -p /app/data /app/plugins /app/temp /app/storage
+RUN mkdir -p /app/data /app/plugins /app/temp /app/storage /app/preinstalled-plugins
+
+ARG TING_PLUGIN_STORE_VERSION=1.0.0
+ADD https://github.com/dqsq2e2/ting-reader-plugin-store/releases/download/v${TING_PLUGIN_STORE_VERSION}/ting-reader-plugin-store-${TING_PLUGIN_STORE_VERSION}.tr /app/preinstalled-plugins/ting-reader-plugin-store.tr
 
 # Set environment variables
 ENV RUST_LOG=info
@@ -70,6 +73,7 @@ ENV STATIC_DIR=/app/static
 ENV DATA_DIR=/app/data
 ENV TEMP_DIR=/app/temp
 ENV STORAGE_DIR=/app/storage
+ENV TING_PLUGINS__PREINSTALLED_DIR=/app/preinstalled-plugins
 ENV TING_CONFIG_PATH=/app/config.toml
 ENV TING_SERVER__HOST=0.0.0.0
 ENV TING_SERVER__PORT=3000

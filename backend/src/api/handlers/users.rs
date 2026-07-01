@@ -25,8 +25,8 @@ fn mask_restricted_settings(response: &mut UserSettingsResponse, is_admin: bool)
 
     if let Some(settings_json) = response.settings_json.as_mut() {
         if let Some(obj) = settings_json.as_object_mut() {
-            obj.remove("autoCache");
-            obj.remove("widgetCss");
+            obj.remove("auto_cache");
+            obj.remove("widget_css");
         }
     }
 }
@@ -218,22 +218,22 @@ pub async fn get_user_settings(
             let mut response = UserSettingsResponse::from(settings);
 
             if let Some(ref json_val) = response.settings_json {
-                if let Some(val) = json_val.get("sleepTimerDefault") {
+                if let Some(val) = json_val.get("sleep_timer_default") {
                     if let Some(i) = val.as_i64() {
                         response.sleep_timer_default = i as i32;
                     }
                 }
-                if let Some(val) = json_val.get("autoPreload") {
+                if let Some(val) = json_val.get("auto_preload") {
                     if let Some(b) = val.as_bool() {
                         response.auto_preload = b;
                     }
                 }
-                if let Some(val) = json_val.get("autoCache") {
+                if let Some(val) = json_val.get("auto_cache") {
                     if let Some(b) = val.as_bool() {
                         response.auto_cache = b;
                     }
                 }
-                if let Some(val) = json_val.get("widgetCss") {
+                if let Some(val) = json_val.get("widget_css") {
                     if let Some(s) = val.as_str() {
                         response.widget_css = Some(s.to_string());
                     }
@@ -282,31 +282,36 @@ pub async fn update_user_settings(
     };
 
     if let Some(sleep_timer) = req.sleep_timer_default {
-        settings_obj["sleepTimerDefault"] = serde_json::json!(sleep_timer);
+        settings_obj["sleep_timer_default"] = serde_json::json!(sleep_timer);
     }
     if let Some(auto_preload) = req.auto_preload {
-        settings_obj["autoPreload"] = serde_json::json!(auto_preload);
+        settings_obj["auto_preload"] = serde_json::json!(auto_preload);
     }
 
     // Restricted settings (admin only)
     if user.role == "admin" {
         if let Some(auto_cache) = req.auto_cache {
-            settings_obj["autoCache"] = serde_json::json!(auto_cache);
+            settings_obj["auto_cache"] = serde_json::json!(auto_cache);
         }
         if let Some(widget_css) = &req.widget_css {
-            settings_obj["widgetCss"] = serde_json::json!(widget_css);
+            settings_obj["widget_css"] = serde_json::json!(widget_css);
         }
     } else {
         // If non-admin tries to update these, we silently ignore them or log a warning
         if req.widget_css.is_some() || req.auto_cache.is_some() {
-            tracing::warn!(user_id = %user.id, "非管理员用户尝试更新受限设置");
+            tracing::warn!(
+                user_id = %user.id,
+                message_key = "user.settings.restricted_update_ignored",
+                message_params = %serde_json::json!({ "user_id": user.id }),
+                "Non-admin attempted to update restricted settings"
+            );
         }
     }
 
     for (k, v) in req.extra {
         // Prevent recursion: Do not merge settings_json back into itself
         // Also skip system fields that shouldn't be in the settings JSON
-        if k != "settings_json" && k != "user_id" && k != "updated_at" && k != "settingsJson" {
+        if k != "settings_json" && k != "user_id" && k != "updated_at" {
             settings_obj[k] = v;
         }
     }
@@ -314,7 +319,6 @@ pub async fn update_user_settings(
     // Clean up any potential recursive nesting from previous bugs in the existing object
     if let Some(obj) = settings_obj.as_object_mut() {
         obj.remove("settings_json");
-        obj.remove("settingsJson");
         obj.remove("user_id");
         obj.remove("updated_at");
     }
@@ -348,22 +352,22 @@ pub async fn update_user_settings(
 
     let mut response = UserSettingsResponse::from(settings);
     if let Some(ref json_val) = response.settings_json {
-        if let Some(val) = json_val.get("sleepTimerDefault") {
+        if let Some(val) = json_val.get("sleep_timer_default") {
             if let Some(i) = val.as_i64() {
                 response.sleep_timer_default = i as i32;
             }
         }
-        if let Some(val) = json_val.get("autoPreload") {
+        if let Some(val) = json_val.get("auto_preload") {
             if let Some(b) = val.as_bool() {
                 response.auto_preload = b;
             }
         }
-        if let Some(val) = json_val.get("autoCache") {
+        if let Some(val) = json_val.get("auto_cache") {
             if let Some(b) = val.as_bool() {
                 response.auto_cache = b;
             }
         }
-        if let Some(val) = json_val.get("widgetCss") {
+        if let Some(val) = json_val.get("widget_css") {
             if let Some(s) = val.as_str() {
                 response.widget_css = Some(s.to_string());
             }
@@ -575,8 +579,9 @@ pub async fn update_progress(
 
     let book_title = book.title.clone().unwrap_or_else(|| "Unknown".to_string());
     if is_first_progress {
-        crate::core::notifications::dispatch_notification_event(
+        crate::core::notifications::dispatch_application_event(
             state.notification_repo.clone(),
+            state.plugin_manager.clone(),
             crate::core::notifications::NotificationEventPayload::new(
                 "playback.play",
                 "播放开始",

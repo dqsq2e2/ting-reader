@@ -1,20 +1,20 @@
 export interface Progress {
   id: string;
-  bookId: string;
-  chapterId: string;
+  book_id: string;
+  chapter_id: string;
   position: number;
   duration?: number;
-  updatedAt: string;
-  bookTitle?: string;
-  chapterTitle?: string;
-  coverUrl?: string;
-  libraryId?: string;
-  chapterDuration?: number;
+  updated_at: string;
+  book_title?: string;
+  chapter_title?: string;
+  cover_url?: string;
+  library_id?: string;
+  chapter_duration?: number;
 }
 
 export interface Stats {
-  totalBooks: number;
-  totalChapters: number;
-  totalDuration: number;
-  lastScanTime?: string;
+  total_books: number;
+  total_chapters: number;
+  total_duration: number;
+  last_scan_time?: string;
 }

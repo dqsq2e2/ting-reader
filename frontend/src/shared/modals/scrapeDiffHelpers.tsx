@@ -1,5 +1,5 @@
-// ScrapeDiff 模态框内部用的类型、常量、字段定义与纯工具函数。
-// 含 JSX 的部分仅限 FIELD_DEFINITIONS 里的 lucide 图标。
+// Types, constants, field definitions, and pure helpers used by ScrapeDiffModal.
+// JSX is limited to lucide icons inside FIELD_DEFINITIONS.
 /* eslint-disable react-refresh/only-export-components */
 
 import React from 'react';
@@ -18,12 +18,14 @@ import {
 } from 'lucide-react';
 import type {
   Book,
+  LocalizedText,
   ScraperSearchField,
   ScraperSearchItem,
   ScraperSource,
 } from '../../core/types';
+import i18n from '../../core/i18n';
 
-// ─── 类型 ────────────────────────────────────────────────────────────────────
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 export type FieldValue = string | number | boolean | string[] | null | undefined;
 export type ModalStep = 'search' | 'results' | 'review';
@@ -32,6 +34,7 @@ export type ResultView = 'list' | 'detail';
 export interface FieldDefinition {
   key: string;
   label: string;
+  labelKey?: string;
   icon: React.ReactNode;
   wide?: boolean;
   cover?: boolean;
@@ -55,17 +58,11 @@ export interface ScrapeSearchResult {
 }
 
 export interface LibraryScraperConfig {
-  defaultSources?: string[];
   default_sources?: string[];
-  coverSources?: string[];
   cover_sources?: string[];
-  introSources?: string[];
   intro_sources?: string[];
-  authorSources?: string[];
   author_sources?: string[];
-  narratorSources?: string[];
   narrator_sources?: string[];
-  tagsSources?: string[];
   tags_sources?: string[];
 }
 
@@ -76,36 +73,102 @@ export interface CoverFrameProps {
   className?: string;
 }
 
-// ─── 字段定义 ────────────────────────────────────────────────────────────────
+// ─── Field Definitions ───────────────────────────────────────────────────────
 
 export const FIELD_DEFINITIONS: Record<string, FieldDefinition> = {
-  title: { key: 'title', label: '书名', icon: <BookOpen size={15} /> },
-  author: { key: 'author', label: '作者', icon: <User size={15} /> },
-  narrator: { key: 'narrator', label: '演播', icon: <Mic2 size={15} /> },
-  cover_url: { key: 'cover_url', label: '封面', icon: <ImageIcon size={15} />, cover: true, wide: true },
-  description: { key: 'description', label: '简介', icon: <FileText size={15} />, wide: true },
-  tags: { key: 'tags', label: '标签', icon: <Tags size={15} />, wide: true },
-  genre: { key: 'genre', label: '类型', icon: <Tags size={15} /> },
-  year: { key: 'year', label: '年份', icon: <BookOpen size={15} /> },
-  subtitle: { key: 'subtitle', label: '副标题', icon: <FileText size={15} /> },
-  published_date: { key: 'published_date', label: '发布日期', icon: <Calendar size={15} /> },
-  publisher: { key: 'publisher', label: '出版社', icon: <Building2 size={15} /> },
-  isbn: { key: 'isbn', label: 'ISBN', icon: <Hash size={15} /> },
-  asin: { key: 'asin', label: 'ASIN', icon: <Hash size={15} /> },
-  language: { key: 'language', label: '语言', icon: <Globe2 size={15} /> },
-  explicit: { key: 'explicit', label: '成人内容', icon: <BadgeCheck size={15} /> },
-  abridged: { key: 'abridged', label: '删节版', icon: <BadgeCheck size={15} /> },
-  duration: { key: 'duration', label: '总时长', icon: <Hash size={15} /> },
+  title: { key: 'title', label: 'Title', labelKey: 'scrapeDiff.fields.title', icon: <BookOpen size={15} /> },
+  author: { key: 'author', label: 'Author', labelKey: 'scrapeDiff.fields.author', icon: <User size={15} /> },
+  narrator: { key: 'narrator', label: 'Narrator', labelKey: 'scrapeDiff.fields.narrator', icon: <Mic2 size={15} /> },
+  cover_url: { key: 'cover_url', label: 'Cover', labelKey: 'scrapeDiff.fields.cover', icon: <ImageIcon size={15} />, cover: true, wide: true },
+  description: { key: 'description', label: 'Description', labelKey: 'scrapeDiff.fields.description', icon: <FileText size={15} />, wide: true },
+  tags: { key: 'tags', label: 'Tags', labelKey: 'scrapeDiff.fields.tags', icon: <Tags size={15} />, wide: true },
+  genre: { key: 'genre', label: 'Genre', labelKey: 'scrapeDiff.fields.genre', icon: <Tags size={15} /> },
+  year: { key: 'year', label: 'Year', labelKey: 'scrapeDiff.fields.year', icon: <BookOpen size={15} /> },
+  subtitle: { key: 'subtitle', label: 'Subtitle', labelKey: 'scrapeDiff.fields.subtitle', icon: <FileText size={15} /> },
+  published_date: { key: 'published_date', label: 'Published Date', labelKey: 'scrapeDiff.fields.publishedDate', icon: <Calendar size={15} /> },
+  publisher: { key: 'publisher', label: 'Publisher', labelKey: 'scrapeDiff.fields.publisher', icon: <Building2 size={15} /> },
+  isbn: { key: 'isbn', label: 'ISBN', labelKey: 'scrapeDiff.fields.isbn', icon: <Hash size={15} /> },
+  asin: { key: 'asin', label: 'ASIN', labelKey: 'scrapeDiff.fields.asin', icon: <Hash size={15} /> },
+  language: { key: 'language', label: 'Language', labelKey: 'scrapeDiff.fields.language', icon: <Globe2 size={15} /> },
+  explicit: { key: 'explicit', label: 'Explicit', labelKey: 'scrapeDiff.fields.explicit', icon: <BadgeCheck size={15} /> },
+  abridged: { key: 'abridged', label: 'Abridged', labelKey: 'scrapeDiff.fields.abridged', icon: <BadgeCheck size={15} /> },
+  duration: { key: 'duration', label: 'Duration', labelKey: 'scrapeDiff.fields.duration', icon: <Hash size={15} /> },
 };
 
 export const FIELD_ORDER = Object.keys(FIELD_DEFINITIONS);
 
-// ─── 常量 ────────────────────────────────────────────────────────────────────
+export type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+export const getLocalizedPluginText = (value?: LocalizedText | string | null) => {
+  if (typeof value === 'string') {
+    const text = value.trim();
+    return text || undefined;
+  }
+  if (!value || typeof value !== 'object') return undefined;
+
+  const language = (i18n.resolvedLanguage || i18n.language || 'zh-CN').toLowerCase();
+  const preferredKeys = language.startsWith('en') ? ['en', 'enUS', 'en-US'] : ['zh', 'zhCN', 'zh-CN', 'zhHans', 'zh-Hans'];
+  const fallbackKeys = language.startsWith('en') ? ['zh', 'zhCN', 'zh-CN', 'zhHans', 'zh-Hans'] : ['en', 'enUS', 'en-US'];
+  for (const key of [...preferredKeys, ...fallbackKeys]) {
+    const text = value[key]?.trim();
+    if (text) return text;
+  }
+  return Object.values(value).find((text) => typeof text === 'string' && text.trim())?.trim();
+};
+
+const getResultFieldPluginLabel = (fieldKey: string, source?: ScraperSource | null) => {
+  const labels = source?.result_field_labels;
+  if (!labels) return undefined;
+  const normalized = normalizeFieldKey(fieldKey);
+  return (
+    getLocalizedPluginText(labels[fieldKey]) ||
+    getLocalizedPluginText(labels[normalized])
+  );
+};
+
+export const getFieldLabel = (fieldKey: string, t?: Translate, source?: ScraperSource | null) => {
+  const pluginLabel = getResultFieldPluginLabel(fieldKey, source);
+  if (pluginLabel) return pluginLabel;
+
+  const definition = FIELD_DEFINITIONS[fieldKey];
+  if (!definition) return fieldKey;
+  return t && definition.labelKey ? t(definition.labelKey) : definition.label;
+};
+
+const DEFAULT_FIELD_LABELS_BY_KEY: Record<string, string[]> = {
+  title: ['Title', '书名'],
+  author: ['Author', '作者'],
+  narrator: ['Narrator', '演播', '演播者'],
+};
+
+export const getSearchFieldLabel = (field: ScraperSearchField, t?: Translate) => {
+  const declaredLabel = getLocalizedPluginText(field.label_i18n);
+  if (declaredLabel) return declaredLabel;
+
+  const normalizedKey = normalizeFieldKey(field.key);
+  const knownLabels = DEFAULT_FIELD_LABELS_BY_KEY[normalizedKey] || [];
+  if (knownLabels.includes(field.label)) {
+    return getFieldLabel(normalizedKey, t);
+  }
+  return field.label || getFieldLabel(normalizedKey, t);
+};
+
+export interface FormatLabels {
+  trueLabel: string;
+  falseLabel: string;
+}
+
+const DEFAULT_BOOLEAN_LABELS: FormatLabels = {
+  trueLabel: 'Yes',
+  falseLabel: 'No',
+};
+
+// ─── Constants ───────────────────────────────────────────────────────────────
 
 export const DEFAULT_SEARCH_FIELDS: ScraperSearchField[] = [
-  { key: 'title', label: '书名', required: true, defaultFrom: 'book.title' },
-  { key: 'author', label: '作者', required: false, defaultFrom: 'book.author' },
-  { key: 'narrator', label: '演播', required: false, defaultFrom: 'book.narrator' },
+  { key: 'title', label: 'Title', required: true, default_from: 'book.title' },
+  { key: 'author', label: 'Author', required: false, default_from: 'book.author' },
+  { key: 'narrator', label: 'Narrator', required: false, default_from: 'book.narrator' },
 ];
 
 export const DEFAULT_RESULT_FIELDS = [
@@ -128,13 +191,13 @@ export const DEFAULT_RESULT_FIELDS = [
   'duration',
 ];
 
-export const STEP_ITEMS: Array<{ key: ModalStep; label: string }> = [
-  { key: 'search', label: '搜索条件' },
-  { key: 'results', label: '选择字段' },
-  { key: 'review', label: '确认应用' },
+export const STEP_ITEMS: Array<{ key: ModalStep; label: string; labelKey: string }> = [
+  { key: 'search', label: 'Search Conditions', labelKey: 'scrapeDiff.searchConditions' },
+  { key: 'results', label: 'Select Fields', labelKey: 'scrapeDiff.selectFieldsStep' },
+  { key: 'review', label: 'Review & Apply', labelKey: 'scrapeDiff.reviewApply' },
 ];
 
-// ─── 字段 key 归一化 + 取值 ──────────────────────────────────────────────────
+// ─── Field key normalization and values ──────────────────────────────────────
 
 export const normalizeFieldKey = (key: string) => {
   const normalized = key.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`);
@@ -146,11 +209,11 @@ export const normalizeFieldKey = (key: string) => {
 };
 
 export const getSearchFields = (source?: ScraperSource | null) => {
-  return source?.searchFields?.length ? source.searchFields : DEFAULT_SEARCH_FIELDS;
+  return source?.search_fields?.length ? source.search_fields : DEFAULT_SEARCH_FIELDS;
 };
 
 export const getSharedSearchFieldKind = (field: ScraperSearchField) => {
-  const from = field.defaultFrom || `book.${field.key}`;
+  const from = field.default_from || `book.${field.key}`;
   if (field.key === 'title' || field.key === 'query' || from === 'book.title') return 'title';
   if (field.key === 'author' || from === 'book.author') return 'author';
   if (field.key === 'narrator' || from === 'book.narrator') return 'narrator';
@@ -158,19 +221,19 @@ export const getSharedSearchFieldKind = (field: ScraperSearchField) => {
 };
 
 export const getResultFields = (source?: ScraperSource | null) => {
-  const fields = source?.resultFields?.length ? source.resultFields : DEFAULT_RESULT_FIELDS;
+  const fields = source?.result_fields?.length ? source.result_fields : DEFAULT_RESULT_FIELDS;
   return Array.from(new Set(fields.map(normalizeFieldKey))).filter((key) => FIELD_DEFINITIONS[key]);
 };
 
 export const getBookDefaultValue = (book: Book, field: ScraperSearchField) => {
-  const from = field.defaultFrom || `book.${field.key}`;
+  const from = field.default_from || `book.${field.key}`;
   if (from === 'book.title' || field.key === 'title' || field.key === 'query') return book.title || '';
   if (from === 'book.author' || field.key === 'author') return book.author || '';
   if (from === 'book.narrator' || field.key === 'narrator') return book.narrator || '';
   return '';
 };
 
-// ─── 书名匹配评分 ────────────────────────────────────────────────────────────
+// ─── Title match scoring ─────────────────────────────────────────────────────
 
 const TITLE_MATCH_PUNCTUATION_PATTERN = /[\s\u3000"'`‘’“”.,，。:：;；!?！？、·•・《》<>〈〉【】[\]（）(){}｛｝\-—–_/\\|+*=#￥$%^&~…]+/g;
 
@@ -270,7 +333,7 @@ export const getTitleMatchScore = (candidate: FieldValue, terms: string[]) => {
   );
 };
 
-// ─── 字段取值 + 草稿合并 ─────────────────────────────────────────────────────
+// ─── Field values and draft merge ────────────────────────────────────────────
 
 export const getItemFieldValue = (item: ScraperSearchItem, fieldKey: string): FieldValue => {
   switch (fieldKey) {
@@ -281,7 +344,7 @@ export const getItemFieldValue = (item: ScraperSearchItem, fieldKey: string): Fi
     case 'narrator':
       return item.narrator;
     case 'cover_url':
-      return item.coverUrl || item.cover_url;
+      return item.cover_url;
     case 'description':
       return item.description || item.intro;
     case 'tags':
@@ -289,11 +352,11 @@ export const getItemFieldValue = (item: ScraperSearchItem, fieldKey: string): Fi
     case 'genre':
       return item.genre;
     case 'year':
-      return item.publishedYear || item.published_year;
+      return item.published_year;
     case 'subtitle':
       return item.subtitle;
     case 'published_date':
-      return item.publishedDate || item.published_date;
+      return item.published_date;
     case 'publisher':
       return item.publisher;
     case 'isbn':
@@ -322,7 +385,7 @@ export const getBookFieldValue = (book: Book, fieldKey: string): FieldValue => {
     case 'narrator':
       return book.narrator;
     case 'cover_url':
-      return book.coverUrl;
+      return book.cover_url;
     case 'description':
       return book.description;
     case 'tags':
@@ -350,16 +413,24 @@ export const getDraftBookFieldValue = (
   return selectedFields[fieldKey]?.value ?? getBookFieldValue(book, fieldKey);
 };
 
-// ─── 字段值格式化 ────────────────────────────────────────────────────────────
+// ─── Field value formatting ──────────────────────────────────────────────────
 
-export const formatFieldValue = (value: FieldValue, emptyLabel = '未返回') => {
+export const formatFieldValue = (
+  value: FieldValue,
+  emptyLabel = 'Not returned',
+  booleanLabels: FormatLabels = DEFAULT_BOOLEAN_LABELS
+) => {
   if (!hasFieldValue(value)) return emptyLabel;
   if (Array.isArray(value)) return value.join(' / ');
-  if (typeof value === 'boolean') return value ? '是' : '否';
+  if (typeof value === 'boolean') return value ? booleanLabels.trueLabel : booleanLabels.falseLabel;
   return String(value);
 };
 
-export const formatCurrentValue = (value: FieldValue) => formatFieldValue(value, '未知');
+export const formatCurrentValue = (
+  value: FieldValue,
+  emptyLabel = 'Unknown',
+  booleanLabels: FormatLabels = DEFAULT_BOOLEAN_LABELS
+) => formatFieldValue(value, emptyLabel, booleanLabels);
 
 export const fieldValueForApi = (value: Exclude<FieldValue, null | undefined>) => {
   return Array.isArray(value) || typeof value === 'boolean' || typeof value === 'number' ? value : String(value);
@@ -384,23 +455,17 @@ export const editorValueForField = (fieldKey: string, value: string): Exclude<Fi
   return value;
 };
 
-// ─── 媒体库刮削配置 + 结果 key ───────────────────────────────────────────────
+// ─── Library scraper config and result keys ──────────────────────────────────
 
 export const getConfiguredSourceIds = (config?: LibraryScraperConfig | null) => {
   if (!config) return new Set<string>();
 
   const keys: Array<keyof LibraryScraperConfig> = [
-    'defaultSources',
     'default_sources',
-    'coverSources',
     'cover_sources',
-    'introSources',
     'intro_sources',
-    'authorSources',
     'author_sources',
-    'narratorSources',
     'narrator_sources',
-    'tagsSources',
     'tags_sources',
   ];
 
@@ -418,7 +483,7 @@ export const getDefaultEnabledSourceIds = (sourceList: ScraperSource[], config?:
 
   return new Set(
     sourceList
-      .filter((source) => source.autoScrape && configuredIds.has(source.id))
+      .filter((source) => source.auto_scrape && configuredIds.has(source.id))
       .map((source) => source.id)
   );
 };
@@ -430,7 +495,7 @@ export const getResultExternalId = (result: ScrapeSearchResult) =>
   result.item.id || `result-${result.resultIndex + 1}`;
 
 export const getSearchInputType = (field: ScraperSearchField) => {
-  const fieldType = field.type || field.fieldType;
+  const fieldType = field.type || field.field_type;
   if (fieldType === 'number') return 'number';
   return 'text';
 };

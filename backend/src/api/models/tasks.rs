@@ -63,6 +63,10 @@ pub struct TaskInfoResponse {
     pub payload: Option<String>,
     /// Task progress message
     pub message: Option<String>,
+    /// Localizable task progress key
+    pub message_key: Option<String>,
+    /// Localizable task progress parameters
+    pub message_params: Option<String>,
     /// Task error message (if failed)
     pub error: Option<String>,
     /// Number of retries attempted
@@ -90,6 +94,10 @@ pub struct TaskDetailResponse {
     pub payload: Option<serde_json::Value>,
     /// Task progress message
     pub message: Option<String>,
+    /// Localizable task progress key
+    pub message_key: Option<String>,
+    /// Localizable task progress parameters
+    pub message_params: Option<String>,
     /// Task result (JSON value, if completed)
     pub result: Option<serde_json::Value>,
     /// Task error message (if failed)

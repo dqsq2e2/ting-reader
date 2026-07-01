@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronLeft, ChevronUp, Clock, ListMusic } from 'lucide-react';
 import type { Book, Chapter } from '../../core/types';
 import { setAlpha, toSolidColor, isLight } from '../../core/utils/color';
@@ -52,6 +53,8 @@ const ChapterListDrawer: React.FC<Props> = ({
   formatTime,
   getChapterProgressText,
 }) => {
+  const { t } = useTranslation();
+
   if (!show) return null;
 
   return (
@@ -65,7 +68,7 @@ const ChapterListDrawer: React.FC<Props> = ({
           <div className="flex items-center gap-3 sm:gap-4">
             <h3 className="text-lg sm:text-xl font-bold dark:text-white flex items-center gap-2">
               <ListMusic size={24} className="text-primary-600" />
-              章节列表
+              {t('player.chapterList')}
             </h3>
             {extraChapters.length > 0 && (
               <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl scale-90 origin-left">
@@ -77,7 +80,7 @@ const ChapterListDrawer: React.FC<Props> = ({
                       : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
                   }`}
                 >
-                  正文
+                  {t('player.mainChapters')}
                 </button>
                 <button
                   onClick={() => { onSetActiveTab('extra'); onSetCurrentGroupIndex(0); }}
@@ -87,7 +90,7 @@ const ChapterListDrawer: React.FC<Props> = ({
                       : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
                   }`}
                 >
-                  番外
+                  {t('player.extraChapters')}
                 </button>
               </div>
             )}
@@ -128,7 +131,7 @@ const ChapterListDrawer: React.FC<Props> = ({
                     color: (effectiveThemeColor && isLight(effectiveThemeColor)) ? '#475569' : (effectiveThemeColor ? '#ffffff' : undefined)
                   } : {}}
                 >
-                  第 {group.start}-{group.end} 章
+                  {t('player.chapterRange', { start: group.start, end: group.end })}
                 </button>
               ))}
             </div>
@@ -145,6 +148,10 @@ const ChapterListDrawer: React.FC<Props> = ({
           {(groups[currentGroupIndex]?.chapters || currentChapters).map((chapter, index) => {
             const actualIndex = currentGroupIndex * chaptersPerGroup + index;
             const isCurrent = currentChapter?.id === chapter.id;
+            const progressText = getChapterProgressText(chapter);
+            const isCompleted = !!chapter.progress_position
+              && !!chapter.duration
+              && chapter.progress_position / chapter.duration >= 0.95;
 
             return (
               <div
@@ -176,7 +183,7 @@ const ChapterListDrawer: React.FC<Props> = ({
                       color: (effectiveThemeColor && isLight(effectiveThemeColor)) ? '#475569' : (effectiveThemeColor ? '#ffffff' : undefined)
                     } : {}}
                   >
-                    {chapter.chapterIndex || (actualIndex + 1)}
+                    {chapter.chapter_index || (actualIndex + 1)}
                   </div>
                   <div className="min-w-0 flex-1">
                     <p
@@ -190,15 +197,15 @@ const ChapterListDrawer: React.FC<Props> = ({
                         <Clock size={10} className="w-2 h-2 min-[361px]:w-2.5 min-[361px]:h-2.5 sm:w-3 sm:h-3" />
                         {formatTime(chapter.duration)}
                       </div>
-                      {getChapterProgressText(chapter) && (
+                      {progressText && (
                         <div
                           className={`text-[8px] min-[361px]:text-[9px] min-[431px]:text-[10px] font-medium px-0.5 min-[361px]:px-1 min-[431px]:px-1.5 py-0.5 rounded ${
-                            getChapterProgressText(chapter) === '已播完'
+                            isCompleted
                               ? 'bg-green-50 text-green-500 dark:bg-green-900/20'
                               : 'bg-primary-50 text-primary-600 dark:bg-primary-900/20'
                           }`}
                         >
-                          {getChapterProgressText(chapter)}
+                          {progressText}
                         </div>
                       )}
                     </div>

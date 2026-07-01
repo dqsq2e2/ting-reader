@@ -67,7 +67,10 @@ impl JwtKeyPair {
 
     /// 轮换密钥
     pub fn rotate(&mut self) {
-        info!("正在轮换 JWT 密钥");
+        info!(
+            message_key = "auth.jwt.rotation.started",
+            "Rotating JWT keys"
+        );
 
         // 将当前密钥移到 previous
         self.previous = Some(self.current.clone());
@@ -77,7 +80,10 @@ impl JwtKeyPair {
         self.current = Self::generate_secret();
         self.current_created_at = chrono::Utc::now().timestamp();
 
-        info!("JWT 密钥轮换完成");
+        info!(
+            message_key = "auth.jwt.rotation.completed",
+            "JWT key rotation completed"
+        );
     }
 
     /// 检查是否需要轮换（超过7天）
@@ -166,11 +172,17 @@ impl JwtKeyManager {
         // 尝试从数据库加载
         match Self::load_from_db(db, encryption_key) {
             Ok(keys) => {
-                info!("从数据库加载 JWT 密钥（已加密存储）");
+                info!(
+                    message_key = "auth.jwt.loaded",
+                    "Loaded encrypted JWT keys from database"
+                );
                 Ok(keys)
             }
             Err(_) => {
-                info!("生成新的 JWT 密钥对（将加密存储）");
+                info!(
+                    message_key = "auth.jwt.generated",
+                    "Generated new encrypted JWT key pair"
+                );
                 let keys = JwtKeyPair::generate();
                 Self::save_to_db(db, &keys, encryption_key)?;
                 Ok(keys)
@@ -252,7 +264,10 @@ impl JwtKeyManager {
             let mut keys = self.keys.write().await;
             keys.rotate();
             Self::save_to_db(&self.db, &keys, &self.encryption_key)?;
-            info!("JWT 密钥已自动轮换并加密存储");
+            info!(
+                message_key = "auth.jwt.rotated",
+                "JWT keys rotated and saved"
+            );
         }
 
         Ok(())
@@ -267,7 +282,12 @@ impl JwtKeyManager {
                 interval.tick().await;
 
                 if let Err(e) = self.check_and_rotate().await {
-                    warn!("JWT 密钥轮换检查失败: {}", e);
+                    warn!(
+                        error = %e,
+                        message_key = "auth.jwt.rotation_check_failed",
+                        message_params = %serde_json::json!({ "error": e.to_string() }),
+                        "JWT key rotation check failed"
+                    );
                 }
             }
         });

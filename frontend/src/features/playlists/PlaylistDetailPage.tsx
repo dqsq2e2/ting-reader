@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import apiClient from '../../core/api/client';
 import type { Book, Playlist, PlaylistItem, Series } from '../../core/types';
 import BookCard from '../../shared/cards/BookCard';
@@ -22,8 +23,8 @@ const getPlaylistItems = (playlist?: Playlist | null): PlaylistItem[] => {
   if (!playlist) return [];
   if (playlist.items && playlist.items.length > 0) return playlist.items;
   return (playlist.books || []).map((book, index) => ({
-    itemType: 'book',
-    itemId: book.id,
+    item_type: 'book',
+    item_id: book.id,
     order: index + 1,
     book,
   }));
@@ -31,11 +32,12 @@ const getPlaylistItems = (playlist?: Playlist | null): PlaylistItem[] => {
 
 const getPlaylistBookCount = (playlist?: Playlist | null) => (
   getPlaylistItems(playlist).reduce((total, item) => (
-    total + (item.itemType === 'series' ? (item.series?.books?.length || 0) : 1)
+    total + (item.item_type === 'series' ? (item.series?.books?.length || 0) : 1)
   ), 0)
 );
 
 const PlaylistDetailPage: React.FC = () => {
+  const { t } = useTranslation();
   const { id } = useParams();
   const navigate = useNavigate();
   const currentChapter = usePlayerStore((state) => state.currentChapter);
@@ -64,15 +66,15 @@ const PlaylistDetailPage: React.FC = () => {
       ]);
       setPlaylist(playlistRes.data);
       setSelectedItems(getPlaylistItems(playlistRes.data).map(item => ({
-        itemType: item.itemType,
-        itemId: item.itemId,
+        item_type: item.item_type,
+        item_id: item.item_id,
       })));
       setEditTitle(playlistRes.data.title || '');
       setEditDescription(playlistRes.data.description || '');
       setBooks(booksRes.data || []);
       setSeries(seriesRes.data || []);
     } catch (err) {
-      console.error('加载书单失败', err);
+      console.error('Failed to load playlist', err);
     } finally {
       setLoading(false);
     }
@@ -137,16 +139,16 @@ const PlaylistDetailPage: React.FC = () => {
   const selectedDisplayItems = useMemo(() => (
     selectedItems
       .map((item, index) => {
-        if (item.itemType === 'series') {
-          const selectedSeries = seriesMap.get(item.itemId);
+        if (item.item_type === 'series') {
+          const selectedSeries = seriesMap.get(item.item_id);
           return selectedSeries
-            ? { itemType: 'series' as const, itemId: item.itemId, order: index + 1, series: selectedSeries }
+            ? { item_type: 'series' as const, item_id: item.item_id, order: index + 1, series: selectedSeries }
             : null;
         }
 
-        const book = bookMap.get(item.itemId);
+        const book = bookMap.get(item.item_id);
         return book
-          ? { itemType: 'book' as const, itemId: item.itemId, order: index + 1, book }
+          ? { item_type: 'book' as const, item_id: item.item_id, order: index + 1, book }
           : null;
       })
       .filter(Boolean) as PlaylistItem[]
@@ -156,7 +158,7 @@ const PlaylistDetailPage: React.FC = () => {
     setSelectedItems(prev => (
       prev.some(item => samePlaylistItem(item, 'book', bookId))
         ? prev.filter(item => !samePlaylistItem(item, 'book', bookId))
-        : [...prev, { itemType: 'book', itemId: bookId }]
+        : [...prev, { item_type: 'book', item_id: bookId }]
     ));
   };
 
@@ -164,7 +166,7 @@ const PlaylistDetailPage: React.FC = () => {
     setSelectedItems(prev => (
       prev.some(selected => samePlaylistItem(selected, 'series', item.id))
         ? prev.filter(selected => !samePlaylistItem(selected, 'series', item.id))
-        : [...prev, { itemType: 'series', itemId: item.id }]
+        : [...prev, { item_type: 'series', item_id: item.id }]
     ));
   };
 
@@ -193,15 +195,15 @@ const PlaylistDetailPage: React.FC = () => {
       });
       setPlaylist(res.data);
       setSelectedItems(getPlaylistItems(res.data).map(item => ({
-        itemType: item.itemType,
-        itemId: item.itemId,
+        item_type: item.item_type,
+        item_id: item.item_id,
       })));
       setIsManaging(false);
       setQuery('');
       setManageView('books');
     } catch (err) {
-      console.error('保存书单书籍失败', err);
-      alert('保存失败');
+      console.error('Failed to save playlist items', err);
+      alert(t('common.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -220,8 +222,8 @@ const PlaylistDetailPage: React.FC = () => {
       setPlaylist(res.data);
       setShowEditModal(false);
     } catch (err) {
-      console.error('保存书单信息失败', err);
-      alert('保存失败');
+      console.error('Failed to save playlist info', err);
+      alert(t('common.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -229,14 +231,14 @@ const PlaylistDetailPage: React.FC = () => {
 
   const handleDelete = async () => {
     if (!playlist) return;
-    if (!window.confirm(`删除书单「${playlist.title}」？`)) return;
+    if (!window.confirm(t('playlists.deleteConfirm', { title: playlist.title }))) return;
 
     try {
       await apiClient.delete(`/api/playlists/${playlist.id}`);
       navigate('/playlists');
     } catch (err) {
-      console.error('删除书单失败', err);
-      alert('删除失败');
+      console.error('Failed to delete playlist', err);
+      alert(t('playlists.deleteFailed'));
     }
   };
 
@@ -250,7 +252,7 @@ const PlaylistDetailPage: React.FC = () => {
     return (
       <div className="flex-1 min-h-full flex flex-col p-4 sm:p-6 md:p-8">
         <BackButton fallback="/playlists" />
-        <div className="py-20 text-center text-slate-500">书单不存在</div>
+        <div className="py-20 text-center text-slate-500">{t('playlists.notFound')}</div>
       </div>
     );
   }
@@ -260,9 +262,9 @@ const PlaylistDetailPage: React.FC = () => {
     const normalizedQuery = query.trim().toLowerCase();
     if (!normalizedQuery) return true;
 
-    const title = item.itemType === 'series' ? item.series?.title : item.book?.title;
-    const author = item.itemType === 'series' ? item.series?.author : item.book?.author;
-    const narrator = item.itemType === 'series' ? item.series?.narrator : item.book?.narrator;
+    const title = item.item_type === 'series' ? item.series?.title : item.book?.title;
+    const author = item.item_type === 'series' ? item.series?.author : item.book?.author;
+    const narrator = item.item_type === 'series' ? item.series?.narrator : item.book?.narrator;
     return (
       title?.toLowerCase().includes(normalizedQuery) ||
       author?.toLowerCase().includes(normalizedQuery) ||
@@ -288,7 +290,7 @@ const PlaylistDetailPage: React.FC = () => {
                 {playlist.title}
               </h1>
               <p className="text-sm md:text-base text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
-                {playlist.description || `${getPlaylistBookCount(playlist)} 本书`}
+                {playlist.description || t('playlists.bookCount', { count: getPlaylistBookCount(playlist) })}
               </p>
             </div>
           </div>
@@ -300,8 +302,8 @@ const PlaylistDetailPage: React.FC = () => {
                   onClick={() => {
                     setIsManaging(false);
                     setSelectedItems(getPlaylistItems(playlist).map(item => ({
-                      itemType: item.itemType,
-                      itemId: item.itemId,
+                      item_type: item.item_type,
+                      item_id: item.item_id,
                     })));
                     setQuery('');
                     setManageView('books');
@@ -309,7 +311,7 @@ const PlaylistDetailPage: React.FC = () => {
                   className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm font-bold"
                 >
                   <X size={18} />
-                  取消
+                  {t('common.cancel')}
                 </button>
                 <button
                   onClick={handleSaveBooks}
@@ -317,7 +319,7 @@ const PlaylistDetailPage: React.FC = () => {
                   className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary-600 text-white text-sm font-bold disabled:opacity-50"
                 >
                   <Save size={18} />
-                  {saving ? '保存中...' : '保存书单'}
+                  {saving ? t('playlists.saving') : t('playlists.savePlaylist')}
                 </button>
               </>
             ) : (
@@ -327,7 +329,7 @@ const PlaylistDetailPage: React.FC = () => {
                   className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-800"
                 >
                   <Edit3 size={18} />
-                  编辑信息
+                  {t('playlists.editInfo')}
                 </button>
                 <button
                   onClick={() => {
@@ -338,14 +340,14 @@ const PlaylistDetailPage: React.FC = () => {
                   className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary-600 text-white text-sm font-bold shadow-lg shadow-primary-500/25"
                 >
                   <Plus size={18} />
-                  管理内容
+                  {t('playlists.manageContent')}
                 </button>
                 <button
                   onClick={handleDelete}
                   className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-50 dark:bg-red-900/20 text-red-600 text-sm font-bold hover:bg-red-100 dark:hover:bg-red-900/30"
                 >
                   <Trash2 size={18} />
-                  删除
+                  {t('playlists.delete')}
                 </button>
               </>
             )}
@@ -365,7 +367,7 @@ const PlaylistDetailPage: React.FC = () => {
                   }`}
                 >
                   <ListMusic size={16} />
-                  书籍
+                  {t('playlists.books')}
                 </button>
                 <button
                   onClick={() => setManageView('series')}
@@ -376,7 +378,7 @@ const PlaylistDetailPage: React.FC = () => {
                   }`}
                 >
                   <Layers size={16} />
-                  系列
+                  {t('playlists.series')}
                 </button>
               </div>
             )}
@@ -385,12 +387,12 @@ const PlaylistDetailPage: React.FC = () => {
               <input
                 value={query}
                 onChange={event => setQuery(event.target.value)}
-                placeholder={isManaging ? (manageView === 'series' ? '搜索系列、作者或系列内书籍' : '搜索书名、作者、演播者') : '搜索书单内作品'}
+                placeholder={isManaging ? (manageView === 'series' ? t('playlists.searchSeriesPlaceholder') : t('playlists.searchBooksPlaceholder')) : t('playlists.searchInPlaylistPlaceholder')}
                 className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
               />
             </div>
             <span className="text-sm font-bold text-slate-500 px-2 whitespace-nowrap">
-              {isManaging ? `已选 ${selectedItems.length} 项` : `${filteredPlaylistItems.length} / ${playlistItems.length} 项`}
+              {isManaging ? t('playlists.selectedItems', { count: selectedItems.length }) : t('playlists.itemProgress', { shown: filteredPlaylistItems.length, total: playlistItems.length })}
             </span>
           </div>
         )}
@@ -408,18 +410,18 @@ const PlaylistDetailPage: React.FC = () => {
           filteredPlaylistItems.length > 0 ? (
             <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-6 2xl:grid-cols-7 gap-x-5 gap-y-9">
               {filteredPlaylistItems.map(item => (
-                item.itemType === 'series' && item.series ? (
-                  <PlaylistSeriesCard key={`series-${item.itemId}`} series={item.series} coverShape={coverShape} />
+                item.item_type === 'series' && item.series ? (
+                  <PlaylistSeriesCard key={`series-${item.item_id}`} series={item.series} coverShape={coverShape} />
                 ) : item.book ? (
-                  <BookCard key={`book-${item.itemId}`} book={item.book} coverShape={coverShape} />
+                  <BookCard key={`book-${item.item_id}`} book={item.book} coverShape={coverShape} />
                 ) : null
               ))}
             </div>
           ) : (
             <EmptyPlaylistState
               icon={<ListMusic size={40} />}
-              title={query ? '没有匹配的作品' : '书单里还没有书'}
-              description={query ? '换个关键词试试' : '点击“管理内容”加入作品或系列'}
+              title={query ? t('playlists.noMatchedWorks') : t('playlists.emptyPlaylistBooks')}
+              description={query ? t('playlists.tryAnotherKeyword') : t('playlists.addContentHint')}
             />
           )
         ) : manageView === 'series' ? (
@@ -438,8 +440,8 @@ const PlaylistDetailPage: React.FC = () => {
           ) : (
             <EmptyPlaylistState
               icon={<Layers size={40} />}
-              title="没有匹配的系列"
-              description="换个关键词试试"
+              title={t('playlists.noMatchedSeries')}
+              description={t('playlists.tryAnotherKeyword')}
             />
           )
         ) : displayBooks.length > 0 ? (
@@ -467,8 +469,8 @@ const PlaylistDetailPage: React.FC = () => {
         ) : (
           <EmptyPlaylistState
             icon={<ListMusic size={40} />}
-            title={isManaging ? '没有匹配的书籍' : (query ? '没有匹配的作品' : '书单里还没有书')}
-            description={isManaging ? '换个关键词试试' : (query ? '换个关键词试试' : '点击“管理内容”加入作品或系列')}
+            title={isManaging ? t('playlists.noMatchedBooks') : (query ? t('playlists.noMatchedWorks') : t('playlists.emptyPlaylistBooks'))}
+            description={isManaging ? t('playlists.tryAnotherKeyword') : (query ? t('playlists.tryAnotherKeyword') : t('playlists.addContentHint'))}
           />
         )}
       </div>
@@ -477,7 +479,7 @@ const PlaylistDetailPage: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 w-full max-w-md shadow-2xl border border-slate-100 dark:border-slate-800">
             <div className="flex items-center justify-between mb-5">
-              <h2 className="text-xl font-bold dark:text-white">编辑书单</h2>
+              <h2 className="text-xl font-bold dark:text-white">{t('playlists.editPlaylist')}</h2>
               <button
                 onClick={() => setShowEditModal(false)}
                 className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500"
@@ -488,7 +490,7 @@ const PlaylistDetailPage: React.FC = () => {
 
             <form onSubmit={handleSaveInfo} className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-bold text-slate-600 dark:text-slate-400">名称</label>
+                <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('playlists.name')}</label>
                 <input
                   value={editTitle}
                   onChange={event => setEditTitle(event.target.value)}
@@ -496,7 +498,7 @@ const PlaylistDetailPage: React.FC = () => {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-bold text-slate-600 dark:text-slate-400">描述</label>
+                <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('playlists.description')}</label>
                 <textarea
                   value={editDescription}
                   onChange={event => setEditDescription(event.target.value)}
@@ -510,14 +512,14 @@ const PlaylistDetailPage: React.FC = () => {
                   onClick={() => setShowEditModal(false)}
                   className="px-5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm font-bold"
                 >
-                  取消
+                  {t('common.cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={saving || !editTitle.trim()}
                   className="px-5 py-2.5 rounded-xl bg-primary-600 text-white text-sm font-bold disabled:opacity-50"
                 >
-                  {saving ? '保存中...' : '保存'}
+                  {saving ? t('playlists.saving') : t('common.save')}
                 </button>
               </div>
             </form>

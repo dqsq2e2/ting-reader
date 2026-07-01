@@ -1,6 +1,11 @@
 
+import i18n from '../i18n';
+import { normalizeLanguage } from '../i18n/locales';
+
+const currentLocale = () => normalizeLanguage(i18n.resolvedLanguage || i18n.language);
+
 export const formatDate = (dateString: string | null | undefined): string => {
-  if (!dateString) return '未知时间';
+  if (!dateString) return i18n.t('common.unknownTime');
   try {
     // 1. Basic cleanup
     let cleanDate = dateString.trim();
@@ -38,10 +43,10 @@ export const formatDate = (dateString: string | null | undefined): string => {
 
     if (isNaN(date.getTime())) {
        console.warn(`解析日期失败: ${dateString} (cleaned: ${cleanDate})`);
-       return '未知时间';
+       return i18n.t('common.unknownTime');
     }
     
-    return new Intl.DateTimeFormat('zh-CN', {
+    return new Intl.DateTimeFormat(currentLocale(), {
         year: 'numeric',
         month: 'long',
         day: 'numeric',
@@ -50,6 +55,6 @@ export const formatDate = (dateString: string | null | undefined): string => {
         hour12: false
     }).format(date);
   } catch {
-    return '未知时间';
+    return i18n.t('common.unknownTime');
   }
 };

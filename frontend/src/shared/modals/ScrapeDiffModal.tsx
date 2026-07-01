@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import apiClient from '../../core/api/client';
 import type { Book, Library, ScraperSearchItem, ScraperSource } from '../../core/types';
 import {
@@ -14,13 +15,13 @@ import {
 } from 'lucide-react';
 import { getCoverAspectClass, useBookshelfCoverShape } from '../../core/hooks/useBookshelfCoverShape';
 import {
-  FIELD_DEFINITIONS,
   FIELD_ORDER,
   STEP_ITEMS,
   editorValueForField,
   fieldValueForApi,
   getBookDefaultValue,
   getDefaultEnabledSourceIds,
+  getFieldLabel,
   getItemFieldValue,
   getResultExternalId,
   getResultFields,
@@ -46,6 +47,7 @@ interface Props {
 }
 
 const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
+  const { t } = useTranslation();
   const coverShape = useBookshelfCoverShape();
   const coverAspectClass = getCoverAspectClass(coverShape);
   const compactCoverClass = coverShape === 'square' ? 'h-24 w-24' : 'h-28 w-20';
@@ -125,10 +127,10 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
       const enabledSources = ((sourcesRes.data.sources || []) as ScraperSource[])
         .filter((source) => source.enabled);
       const libraries = (librariesRes.data || []) as Library[];
-      const currentLibrary = libraries.find((library) => library.id === currentBook.libraryId);
+      const currentLibrary = libraries.find((library) => library.id === currentBook.library_id);
       const defaultEnabledIds = getDefaultEnabledSourceIds(
         enabledSources,
-        currentLibrary?.scraperConfig as LibraryScraperConfig | undefined
+        currentLibrary?.scraper_config as LibraryScraperConfig | undefined
       );
       const firstSource = enabledSources.find((source) => defaultEnabledIds.has(source.id)) || enabledSources[0] || null;
 
@@ -138,12 +140,12 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
       setEnabledSourceIds(defaultEnabledIds);
       setSearchValuesBySourceId(buildSearchValuesBySource(enabledSources, currentBook));
     } catch (err) {
-      console.error('获取刮削信息失败', err);
-      setError('加载失败');
+      console.error('Failed to load scrape data', err);
+      setError(t('scrapeDiff.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [bookId, buildSearchValuesBySource]);
+  }, [bookId, buildSearchValuesBySource, t]);
 
   useEffect(() => {
     loadInitialData();
@@ -257,7 +259,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
 
   const handleSearch = async () => {
     if (enabledSearchSources.length === 0) {
-      alert('请至少启用一个插件');
+      alert(t('scrapeDiff.noPluginEnabled'));
       return;
     }
 
@@ -267,7 +269,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
       if (missingRequired) {
         setActiveSourceId(source.id);
         setStep('search');
-        alert(`${source.name} 的 ${missingRequired.label}不能为空`);
+        alert(t('scrapeDiff.requiredField', { source: source.name, field: missingRequired.label }));
         return;
       }
     }
@@ -279,11 +281,19 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
       const responses = await Promise.all(
         enabledSearchSources.map(async (source) => {
           try {
+            const searchParams = { ...(searchValuesBySourceId[source.id] || {}) };
+            if (source.aggregate_auto_scrape) {
+              searchParams.candidate_sources = JSON.stringify(
+                enabledSearchSources
+                  .filter((candidate) => candidate.auto_scrape && !candidate.aggregate_auto_scrape && candidate.id !== source.id)
+                  .map((candidate) => candidate.id)
+              );
+            }
             const res = await apiClient.post('/api/scraper/search', {
               source: source.id,
-              searchParams: searchValuesBySourceId[source.id] || {},
+              search_params: searchParams,
               page: 1,
-              pageSize: 20,
+              page_size: 20,
             });
             return {
               source,
@@ -291,11 +301,11 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
               error: '',
             };
           } catch (err) {
-            console.error(`${source.name} 搜索刮削结果失败`, err);
+            console.error(`${source.name} search failed`, err);
             return {
               source,
               items: [] as ScraperSearchItem[],
-              error: '搜索失败',
+              error: t('scrapeDiff.searchFailed'),
             };
           }
         })
@@ -331,11 +341,11 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
       setExpandedDescriptions(new Set());
       setStep('results');
     } catch (err) {
-      console.error('搜索刮削结果失败', err);
+      console.error('Failed to search scrape results', err);
       setResults([]);
       setSelectedResultIndex(null);
       setResultView('list');
-      setError('搜索失败');
+      setError(t('scrapeDiff.searchFailed'));
       setSearchErrors({});
       setStep('results');
     } finally {
@@ -350,14 +360,13 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
     const value = getItemFieldValue(item, fieldKey);
     if (!hasFieldValue(value)) return;
 
-    const definition = FIELD_DEFINITIONS[fieldKey];
     const resultKey = getResultKey(result);
     const resultId = getResultExternalId(result);
     setSelectedFields((prev) => ({
       ...prev,
       [fieldKey]: {
         key: fieldKey,
-        label: definition.label,
+        label: getFieldLabel(fieldKey, t, source),
         value: value as Exclude<FieldValue, null | undefined>,
         sourceId: source.id,
         sourceName: source.name,
@@ -378,12 +387,11 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
         const value = getItemFieldValue(item, fieldKey);
         if (!hasFieldValue(value)) return;
 
-        const definition = FIELD_DEFINITIONS[fieldKey];
         const resultKey = getResultKey(result);
         const resultId = getResultExternalId(result);
         next[fieldKey] = {
           key: fieldKey,
-          label: definition.label,
+          label: getFieldLabel(fieldKey, t, source),
           value: value as Exclude<FieldValue, null | undefined>,
           sourceId: source.id,
           sourceName: source.name,
@@ -433,7 +441,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
 
   const isStepEnabled = (target: ModalStep) => {
     if (target === step || target === 'search') return true;
-    if (target === 'results') return results.length > 0 || error === '搜索失败' || Object.keys(searchErrors).length > 0;
+    if (target === 'results') return results.length > 0 || error === t('scrapeDiff.searchFailed') || Object.keys(searchErrors).length > 0;
     return selectedCount > 0;
   };
 
@@ -450,20 +458,20 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
             {
               value: fieldValueForApi(selection.value),
               source: selection.sourceId,
-              externalId: selection.resultId,
+              external_id: selection.resultId,
             },
           ])
       );
 
       await apiClient.post(`/api/books/${bookId}/scrape-apply`, {
         fields,
-        applyMetadata: true,
+        apply_metadata: true,
       });
       onSave();
       onClose();
     } catch (err) {
-      console.error('应用刮削结果失败', err);
-      alert('应用失败');
+      console.error('Failed to apply scrape result', err);
+      alert(t('scrapeDiff.applyFailed'));
     } finally {
       setSaving(false);
     }
@@ -475,7 +483,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
         <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
         <div className="relative flex flex-col items-center gap-4 rounded-2xl bg-white p-8 shadow-2xl dark:bg-slate-900">
           <Loader2 className="animate-spin text-primary-600" size={40} />
-          <p className="font-bold text-slate-600 dark:text-slate-400">正在加载...</p>
+          <p className="font-bold text-slate-600 dark:text-slate-400">{t('scrapeDiff.loading')}</p>
         </div>
       </div>
     );
@@ -487,9 +495,9 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
         <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose} />
         <div className="relative flex max-w-sm flex-col items-center gap-4 rounded-2xl bg-white p-8 text-center shadow-2xl dark:bg-slate-900">
           <AlertTriangle className="text-yellow-500" size={40} />
-          <h3 className="text-xl font-bold dark:text-white">{error || '没有可用插件'}</h3>
+          <h3 className="text-xl font-bold dark:text-white">{error || t('scrapeDiff.noPlugins')}</h3>
           <button onClick={onClose} className="mt-2 rounded-xl bg-slate-100 px-6 py-2 font-bold dark:bg-slate-800">
-            关闭
+            {t('scrapeDiff.close')}
           </button>
         </div>
       </div>
@@ -507,7 +515,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
           <div className="flex items-center justify-between gap-3">
             <h2 className="flex items-center gap-2 text-lg font-bold text-slate-950 dark:text-white sm:text-xl">
               <RefreshCw size={22} className="text-primary-600" />
-              手动刮削
+              {t('scrapeDiff.manualScrape')}
             </h2>
             <button onClick={onClose} className="rounded-full p-2 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800">
               <X size={22} className="text-slate-500" />
@@ -537,7 +545,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
                     }`}>
                       {index + 1}
                     </span>
-                    {item.label}
+                    {t(item.labelKey)}
                   </button>
                   {index < STEP_ITEMS.length - 1 ? <ChevronRight size={16} className="shrink-0 text-slate-300" /> : null}
                 </React.Fragment>
@@ -609,7 +617,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
 
         <div className="flex flex-col gap-3 border-t border-slate-100 px-4 py-3 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div className="text-sm font-bold text-slate-500">
-            已选择 {selectedCount} 个字段
+            {t('scrapeDiff.selectedFields', { count: selectedCount })}
           </div>
 
           <div className="flex flex-wrap justify-end gap-2">
@@ -619,7 +627,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
                   onClick={onClose}
                   className="rounded-xl px-5 py-2.5 font-bold text-slate-500 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
-                  取消
+                  {t('scrapeDiff.cancel')}
                 </button>
                 <button
                   onClick={handleSearch}
@@ -627,7 +635,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-6 py-2.5 font-bold text-white transition-colors hover:bg-primary-700 disabled:opacity-60"
                 >
                   {searching ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
-                  搜索 {enabledSearchSources.length} 个插件
+                  {t('scrapeDiff.searchPlugins', { count: enabledSearchSources.length })}
                 </button>
               </>
             ) : null}
@@ -645,14 +653,14 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
                   className="inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 font-bold text-slate-500 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
                   <ArrowLeft size={17} />
-                  {resultView === 'detail' ? '搜索结果' : '搜索条件'}
+                  {resultView === 'detail' ? t('scrapeDiff.searchResults') : t('scrapeDiff.searchConditions')}
                 </button>
                 <button
                   onClick={() => setStep('review')}
                   disabled={selectedCount === 0}
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-6 py-2.5 font-bold text-white transition-colors hover:bg-primary-700 disabled:opacity-50"
                 >
-                  确认应用
+                  {t('scrapeDiff.reviewApply')}
                   <ArrowRight size={17} />
                 </button>
               </>
@@ -665,7 +673,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
                   className="inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 font-bold text-slate-500 transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
                   <ArrowLeft size={17} />
-                  返回
+                  {t('scrapeDiff.back')}
                 </button>
                 <button
                   onClick={handleApply}
@@ -673,7 +681,7 @@ const ScrapeDiffModal: React.FC<Props> = ({ bookId, onClose, onSave }) => {
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-6 py-2.5 font-bold text-white transition-colors hover:bg-primary-700 disabled:opacity-50"
                 >
                   {saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-                  应用
+                  {t('scrapeDiff.apply')}
                 </button>
               </>
             ) : null}

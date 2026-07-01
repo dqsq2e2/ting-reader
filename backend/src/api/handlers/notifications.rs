@@ -141,10 +141,16 @@ pub async fn create_notification_webhook(
 
     tracing::info!(
         target: "audit::notification",
+        message_key = "notification.webhook.created",
+        message_params = %serde_json::json!({
+            "actor": user.username.as_str(),
+            "webhook_id": webhook.id.as_str(),
+            "webhook_name": webhook.name.as_str(),
+        }),
         webhook_id = %webhook.id,
         webhook_name = %webhook.name,
         actor = %user.username,
-        "管理员创建了 webhook 通知配置"
+        "Webhook configuration created"
     );
 
     Ok((
@@ -189,9 +195,16 @@ pub async fn update_notification_webhook(
 
     tracing::info!(
         target: "audit::notification",
+        message_key = "notification.webhook.updated",
+        message_params = %serde_json::json!({
+            "actor": user.username.as_str(),
+            "webhook_id": id.as_str(),
+            "webhook_name": response.name.as_str(),
+        }),
         webhook_id = %id,
+        webhook_name = %response.name,
         actor = %user.username,
-        "管理员更新了 webhook 通知配置"
+        "Webhook configuration updated"
     );
 
     Ok(Json(NotificationWebhookResponse::from(response)))
@@ -214,10 +227,16 @@ pub async fn delete_notification_webhook(
 
     tracing::info!(
         target: "audit::notification",
+        message_key = "notification.webhook.deleted",
+        message_params = %serde_json::json!({
+            "actor": user.username.as_str(),
+            "webhook_id": id.as_str(),
+            "webhook_name": webhook.name.as_str(),
+        }),
         webhook_id = %id,
         webhook_name = %webhook.name,
         actor = %user.username,
-        "管理员删除了 webhook 通知配置"
+        "Webhook configuration deleted"
     );
 
     Ok(StatusCode::NO_CONTENT)

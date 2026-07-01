@@ -22,6 +22,12 @@ pub struct LogEntry {
     pub module: String,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_params: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub fields: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task_id: Option<String>,
@@ -139,7 +145,8 @@ impl Logger {
             level = %config.level,
             format = %config.format,
             output = %config.output,
-            "日志系统初始化完成"
+            message_key = "logging.initialized",
+            "Logging initialized"
         );
 
         Ok(Logger { _guards: guards })
