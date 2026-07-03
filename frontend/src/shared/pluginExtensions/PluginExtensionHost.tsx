@@ -93,7 +93,7 @@ const PluginExtensionHost = () => {
         <button
           type="button"
           onClick={() => setMenuOpen((open) => !open)}
-          className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-transparent bg-transparent text-primary-600 transition-colors hover:bg-white/70 focus:outline-none focus:ring-2 focus:ring-cyan-300 focus:ring-offset-2 focus:ring-offset-white dark:text-primary-300 dark:hover:bg-slate-800/70 dark:focus:ring-offset-slate-950"
+          className="inline-flex h-12 w-12 items-center justify-center rounded-xl border border-slate-200/80 bg-white/95 text-primary-600 shadow-lg shadow-slate-900/10 transition-colors hover:border-primary-200 hover:bg-primary-50 focus:outline-none focus:ring-2 focus:ring-cyan-300 focus:ring-offset-2 focus:ring-offset-white dark:border-slate-700/80 dark:bg-slate-900/95 dark:text-primary-300 dark:shadow-slate-950/25 dark:hover:bg-slate-800 dark:focus:ring-offset-slate-950"
           title="Plugin entries"
           aria-label="Plugin entries"
           aria-expanded={menuOpen}
