@@ -12,6 +12,16 @@ export type ClientExtensionSlot =
 export type ClientExtensionRenderMode =
   "schema" | "builtin" | "web_container" | "action";
 
+export type ClientExtensionIcon =
+  | string
+  | {
+      type?: "lucide" | "emoji" | "image" | "url";
+      name?: string;
+      value?: string;
+      src?: string;
+      alt?: string;
+    };
+
 export type ClientExtensionDescriptor = {
   id: string;
   pluginId: string;
@@ -20,7 +30,7 @@ export type ClientExtensionDescriptor = {
   renderMode: ClientExtensionRenderMode;
   render?: UiExtensionRenderConfig;
   title?: string;
-  icon?: string;
+  icon?: ClientExtensionIcon;
   capability: PluginCapability;
   priority: number;
   contexts: string[];
@@ -38,7 +48,7 @@ export type UiExtensionCapabilityExtra = {
   render_mode?: ClientExtensionRenderMode;
   title?: string;
   label?: string;
-  icon?: string;
+  icon?: ClientExtensionIcon;
   priority?: number;
   contexts?: string[];
   context?: string[];

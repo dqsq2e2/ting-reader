@@ -1,19 +1,34 @@
-import { MessageCircle, PlugZap, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useState } from "react";
 import { invokePluginCapability } from "../../core/api/pluginCapabilities";
 import { useClientExtensions } from "../../core/hooks/useClientExtensions";
 import type { ClientExtensionDescriptor } from "../../core/pluginExtensions";
+import PluginExtensionIcon from "./PluginExtensionIcon";
 import PluginWebContainer from "./PluginWebContainer";
 
 const extensionLabel = (extension: ClientExtensionDescriptor) =>
   extension.title || extension.pluginName || extension.capability.id;
 
+const PluginLauncherIcon = () => (
+  <span
+    aria-hidden="true"
+    className="grid h-6 w-6 grid-cols-2 gap-0.5"
+  >
+    <span className="rounded-[1px] bg-[#54cde3]" />
+    <span className="rounded-[1px] bg-[#48bfdd]" />
+    <span className="rounded-[1px] bg-[#32b4d4]" />
+    <span className="rounded-[1px] bg-[#249ec8]" />
+  </span>
+);
+
 const PluginExtensionHost = () => {
   const { registry } = useClientExtensions();
   const floatingActions = registry.bySlot["global.floating_action"] || [];
   const panels = registry.bySlot["global.panel"] || [];
+  const primaryActions = floatingActions.length > 0 ? floatingActions : panels;
   const [activeExtension, setActiveExtension] =
     useState<ClientExtensionDescriptor | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [actionState, setActionState] = useState<
     "idle" | "running" | "success" | "error"
   >("idle");
@@ -26,6 +41,7 @@ const PluginExtensionHost = () => {
   const openExtension = (extension: ClientExtensionDescriptor) => {
     setActionState("idle");
     setActionMessage(undefined);
+    setMenuOpen(false);
     setActiveExtension(extension);
   };
 
@@ -55,26 +71,35 @@ const PluginExtensionHost = () => {
     }
   };
 
-  const primaryActions = floatingActions.length > 0 ? floatingActions : panels;
-
   return (
     <>
-      <div className="fixed bottom-[calc(var(--bottom-nav-h,0px)+1rem)] right-4 z-[90] flex flex-col items-end gap-2 xl:bottom-6">
-        {primaryActions.slice(0, 3).map((extension) => (
-          <button
-            key={extension.id}
-            type="button"
-            onClick={() => openExtension(extension)}
-            className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-lg shadow-slate-900/10 transition-colors hover:bg-primary-50 hover:text-primary-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-primary-950/40 dark:hover:text-primary-300"
-            title={extensionLabel(extension)}
-          >
-            {extension.slot === "global.floating_action" ? (
-              <MessageCircle size={20} />
-            ) : (
-              <PlugZap size={20} />
-            )}
-          </button>
-        ))}
+      <div className="fixed bottom-[calc(var(--bottom-nav-h,0px)+1rem)] right-4 z-[90] flex flex-col items-center gap-2 xl:bottom-6">
+        {menuOpen ? (
+          <div className="mb-1 flex max-h-[min(60vh,24rem)] flex-col items-center gap-2 overflow-y-auto">
+            {primaryActions.map((extension) => (
+              <button
+                key={extension.id}
+                type="button"
+                onClick={() => openExtension(extension)}
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200/80 bg-white/95 text-slate-700 shadow-md shadow-slate-900/10 transition-colors hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700 focus:outline-none focus:ring-2 focus:ring-cyan-300 focus:ring-offset-2 focus:ring-offset-white dark:border-slate-700/80 dark:bg-slate-900/95 dark:text-slate-100 dark:hover:border-primary-700 dark:hover:bg-primary-950/40 dark:hover:text-primary-300 dark:focus:ring-offset-slate-950"
+                title={extensionLabel(extension)}
+                aria-label={extensionLabel(extension)}
+              >
+                <PluginExtensionIcon extension={extension} size={18} />
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => setMenuOpen((open) => !open)}
+          className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-transparent bg-transparent text-primary-600 transition-colors hover:bg-white/70 focus:outline-none focus:ring-2 focus:ring-cyan-300 focus:ring-offset-2 focus:ring-offset-white dark:text-primary-300 dark:hover:bg-slate-800/70 dark:focus:ring-offset-slate-950"
+          title="Plugin entries"
+          aria-label="Plugin entries"
+          aria-expanded={menuOpen}
+        >
+          <PluginLauncherIcon />
+        </button>
       </div>
 
       {activeExtension ? (
@@ -82,7 +107,7 @@ const PluginExtensionHost = () => {
           <section className="flex h-[min(42rem,88vh)] w-full max-w-md flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
             <header className="flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 px-4 dark:border-slate-800">
               <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary-50 text-primary-700 dark:bg-primary-950/40 dark:text-primary-300">
-                <PlugZap size={17} />
+                <PluginExtensionIcon extension={activeExtension} size={17} />
               </div>
               <div className="min-w-0 flex-1">
                 <h2 className="truncate text-sm font-semibold text-slate-950 dark:text-white">

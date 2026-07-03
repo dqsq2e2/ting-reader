@@ -753,6 +753,7 @@ capabilities:
     kind: ui_extension
     invoke: assistant.open
     slot: global.floating_action
+    icon: message-circle
     render:
       mode: web_container
       entry: ui/assistant.html
@@ -770,6 +771,10 @@ capabilities:
         assert_eq!(
             metadata.capabilities[0].extra["slot"],
             serde_json::json!("global.floating_action")
+        );
+        assert_eq!(
+            metadata.capabilities[0].extra["icon"],
+            serde_json::json!("message-circle")
         );
         assert_eq!(
             metadata.capabilities[0].extra["render"]["mode"],

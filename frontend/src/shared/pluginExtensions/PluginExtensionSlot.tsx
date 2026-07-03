@@ -1,4 +1,4 @@
-import { Loader2, PlugZap, X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import type { FormEvent, ReactNode } from "react";
 import { useEffect, useState } from "react";
 import {
@@ -11,6 +11,7 @@ import type {
   ClientExtensionSlot,
 } from "../../core/pluginExtensions";
 import DocumentReaderPanel from "./DocumentReaderPanel";
+import PluginExtensionIcon from "./PluginExtensionIcon";
 import PluginWebContainer from "./PluginWebContainer";
 
 type PluginExtensionSlotProps = {
@@ -167,7 +168,7 @@ const PluginExtensionSlot = ({
             className={buttonClassName}
             title={extensionLabel(extension)}
           >
-            <PlugZap size={17} />
+            <PluginExtensionIcon extension={extension} size={17} />
           </button>
         ))}
       </div>
@@ -177,7 +178,7 @@ const PluginExtensionSlot = ({
           <section className="flex h-[min(38rem,86vh)] w-full max-w-md flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
             <header className="flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 px-4 dark:border-slate-800">
               <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary-50 text-primary-700 dark:bg-primary-950/40 dark:text-primary-300">
-                <PlugZap size={17} />
+                <PluginExtensionIcon extension={activeExtension} size={17} />
               </div>
               <div className="min-w-0 flex-1">
                 <h2 className="truncate text-sm font-semibold text-slate-950 dark:text-white">

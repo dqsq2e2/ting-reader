@@ -60,6 +60,7 @@ capabilities:
     invoke: openAssistant
     slot: global.floating_action
     title: { zh: AI 助手, en: AI Assistant }
+    icon: message-circle
     render:
       mode: web_container
       entry: ui/index.html
@@ -357,6 +358,7 @@ capabilities:
     invoke: openAssistant
     slot: global.floating_action
     title: { zh: AI 助手, en: AI Assistant }
+    icon: message-circle
     render:
       mode: web_container
       entry: ui/index.html
@@ -366,6 +368,7 @@ capabilities:
     invoke: saveNote
     slot: book.detail_action
     title: { zh: 记录想法, en: Quick Note }
+    icon: book-open
     render:
       mode: schema
       submit_label: Save
@@ -393,6 +396,47 @@ capabilities:
 | `schema` | 插件声明表单字段，客户端用原生控件渲染 |
 | `web_container` | 插件提供 HTML/JS，客户端用 iframe 或 WebView 承载 |
 | `builtin` | 客户端内置通用组件，如 `host_method`、`capability_result`、`document_reader` |
+
+### 6.1 入口展示和自定义图标
+
+`global.floating_action` 和 `global.panel` 会汇总到客户端右下角的插件入口。入口本身是固定的四宫格图标；点击后向上展开一列只显示图标的菜单，插件名称通过 tooltip、无障碍标签和面板标题展示。优先展示 `global.floating_action`，如果没有这类入口，再展示 `global.panel`。
+
+`book.detail_action` 会出现在书籍详情页动作区。`reader.toolbar_action`、`reader.side_panel`、`settings.section` 等 slot 也会在各自页面使用同一个 `icon` 字段渲染按钮和面板标题。
+
+推荐为每个 UI capability 显式声明 `icon`。最稳妥的跨端写法是 Lucide 风格的 kebab-case 字符串；Web 会匹配 Lucide 图标，Flutter 会把常见名称映射到对应 Material 图标：
+
+```yaml
+capabilities:
+  - id: assistant.panel
+    kind: ui_extension
+    slot: global.floating_action
+    title: { zh: AI 助手, en: AI Assistant }
+    icon: messages-square
+    render:
+      mode: web_container
+      entry: ui/index.html
+
+  - id: assistant.book_detail
+    kind: ui_extension
+    slot: book.detail_action
+    title: { zh: 问书单助手, en: Ask Booklist Assistant }
+    icon:
+      type: lucide
+      name: book-open
+    render:
+      mode: web_container
+      entry: ui/index.html
+```
+
+`icon` 也支持对象形式：
+
+```yaml
+icon: { type: lucide, name: settings }
+icon: { type: emoji, value: "✨" }
+icon: { type: image, src: "https://example.com/plugin-icon.png" }
+```
+
+图片图标建议使用 HTTPS 或客户端可访问的本地资源路径，并保持正方形透明底。未声明 `icon` 时，客户端会按 slot 使用默认图标。
 
 ## 7. 内容处理与 DocumentReader
 
