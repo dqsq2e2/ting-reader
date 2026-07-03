@@ -126,6 +126,18 @@ WASM 的 `host_invoke` 返回响应句柄；负数表示桥接层错误，例如
 | `cache.has` | `cache_read` 或 `cache_write` | 判断插件隔离缓存是否存在 |
 | `cache.set` | `cache_write` | 写入插件隔离缓存 |
 | `cache.delete` | `cache_write` | 删除插件隔离缓存 |
+| `playlists.list` | `playlists_read` 或 `playlists_write` | 列出当前用户的播放列表 |
+| `playlists.get` | `playlists_read` 或 `playlists_write` | 读取当前用户的单个播放列表 |
+| `playlists.create` | `playlists_write` | 为当前用户新建播放列表 |
+| `playlists.update` | `playlists_write` | 更新当前用户的播放列表信息 |
+| `playlists.delete` | `playlists_write` | 删除当前用户的播放列表 |
+| `playlists.add_item` | `playlists_write` | 向当前用户的播放列表追加条目 |
+| `playlists.remove_item` | `playlists_write` | 从当前用户的播放列表移除条目 |
+| `favorites.list` | `favorites_read` 或 `favorites_write` | 列出当前用户的收藏 |
+| `favorites.add` | `favorites_write` | 将书籍加入当前用户的收藏 |
+| `favorites.remove` | `favorites_write` | 从当前用户的收藏移除书籍 |
+| `user_settings.get` | `user_settings_read` 或 `user_settings_write` | 读取当前用户的设置 |
+| `user_settings.set` | `user_settings_write` | 写入当前用户的单个设置项 |
 
 权限写在 manifest 中：
 
@@ -662,7 +674,164 @@ pub struct TingNativeHostApi {
 | `-6` | HostGateway 调用失败，详情在 `result_json.error` |
 | `-7` | 响应 JSON 序列化或 CString 构造失败 |
 
-## 11. 常见问题
+## 11. 个人数据（播放列表、收藏、用户设置）
+
+以下方法只能操作**当前登录用户**名下的数据，没有 admin 特权，不会返回其他用户的记录。
+
+### playlists.list
+
+```javascript
+const list = await Ting.host.invoke("playlists.list", { limit: 20, offset: 0 });
+```
+
+返回：
+
+```json
+{
+  "items": [
+    {
+      "id": "playlist-id",
+      "user_id": "user-id",
+      "name": "我的合集",
+      "description": null,
+      "created_at": "2026-07-01T12:00:00Z",
+      "updated_at": "2026-07-01T12:00:00Z"
+    }
+  ],
+  "total": 1,
+  "offset": 0,
+  "limit": 20
+}
+```
+
+### playlists.get
+
+```javascript
+const playlist = await Ting.host.invoke("playlists.get", {
+  playlist_id: "playlist-id"
+});
+```
+
+返回包含 `items` 数组：`{ item_type, item_id, item_order, playlist_id }`。
+
+### playlists.create
+
+参数：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `name` | string | 必填，播放列表名称（也接受 `title`） |
+| `description` | string | 可选 |
+| `items` | array | 可选，元素形如 `{ item_type: 'book'\|'series', item_id, item_order? }` |
+
+返回创建后的播放列表（包含 `items`）。
+
+### playlists.update
+
+参数：`playlist_id` 必填；`name` / `description` 可选；`description` 传 `null` 表示清空。返回更新后的播放列表。
+
+### playlists.delete
+
+参数：`playlist_id`。返回：
+
+```json
+{ "ok": true, "id": "playlist-id" }
+```
+
+### playlists.add_item / playlists.remove_item
+
+```javascript
+await Ting.host.invoke("playlists.add_item", {
+  playlist_id: "playlist-id",
+  item_type: "book",
+  item_id: "book-id"
+});
+
+await Ting.host.invoke("playlists.remove_item", {
+  playlist_id: "playlist-id",
+  item_type: "book",
+  item_id: "book-id"
+});
+```
+
+只支持 `item_type` 为 `book` 或 `series`；`add_item` 会追加到末尾。若播放列表不属于当前用户，返回 `PermissionDenied`。
+
+### favorites.list
+
+```javascript
+const favs = await Ting.host.invoke("favorites.list", { limit: 100 });
+```
+
+返回：
+
+```json
+{
+  "items": [
+    {
+      "id": "favorite-id",
+      "user_id": "user-id",
+      "book_id": "book-id",
+      "created_at": "2026-07-01T12:00:00Z"
+    }
+  ],
+  "total": 1,
+  "offset": 0,
+  "limit": 100
+}
+```
+
+### favorites.add / favorites.remove
+
+```javascript
+await Ting.host.invoke("favorites.add", { book_id: "book-id" });
+await Ting.host.invoke("favorites.remove", { book_id: "book-id" });
+```
+
+`favorites.add` 会先校验当前用户是否能访问该书籍，重复添加时返回 `{ ok: true, book_id, created: false }`。
+
+### user_settings.get
+
+不带 `key` 返回全部键值：
+
+```javascript
+const all = await Ting.host.invoke("user_settings.get", {});
+```
+
+```json
+{
+  "items": {
+    "playback_speed": 1.0,
+    "theme": "auto",
+    "auto_play": true,
+    "skip_intro": 0,
+    "skip_outro": 0,
+    "custom_key": "custom_value"
+  }
+}
+```
+
+带 `key` 返回单值：
+
+```javascript
+const single = await Ting.host.invoke("user_settings.get", { key: "custom_key" });
+// => { "key": "custom_key", "value": "custom_value" }
+```
+
+未设置的 key 返回 `value: null`。
+
+### user_settings.set
+
+```javascript
+await Ting.host.invoke("user_settings.set", {
+  key: "assistant.last_prompt",
+  value: { prompt: "总结这本书", ts: 1782888000 }
+});
+// => { "ok": true, "key": "assistant.last_prompt" }
+```
+
+`value` 可为字符串、数字、布尔或对象；宿主会 JSON 编码后写入 `user_settings.settings_json`。保留字段 `user_id`、`updated_at`、`settings_json` 不能作为 key。
+
+## 12. 常见问题
 
 ### 为什么后台任务里调用 HostGateway 被拒绝？
 

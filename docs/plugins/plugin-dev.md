@@ -280,6 +280,13 @@ capabilities:
 | `tasks.create` | `task_create` | 创建后台任务 |
 | `cache.get` / `cache.has` | `cache_read` 或 `cache_write` | 读取插件隔离缓存 |
 | `cache.set` / `cache.delete` | `cache_write` | 写入插件隔离缓存 |
+| `playlists.list` / `playlists.get` | `playlists_read` 或 `playlists_write` | 读取当前用户的播放列表 |
+| `playlists.create` / `playlists.update` / `playlists.delete` | `playlists_write` | 维护当前用户的播放列表 |
+| `playlists.add_item` / `playlists.remove_item` | `playlists_write` | 追加或删除当前用户的播放列表条目 |
+| `favorites.list` | `favorites_read` 或 `favorites_write` | 读取当前用户的收藏 |
+| `favorites.add` / `favorites.remove` | `favorites_write` | 维护当前用户的收藏 |
+| `user_settings.get` | `user_settings_read` 或 `user_settings_write` | 读取当前用户的设置 |
+| `user_settings.set` | `user_settings_write` | 写入当前用户的设置项（value 会 JSON 编码） |
 
 ### 5.2 JavaScript 调用示例
 

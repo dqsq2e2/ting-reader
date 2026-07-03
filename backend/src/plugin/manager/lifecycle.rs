@@ -410,6 +410,42 @@ impl PluginManager {
                 "Reloading plugin with version change"
             );
 
+            // Preserve old config before loading new version.
+            let preserved_old_config: Option<serde_json::Value> = {
+                let cm_lock = self.config_manager.read().unwrap();
+                cm_lock.as_ref().and_then(|cm| cm.get_config(id).ok())
+            };
+
+            // Migrate old config to new version before load so ensure_config finds it.
+            if let Some(ref old_config) = preserved_old_config {
+                if let Some(ref schema) = new_metadata.config_schema {
+                    let cm_lock = self.config_manager.read().unwrap();
+                    if let Some(cm) = cm_lock.as_ref() {
+                        let mut merged = extract_defaults_from_schema(schema);
+                        if let (Some(merged_obj), Some(old_obj)) =
+                            (merged.as_object_mut(), old_config.as_object())
+                        {
+                            let schema_keys: std::collections::HashSet<&String> = schema
+                                .get("properties")
+                                .and_then(|p| p.as_object())
+                                .map(|m| m.keys().collect())
+                                .unwrap_or_default();
+                            for (key, old_value) in old_obj {
+                                if schema_keys.contains(key) {
+                                    merged_obj.insert(key.clone(), old_value.clone());
+                                }
+                            }
+                        }
+                        let _ = cm.initialize_config(
+                            new_id.clone(),
+                            new_metadata.name.clone(),
+                            Some(schema.clone()),
+                            merged,
+                        );
+                    }
+                }
+            }
+
             match self.load_plugin(&plugin_path).await {
                 Ok(loaded_id) => {
                     if let Err(e) = self.unload_plugin(id).await {
@@ -485,6 +521,16 @@ impl PluginManager {
             to_remove
         };
 
+        // Preserve old config before uninstalling so we can migrate it to the new version.
+        let preserved_old_config: Option<serde_json::Value> = {
+            let cm_lock = self.config_manager.read().unwrap();
+            cm_lock.as_ref().and_then(|cm| {
+                old_versions_to_remove
+                    .iter()
+                    .find_map(|old_id| cm.get_config(old_id).ok())
+            })
+        };
+
         for old_id in old_versions_to_remove {
             info!(
                 "Found old version of plugin {}, removing: {}",
@@ -524,6 +570,36 @@ impl PluginManager {
         }
 
         let plugin_id = installer.install_plugin(package_path, |_| Ok(())).await?;
+
+        // Migrate old config to new version: merge old values over new schema defaults.
+            if let Some(ref old_config) = preserved_old_config {
+                if let Some(ref schema) = metadata.config_schema {
+                    let cm_lock = self.config_manager.read().unwrap();
+                    if let Some(cm) = cm_lock.as_ref() {
+                        let mut merged = extract_defaults_from_schema(schema);
+                        if let (Some(merged_obj), Some(old_obj)) =
+                            (merged.as_object_mut(), old_config.as_object())
+                        {
+                            let schema_keys: std::collections::HashSet<&String> = schema
+                                .get("properties")
+                                .and_then(|p| p.as_object())
+                                .map(|m| m.keys().collect())
+                                .unwrap_or_default();
+                            for (key, old_value) in old_obj {
+                                if schema_keys.contains(key) {
+                                    merged_obj.insert(key.clone(), old_value.clone());
+                                }
+                            }
+                        }
+                        let _ = cm.initialize_config(
+                            plugin_id.clone(),
+                            metadata.name.clone(),
+                            Some(schema.clone()),
+                            merged,
+                        );
+                    }
+                }
+            }
 
         let plugin_path = self.config.plugin_dir.join(&plugin_id);
         if let Err(e) = self.load_plugin(&plugin_path).await {

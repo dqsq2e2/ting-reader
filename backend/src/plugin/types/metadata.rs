@@ -398,6 +398,12 @@ fn parse_permissions(json: &Value) -> Vec<Permission> {
                 "task_create" => Some(Permission::TaskCreate),
                 "cache_read" => Some(Permission::CacheRead),
                 "cache_write" => Some(Permission::CacheWrite),
+                "playlists_read" => Some(Permission::PlaylistsRead),
+                "playlists_write" => Some(Permission::PlaylistsWrite),
+                "favorites_read" => Some(Permission::FavoritesRead),
+                "favorites_write" => Some(Permission::FavoritesWrite),
+                "user_settings_read" => Some(Permission::UserSettingsRead),
+                "user_settings_write" => Some(Permission::UserSettingsWrite),
                 "event_publish" => Some(Permission::EventPublish),
                 "event_subscribe" => value
                     .map(|value| Permission::EventSubscribe(value.to_string()))

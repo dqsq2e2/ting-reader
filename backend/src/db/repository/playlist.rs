@@ -239,6 +239,138 @@ impl PlaylistRepository {
             .await
     }
 
+    pub async fn add_item(
+        &self,
+        playlist_id: &str,
+        user_id: &str,
+        is_admin: bool,
+        item: PlaylistItem,
+    ) -> Result<()> {
+        let playlist_id = playlist_id.to_string();
+        let user_id = user_id.to_string();
+        self.db
+            .transaction(move |tx| {
+                if !is_admin {
+                    let has_access: bool = match item.item_type.as_str() {
+                        "book" => tx
+                            .query_row(
+                                "SELECT EXISTS(
+                                    SELECT 1 FROM books b
+                                    WHERE b.id = ? AND (
+                                        b.library_id IN (SELECT library_id FROM user_library_access WHERE user_id = ?)
+                                        OR
+                                        b.id IN (SELECT book_id FROM user_book_access WHERE user_id = ?)
+                                    )
+                                )",
+                                rusqlite::params![&item.item_id, &user_id, &user_id],
+                                |row| row.get(0),
+                            )
+                            .unwrap_or(false),
+                        "series" => tx
+                            .query_row(
+                                "SELECT EXISTS(
+                                    SELECT 1 FROM series s
+                                    WHERE s.id = ? AND (
+                                        s.library_id IN (SELECT library_id FROM user_library_access WHERE user_id = ?)
+                                        OR
+                                        s.id IN (
+                                            SELECT series_id FROM series_books
+                                            WHERE book_id IN (SELECT book_id FROM user_book_access WHERE user_id = ?)
+                                        )
+                                    )
+                                )",
+                                rusqlite::params![&item.item_id, &user_id, &user_id],
+                                |row| row.get(0),
+                            )
+                            .unwrap_or(false),
+                        _ => false,
+                    };
+
+                    if !has_access {
+                        return Err(TingError::PermissionDenied(
+                            "No access to playlist item".to_string(),
+                        ));
+                    }
+                }
+
+                let next_order: i32 = tx
+                    .query_row(
+                        "SELECT COALESCE(MAX(item_order), 0) + 1 FROM playlist_items WHERE playlist_id = ?",
+                        [&playlist_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(1);
+
+                tx.execute(
+                    "INSERT INTO playlist_items (playlist_id, item_type, item_id, item_order) VALUES (?, ?, ?, ?)",
+                    rusqlite::params![
+                        &playlist_id,
+                        &item.item_type,
+                        &item.item_id,
+                        next_order,
+                    ],
+                )
+                .map_err(TingError::DatabaseError)?;
+
+                if item.item_type == "book" {
+                    tx.execute(
+                        "INSERT INTO playlist_books (playlist_id, book_id, book_order) VALUES (?, ?, ?)",
+                        rusqlite::params![
+                            &playlist_id,
+                            &item.item_id,
+                            next_order,
+                        ],
+                    )
+                    .map_err(TingError::DatabaseError)?;
+                }
+
+                tx.execute(
+                    "UPDATE playlists SET updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+                    [&playlist_id],
+                )
+                .map_err(TingError::DatabaseError)?;
+
+                Ok(())
+            })
+            .await
+    }
+
+    pub async fn remove_item(
+        &self,
+        playlist_id: &str,
+        item_type: &str,
+        item_id: &str,
+    ) -> Result<()> {
+        let playlist_id = playlist_id.to_string();
+        let item_type = item_type.to_string();
+        let item_id = item_id.to_string();
+        self.db
+            .transaction(move |tx| {
+                tx.execute(
+                    "DELETE FROM playlist_items WHERE playlist_id = ? AND item_type = ? AND item_id = ?",
+                    rusqlite::params![&playlist_id, &item_type, &item_id],
+                )
+                .map_err(TingError::DatabaseError)?;
+
+                if item_type == "book" {
+                    tx.execute(
+                        "DELETE FROM playlist_books WHERE playlist_id = ? AND book_id = ?",
+                        rusqlite::params![&playlist_id, &item_id],
+                    )
+                    .map_err(TingError::DatabaseError)?;
+                }
+
+                tx.execute(
+                    "UPDATE playlists SET updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+                    [&playlist_id],
+                )
+                .map_err(TingError::DatabaseError)?;
+
+                Ok(())
+            })
+            .await
+    }
+
     pub async fn replace_items(
         &self,
         playlist_id: &str,

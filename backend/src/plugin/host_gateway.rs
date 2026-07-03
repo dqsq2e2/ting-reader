@@ -1,11 +1,13 @@
 use crate::core::error::{Result, TingError};
 mod data;
 mod files;
+mod personal;
 mod tasks_cache;
 
 use crate::core::task_queue::{Priority, TaskQueue};
 use crate::db::repository::{
-    BookRepository, ChapterRepository, LibraryRepository, ProgressRepository,
+    BookRepository, ChapterRepository, FavoriteRepository, LibraryRepository, PlaylistRepository,
+    ProgressRepository, UserSettingsRepository,
 };
 use crate::plugin::manager::PluginManager;
 use crate::plugin::wasm::sandbox::Permission;
@@ -19,6 +21,9 @@ pub struct PluginHostGateway {
     library_repo: Arc<LibraryRepository>,
     chapter_repo: Arc<ChapterRepository>,
     progress_repo: Arc<ProgressRepository>,
+    playlist_repo: Arc<PlaylistRepository>,
+    favorite_repo: Arc<FavoriteRepository>,
+    settings_repo: Arc<UserSettingsRepository>,
     task_queue: Arc<TaskQueue>,
     plugin_manager: Arc<PluginManager>,
     plugin_cache: Arc<PluginCache>,
@@ -89,14 +94,24 @@ pub enum PluginHostPermission {
     TaskCreate,
     CacheRead,
     CacheWrite,
+    PlaylistsRead,
+    PlaylistsWrite,
+    FavoritesRead,
+    FavoritesWrite,
+    UserSettingsRead,
+    UserSettingsWrite,
 }
 
 impl PluginHostGateway {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         book_repo: Arc<BookRepository>,
         library_repo: Arc<LibraryRepository>,
         chapter_repo: Arc<ChapterRepository>,
         progress_repo: Arc<ProgressRepository>,
+        playlist_repo: Arc<PlaylistRepository>,
+        favorite_repo: Arc<FavoriteRepository>,
+        settings_repo: Arc<UserSettingsRepository>,
         task_queue: Arc<TaskQueue>,
         plugin_manager: Arc<PluginManager>,
         plugin_cache: Arc<PluginCache>,
@@ -106,6 +121,9 @@ impl PluginHostGateway {
             library_repo,
             chapter_repo,
             progress_repo,
+            playlist_repo,
+            favorite_repo,
+            settings_repo,
             task_queue,
             plugin_manager,
             plugin_cache,
@@ -175,6 +193,16 @@ impl PluginHostGateway {
             "tasks.create" => Some(PluginHostPermission::TaskCreate),
             "cache.get" | "cache.has" => Some(PluginHostPermission::CacheRead),
             "cache.set" | "cache.delete" => Some(PluginHostPermission::CacheWrite),
+            "playlists.list" | "playlists.get" => Some(PluginHostPermission::PlaylistsRead),
+            "playlists.create"
+            | "playlists.update"
+            | "playlists.delete"
+            | "playlists.add_item"
+            | "playlists.remove_item" => Some(PluginHostPermission::PlaylistsWrite),
+            "favorites.list" => Some(PluginHostPermission::FavoritesRead),
+            "favorites.add" | "favorites.remove" => Some(PluginHostPermission::FavoritesWrite),
+            "user_settings.get" => Some(PluginHostPermission::UserSettingsRead),
+            "user_settings.set" => Some(PluginHostPermission::UserSettingsWrite),
             _ => None,
         }
     }
@@ -215,6 +243,42 @@ impl PluginHostGateway {
                     | (PluginHostPermission::CacheRead, Permission::CacheRead)
                     | (PluginHostPermission::CacheRead, Permission::CacheWrite)
                     | (PluginHostPermission::CacheWrite, Permission::CacheWrite)
+                    | (
+                        PluginHostPermission::PlaylistsRead,
+                        Permission::PlaylistsRead
+                    )
+                    | (
+                        PluginHostPermission::PlaylistsRead,
+                        Permission::PlaylistsWrite
+                    )
+                    | (
+                        PluginHostPermission::PlaylistsWrite,
+                        Permission::PlaylistsWrite
+                    )
+                    | (
+                        PluginHostPermission::FavoritesRead,
+                        Permission::FavoritesRead
+                    )
+                    | (
+                        PluginHostPermission::FavoritesRead,
+                        Permission::FavoritesWrite
+                    )
+                    | (
+                        PluginHostPermission::FavoritesWrite,
+                        Permission::FavoritesWrite
+                    )
+                    | (
+                        PluginHostPermission::UserSettingsRead,
+                        Permission::UserSettingsRead
+                    )
+                    | (
+                        PluginHostPermission::UserSettingsRead,
+                        Permission::UserSettingsWrite
+                    )
+                    | (
+                        PluginHostPermission::UserSettingsWrite,
+                        Permission::UserSettingsWrite
+                    )
             )
         })
     }
@@ -248,6 +312,18 @@ impl PluginHostGateway {
             "cache.set" => self.cache_set(plugin_id, &params).await,
             "cache.has" => self.cache_has(plugin_id, &params).await,
             "cache.delete" => self.cache_delete(plugin_id, &params).await,
+            "playlists.list" => self.playlists_list(user, &params).await,
+            "playlists.get" => self.playlists_get(user, &params).await,
+            "playlists.create" => self.playlists_create(user, &params).await,
+            "playlists.update" => self.playlists_update(user, &params).await,
+            "playlists.delete" => self.playlists_delete(user, &params).await,
+            "playlists.add_item" => self.playlists_add_item(user, &params).await,
+            "playlists.remove_item" => self.playlists_remove_item(user, &params).await,
+            "favorites.list" => self.favorites_list(user, &params).await,
+            "favorites.add" => self.favorites_add(user, &params).await,
+            "favorites.remove" => self.favorites_remove(user, &params).await,
+            "user_settings.get" => self.user_settings_get(user, &params).await,
+            "user_settings.set" => self.user_settings_set(user, &params).await,
             _ => Err(TingError::InvalidRequest(format!(
                 "Unknown plugin host method: {}",
                 method

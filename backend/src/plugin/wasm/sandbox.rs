@@ -306,6 +306,30 @@ pub enum Permission {
     /// Permission to subscribe to specific event types
     #[serde(rename = "event_subscribe")]
     EventSubscribe(String),
+
+    /// Read the current user's playlists through HostGateway
+    #[serde(rename = "playlists_read")]
+    PlaylistsRead,
+
+    /// Write the current user's playlists through HostGateway
+    #[serde(rename = "playlists_write")]
+    PlaylistsWrite,
+
+    /// Read the current user's favorites through HostGateway
+    #[serde(rename = "favorites_read")]
+    FavoritesRead,
+
+    /// Write the current user's favorites through HostGateway
+    #[serde(rename = "favorites_write")]
+    FavoritesWrite,
+
+    /// Read the current user's application settings through HostGateway
+    #[serde(rename = "user_settings_read")]
+    UserSettingsRead,
+
+    /// Write the current user's application settings through HostGateway
+    #[serde(rename = "user_settings_write")]
+    UserSettingsWrite,
 }
 
 impl std::fmt::Display for Permission {
@@ -327,6 +351,12 @@ impl std::fmt::Display for Permission {
             Permission::CacheWrite => write!(f, "CacheWrite"),
             Permission::EventPublish => write!(f, "EventPublish"),
             Permission::EventSubscribe(event_type) => write!(f, "EventSubscribe({})", event_type),
+            Permission::PlaylistsRead => write!(f, "PlaylistsRead"),
+            Permission::PlaylistsWrite => write!(f, "PlaylistsWrite"),
+            Permission::FavoritesRead => write!(f, "FavoritesRead"),
+            Permission::FavoritesWrite => write!(f, "FavoritesWrite"),
+            Permission::UserSettingsRead => write!(f, "UserSettingsRead"),
+            Permission::UserSettingsWrite => write!(f, "UserSettingsWrite"),
         }
     }
 }

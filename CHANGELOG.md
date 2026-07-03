@@ -2,6 +2,15 @@
 
 所有关于 **Ting Reader** 的重要变更都将记录在此文件中。
 
+## [1.4.9] - 2026-07-03
+
+### ✨ 新功能
+- **插件个人数据 HostGateway 接口**：插件现在可以通过 HostGateway 访问当前用户的个人数据，新增 `playlists.*`（列表/详情/创建/更新/删除/添加条目/移除条目）、`favorites.*`（列表/添加/移除）和 `user_settings.*`（读取/写入）三组接口，并配套新增 `playlists_read/write`、`favorites_read/write`、`user_settings_read/write` 六项权限，方便插件做收藏、书单和个性化设置的联动。
+- **插件升级配置自动迁移**：插件重新加载或重新安装到新版本时，会先保留旧配置，再以新版本 config schema 的默认值为基础，把旧配置中仍然存在的字段合并进来，避免升级插件后自定义配置丢失。
+
+### 🛠️ 修复与优化
+- **播放列表条目写入接口**：PlaylistRepository 新增 `add_item` / `remove_item` 方法，添加条目时按用户库与书籍访问权限做校验，并同步维护 `playlist_items` 与 `playlist_books` 的顺序和更新时间。
+
 ## [1.4.8] - 2026-07-01
 
 ### ✨ 新功能
