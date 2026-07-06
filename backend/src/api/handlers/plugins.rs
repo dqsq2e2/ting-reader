@@ -10,17 +10,19 @@ use crate::api::models::{
     ToolProviderRegistrationResponse, UninstallPluginResponse, UnverifiedPluginInstallResponse,
     UpdatePluginConfigRequest, UpdatePluginConfigResponse,
 };
+use crate::api::require_admin;
 use crate::auth::middleware::AuthUser;
 use crate::core::error::{Result, TingError};
 use crate::core::signing::{
     constant_time_eq, normalize_plugin_route_sign_path, sign_plugin_route_request,
-    signature_expires_from_ttl, signature_has_expired,
-    DEFAULT_PLUGIN_ROUTE_SIGNATURE_TTL_SECONDS, MAX_PLUGIN_ROUTE_SIGNATURE_TTL_SECONDS,
+    signature_expires_from_ttl, signature_has_expired, DEFAULT_PLUGIN_ROUTE_SIGNATURE_TTL_SECONDS,
+    MAX_PLUGIN_ROUTE_SIGNATURE_TTL_SECONDS,
 };
 use crate::db::repository::Repository;
+use crate::plugin::manager::capabilities::RegisteredCapability;
 use crate::plugin::tr_package::{self, TrPackageSignatureStatus};
 use crate::plugin::types::metadata::parse_plugin_metadata_content;
-use crate::plugin::types::{PluginCapability, PluginState};
+use crate::plugin::types::{PluginCapability, PluginMetadata, PluginState};
 use crate::plugin::PluginHostUser;
 use axum::{
     body::{Body, Bytes},
@@ -35,12 +37,36 @@ use serde_json::Value;
 use std::path::{Component, Path as FsPath, PathBuf};
 use uuid::Uuid;
 
-/// Handler for GET /api/v1/plugins - List all plugins
-pub async fn list_plugins(State(state): State<AppState>) -> Result<impl IntoResponse> {
+fn is_admin_user(user: &AuthUser) -> bool {
+    user.role == "admin"
+}
+
+fn plugin_visible_to_user(admin_only: bool, is_admin: bool) -> bool {
+    !admin_only || is_admin
+}
+
+fn require_plugin_visible(metadata: &PluginMetadata, user: &AuthUser) -> Result<()> {
+    if metadata.admin_only {
+        require_admin(user)?;
+    }
+    Ok(())
+}
+
+fn registration_visible_to_user(registration: &RegisteredCapability, is_admin: bool) -> bool {
+    plugin_visible_to_user(registration.admin_only, is_admin)
+}
+
+/// Handler for GET /api/v1/plugins - List plugins visible to the current user
+pub async fn list_plugins(
+    State(state): State<AppState>,
+    user: AuthUser,
+) -> Result<impl IntoResponse> {
+    let is_admin = is_admin_user(&user);
     let plugins = state.plugin_manager.list_plugins().await;
 
     let plugin_responses: Vec<PluginInfoResponse> = plugins
         .into_iter()
+        .filter(|info| plugin_visible_to_user(info.admin_only, is_admin))
         .map(|info| PluginInfoResponse {
             id: info.id,
             name: info.name,
@@ -65,6 +91,7 @@ pub async fn list_plugins(State(state): State<AppState>) -> Result<impl IntoResp
             repo: info.repo,
             min_core_version: info.min_core_version,
             min_flutter_version: info.min_flutter_version,
+            admin_only: info.admin_only,
             scraper: info.scraper,
             capabilities: info.capabilities,
         })
@@ -76,10 +103,12 @@ pub async fn list_plugins(State(state): State<AppState>) -> Result<impl IntoResp
 /// Handler for GET /api/v1/plugins/:id - Get plugin details
 pub async fn get_plugin_detail(
     State(state): State<AppState>,
+    user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse> {
     let plugin = state.plugin_manager.get_plugin(&id)?;
     let metadata = plugin;
+    require_plugin_visible(&metadata, &user)?;
 
     let plugins = state.plugin_manager.list_plugins().await;
     let plugin_info = plugins
@@ -100,6 +129,7 @@ pub async fn get_plugin_detail(
         repo: metadata.repo.clone(),
         min_core_version: metadata.min_core_version.clone(),
         min_flutter_version: metadata.min_flutter_version.clone(),
+        admin_only: metadata.admin_only,
         is_enabled: true, // All loaded plugins are enabled
         state: format!("{:?}", plugin_info.state).to_lowercase(),
         error: plugin_info.error.clone(),
@@ -135,6 +165,7 @@ pub async fn get_plugin_detail(
 /// Handler for POST /api/v1/plugins/install - Install a plugin
 pub async fn install_plugin(
     State(state): State<AppState>,
+    user: AuthUser,
     mut multipart: Multipart,
 ) -> Result<Response> {
     let temp_dir = std::env::temp_dir().join("ting-reader-uploads");
@@ -186,6 +217,11 @@ pub async fn install_plugin(
             let _ = tokio::fs::remove_file(&temp_path).await;
             return Err(error);
         }
+    }
+
+    if let Err(error) = validate_plugin_install_privilege(&temp_path, &user) {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return Err(error);
     }
 
     let result = state
@@ -253,11 +289,33 @@ fn unverified_plugin_install_confirmation(
     }))
 }
 
+fn validate_plugin_install_privilege(package_path: &FsPath, user: &AuthUser) -> Result<()> {
+    if package_path.is_dir() {
+        let metadata = crate::plugin::types::metadata::read_plugin_metadata(package_path)?;
+        return require_plugin_visible(&metadata, user);
+    }
+
+    if tr_package::has_tr_magic(package_path)? {
+        let metadata_content = tr_package::read_manifest_file(package_path, "plugin.yml")?;
+        let metadata = parse_plugin_metadata_content(&metadata_content, "plugin.yml")?;
+        return require_plugin_visible(&metadata, user);
+    }
+
+    Ok(())
+}
+
 /// Handler for POST /api/v1/plugins/:id/reload - Reload a plugin
 pub async fn reload_plugin(
     State(state): State<AppState>,
+    user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse> {
+    let metadata = state
+        .plugin_manager
+        .get_plugin(&id)
+        .map_err(|_| TingError::PluginNotFound(id.clone()))?;
+    require_plugin_visible(&metadata, &user)?;
+
     state.plugin_manager.reload_plugin(&id).await?;
 
     Ok(Json(ReloadPluginResponse {
@@ -268,11 +326,14 @@ pub async fn reload_plugin(
 /// Handler for DELETE /api/v1/plugins/:id - Uninstall a plugin
 pub async fn uninstall_plugin(
     State(state): State<AppState>,
+    user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse> {
-    if state.plugin_manager.get_plugin(&id).is_err() {
-        return Err(TingError::PluginNotFound(id.clone()));
-    }
+    let metadata = state
+        .plugin_manager
+        .get_plugin(&id)
+        .map_err(|_| TingError::PluginNotFound(id.clone()))?;
+    require_plugin_visible(&metadata, &user)?;
 
     state.plugin_manager.uninstall_plugin(&id).await?;
 
@@ -287,12 +348,14 @@ pub async fn uninstall_plugin(
 /// Handler for GET /api/v1/plugins/:id/config - Get plugin configuration
 pub async fn get_plugin_config(
     State(state): State<AppState>,
+    user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse> {
     let metadata = state
         .plugin_manager
         .get_plugin(&id)
         .map_err(|_| TingError::PluginNotFound(id.clone()))?;
+    require_plugin_visible(&metadata, &user)?;
 
     if let Some(ref schema) = metadata.config_schema {
         let defaults = extract_defaults_from_schema(schema);
@@ -318,6 +381,7 @@ pub async fn get_plugin_config(
 /// Handler for PUT /api/v1/plugins/:id/config - Update plugin configuration
 pub async fn update_plugin_config(
     State(state): State<AppState>,
+    user: AuthUser,
     Path(id): Path<String>,
     Json(req): Json<UpdatePluginConfigRequest>,
 ) -> Result<impl IntoResponse> {
@@ -325,6 +389,7 @@ pub async fn update_plugin_config(
         .plugin_manager
         .get_plugin(&id)
         .map_err(|_| TingError::PluginNotFound(id.clone()))?;
+    require_plugin_visible(&metadata, &user)?;
 
     // Auto-initialize or sync config schema before preserving encrypted fields.
     if let Some(ref schema) = metadata.config_schema {
@@ -351,8 +416,10 @@ pub async fn update_plugin_config(
 /// Handler for GET /api/v1/plugin-capabilities - List registered capabilities.
 pub async fn list_plugin_capabilities(
     State(state): State<AppState>,
+    user: AuthUser,
     Query(query): Query<ListPluginCapabilitiesQuery>,
 ) -> Result<impl IntoResponse> {
+    let is_admin = is_admin_user(&user);
     let capabilities = if let Some(kind) = query.kind.as_deref() {
         state.plugin_manager.find_capabilities_by_kind(kind).await
     } else {
@@ -362,6 +429,7 @@ pub async fn list_plugin_capabilities(
     Ok(Json(
         capabilities
             .into_iter()
+            .filter(|registration| registration_visible_to_user(registration, is_admin))
             .map(plugin_capability_registration_response)
             .collect::<Vec<_>>(),
     ))
@@ -370,8 +438,10 @@ pub async fn list_plugin_capabilities(
 /// Handler for GET /api/v1/plugin-capabilities/content-processors.
 pub async fn find_content_processors(
     State(state): State<AppState>,
+    user: AuthUser,
     Query(query): Query<FindContentProcessorsQuery>,
 ) -> Result<impl IntoResponse> {
+    let is_admin = is_admin_user(&user);
     let processors = state
         .plugin_manager
         .find_content_processors(&query.extension, query.operation.as_deref())
@@ -380,6 +450,7 @@ pub async fn find_content_processors(
     Ok(Json(
         processors
             .into_iter()
+            .filter(|processor| registration_visible_to_user(&processor.registration, is_admin))
             .map(|processor| plugin_capability_registration_response(processor.registration))
             .collect::<Vec<_>>(),
     ))
@@ -388,8 +459,10 @@ pub async fn find_content_processors(
 /// Handler for GET /api/v1/plugin-capabilities/tools.
 pub async fn find_tool_providers(
     State(state): State<AppState>,
+    user: AuthUser,
     Query(query): Query<FindToolProvidersQuery>,
 ) -> Result<impl IntoResponse> {
+    let is_admin = is_admin_user(&user);
     let providers = state
         .plugin_manager
         .find_tool_providers(query.name.as_deref())
@@ -398,9 +471,11 @@ pub async fn find_tool_providers(
     Ok(Json(
         providers
             .into_iter()
+            .filter(|provider| registration_visible_to_user(&provider.registration, is_admin))
             .map(|provider| ToolProviderRegistrationResponse {
                 plugin_id: provider.registration.plugin_id,
                 plugin_name: provider.registration.plugin_name,
+                admin_only: provider.registration.admin_only,
                 capability: provider.registration.capability,
                 tool: provider.tool,
             })
@@ -411,8 +486,10 @@ pub async fn find_tool_providers(
 /// Handler for GET /api/v1/plugin-capabilities/task-handlers.
 pub async fn find_task_handlers(
     State(state): State<AppState>,
+    user: AuthUser,
     Query(query): Query<FindTaskHandlersQuery>,
 ) -> Result<impl IntoResponse> {
+    let is_admin = is_admin_user(&user);
     let handlers = state
         .plugin_manager
         .find_task_handlers(query.task_type.as_deref())
@@ -421,6 +498,7 @@ pub async fn find_task_handlers(
     Ok(Json(
         handlers
             .into_iter()
+            .filter(|handler| registration_visible_to_user(&handler.registration, is_admin))
             .map(|handler| plugin_capability_registration_response(handler.registration))
             .collect::<Vec<_>>(),
     ))
@@ -429,8 +507,10 @@ pub async fn find_task_handlers(
 /// Handler for GET /api/v1/plugin-capabilities/event-handlers.
 pub async fn find_event_handlers(
     State(state): State<AppState>,
+    user: AuthUser,
     Query(query): Query<FindEventHandlersQuery>,
 ) -> Result<impl IntoResponse> {
+    let is_admin = is_admin_user(&user);
     let handlers = state
         .plugin_manager
         .find_event_handlers(query.event.as_deref())
@@ -439,17 +519,19 @@ pub async fn find_event_handlers(
     Ok(Json(
         handlers
             .into_iter()
+            .filter(|handler| registration_visible_to_user(&handler.registration, is_admin))
             .map(|handler| plugin_capability_registration_response(handler.registration))
             .collect::<Vec<_>>(),
     ))
 }
 
 fn plugin_capability_registration_response(
-    registration: crate::plugin::manager::capabilities::RegisteredCapability,
+    registration: RegisteredCapability,
 ) -> PluginCapabilityRegistrationResponse {
     PluginCapabilityRegistrationResponse {
         plugin_id: registration.plugin_id,
         plugin_name: registration.plugin_name,
+        admin_only: registration.admin_only,
         capability: registration.capability,
     }
 }
@@ -472,6 +554,7 @@ pub async fn invoke_plugin_capability(
         .plugin_manager
         .get_plugin(&id)
         .map_err(|_| TingError::PluginNotFound(id.clone()))?;
+    require_plugin_visible(&metadata, &user)?;
 
     let capability = metadata
         .effective_capabilities()
@@ -631,6 +714,10 @@ pub async fn sign_plugin_route(
             ))
         })?;
 
+    if matched.registration.admin_only {
+        require_admin(&user)?;
+    }
+
     if !plugin_route_allows_public_access(&matched.registration.capability) {
         return Err(TingError::PermissionDenied(format!(
             "Plugin route cannot be exposed through public plugin-routes: {} {}",
@@ -648,6 +735,11 @@ pub async fn sign_plugin_route(
         .bind_current_user
         .unwrap_or(true)
         .then(|| user.id.clone());
+    if matched.registration.admin_only && signed_user_id.is_none() {
+        return Err(TingError::PermissionDenied(
+            "Admin-only plugin routes must bind the current admin user".to_string(),
+        ));
+    }
     let signature = sign_plugin_route_request(
         state.encryption_key.as_ref(),
         method.as_str(),
@@ -685,6 +777,12 @@ pub async fn invoke_plugin_host(
     user: AuthUser,
     Json(req): Json<InvokePluginHostRequest>,
 ) -> Result<impl IntoResponse> {
+    let metadata = state
+        .plugin_manager
+        .get_plugin(&req.plugin_id)
+        .map_err(|_| TingError::PluginNotFound(req.plugin_id.clone()))?;
+    require_plugin_visible(&metadata, &user)?;
+
     let host_user = PluginHostUser {
         id: user.id.clone(),
         username: user.username.clone(),
@@ -817,6 +915,14 @@ async fn call_plugin_route_inner(
                 role: signed_user.role,
             });
             route_access = PluginRouteAccess::SignedUser;
+        }
+    }
+    if matched.registration.admin_only {
+        let is_route_admin = route_user.as_ref().map(is_admin_user).unwrap_or(false);
+        if !is_route_admin {
+            return Err(TingError::PermissionDenied(
+                "Admin access required for this plugin route".to_string(),
+            ));
         }
     }
 
@@ -1167,13 +1273,18 @@ pub async fn scraper_search(
 /// Handler for GET /api/v1/store/plugins - Get list of plugins from store
 pub async fn get_store_plugins(
     State(state): State<AppState>,
+    user: AuthUser,
     Query(query): Query<StorePluginsQuery>,
 ) -> Result<impl IntoResponse> {
+    let is_admin = is_admin_user(&user);
     let plugins = if query.refresh.unwrap_or(false) {
         state.plugin_manager.refresh_store_plugins().await?
     } else {
         state.plugin_manager.get_store_plugins().await?
-    };
+    }
+    .into_iter()
+    .filter(|plugin| plugin_visible_to_user(plugin.admin_only, is_admin))
+    .collect::<Vec<_>>();
     Ok(Json(plugins))
 }
 
@@ -1194,8 +1305,21 @@ pub async fn clear_plugin_cache(State(state): State<AppState>) -> Result<impl In
 /// Handler for POST /api/v1/store/install - Install a plugin from store
 pub async fn install_store_plugin(
     State(state): State<AppState>,
+    user: AuthUser,
     Json(req): Json<InstallStorePluginRequest>,
 ) -> Result<Response> {
+    if let Some(plugin) = state
+        .plugin_manager
+        .get_store_plugins()
+        .await?
+        .into_iter()
+        .find(|plugin| plugin.id == req.plugin_id)
+    {
+        if plugin.admin_only {
+            require_admin(&user)?;
+        }
+    }
+
     let temp_path = state
         .plugin_manager
         .download_plugin_from_store(&req.plugin_id)
@@ -1211,6 +1335,11 @@ pub async fn install_store_plugin(
             let _ = tokio::fs::remove_file(&temp_path).await;
             return Err(error);
         }
+    }
+
+    if let Err(error) = validate_plugin_install_privilege(&temp_path, &user) {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return Err(error);
     }
 
     let result = state

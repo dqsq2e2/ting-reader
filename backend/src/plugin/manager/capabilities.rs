@@ -9,6 +9,8 @@ use crate::plugin::types::{PluginCapability, PluginId, PluginState};
 pub struct RegisteredCapability {
     pub plugin_id: PluginId,
     pub plugin_name: String,
+    #[serde(default)]
+    pub admin_only: bool,
     pub capability: PluginCapability,
 }
 
@@ -52,11 +54,13 @@ impl PluginManager {
 
             let plugin_id = entry.metadata.instance_id();
             let plugin_name = entry.metadata.name.clone();
+            let admin_only = entry.metadata.admin_only;
 
             capabilities.extend(entry.metadata.effective_capabilities().into_iter().map(
                 |capability| RegisteredCapability {
                     plugin_id: plugin_id.clone(),
                     plugin_name: plugin_name.clone(),
+                    admin_only,
                     capability,
                 },
             ));
@@ -487,6 +491,33 @@ mod tests {
         assert_eq!(capabilities.len(), 1);
         assert_eq!(capabilities[0].plugin_id, plugin_id);
         assert_eq!(capabilities[0].capability.kind, "metadata_provider");
+    }
+
+    #[tokio::test]
+    async fn capability_registry_lists_admin_only_flag() {
+        let manager = test_manager();
+        let mut metadata = PluginMetadata::new(
+            "admin-panel".to_string(),
+            "Admin Panel".to_string(),
+            "1.0.0".to_string(),
+            PluginType::Utility,
+            "Ting Reader".to_string(),
+            "Admin panel".to_string(),
+            "plugin.js".to_string(),
+        );
+        metadata.admin_only = true;
+        metadata.capabilities.push(PluginCapability {
+            id: "admin.panel".to_string(),
+            kind: "ui_extension".to_string(),
+            invoke: Some("open".to_string()),
+            extra: BTreeMap::new(),
+        });
+        insert_metadata(&manager, metadata).await;
+
+        let capabilities = manager.list_capabilities().await;
+
+        assert_eq!(capabilities.len(), 1);
+        assert!(capabilities[0].admin_only);
     }
 
     #[tokio::test]

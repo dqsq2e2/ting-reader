@@ -83,6 +83,9 @@ pub struct PluginMetadata {
     pub min_core_version: Option<String>,
     #[serde(default)]
     pub min_flutter_version: Option<String>,
+    /// Whether this plugin should only be visible and callable by admin users.
+    #[serde(default)]
+    pub admin_only: bool,
     #[serde(default)]
     pub supported_extensions: Option<Vec<String>>,
     #[serde(default)]
@@ -189,6 +192,7 @@ impl PluginMetadata {
             config_schema: None,
             min_core_version: None,
             min_flutter_version: None,
+            admin_only: false,
             supported_extensions: None,
             scraper: None,
             capabilities: Vec::new(),

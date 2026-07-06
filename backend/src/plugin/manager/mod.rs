@@ -97,6 +97,8 @@ pub struct PluginInfo {
     #[serde(default)]
     pub min_flutter_version: Option<String>,
     #[serde(default)]
+    pub admin_only: bool,
+    #[serde(default)]
     pub scraper: Option<ScraperCapabilities>,
     #[serde(default)]
     pub capabilities: Vec<PluginCapability>,
@@ -126,6 +128,7 @@ impl PluginInfo {
             repo: metadata.repo.clone(),
             min_core_version: metadata.min_core_version.clone(),
             min_flutter_version: metadata.min_flutter_version.clone(),
+            admin_only: metadata.admin_only,
             scraper: metadata.scraper.clone(),
             capabilities: metadata.effective_capabilities(),
         }

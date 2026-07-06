@@ -107,6 +107,9 @@ pub struct StorePlugin {
     /// Minimum Flutter client version required for client-facing plugins
     #[serde(default)]
     pub min_flutter_version: Option<String>,
+    /// Whether this plugin should only be shown and used by admin users
+    #[serde(default)]
+    pub admin_only: bool,
     /// Capability declarations used by the plugin base.
     #[serde(default)]
     pub capabilities: Vec<PluginCapability>,

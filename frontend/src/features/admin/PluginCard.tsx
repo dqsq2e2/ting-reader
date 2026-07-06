@@ -95,6 +95,7 @@ type PluginCardData = {
   repo?: string;
   min_core_version?: string;
   min_flutter_version?: string;
+  admin_only?: boolean;
   dependencies?: string[];
   permissions?: string[];
   config_schema?: Record<string, unknown>;
@@ -434,6 +435,7 @@ const toInstalledCardData = (
     repo: plugin.repo || storeMeta?.repo,
     min_core_version: plugin.min_core_version || storeMeta?.min_core_version,
     min_flutter_version: plugin.min_flutter_version || storeMeta?.min_flutter_version,
+    admin_only: plugin.admin_only || storeMeta?.admin_only,
     dependencies: normalizeDependencyIds(
       plugin.dependencies || storeMeta?.dependencies,
     ),
@@ -469,6 +471,7 @@ const toStoreCardData = (
     repo: plugin.repo,
     min_core_version: plugin.min_core_version,
     min_flutter_version: plugin.min_flutter_version,
+    admin_only: plugin.admin_only,
     dependencies: normalizeDependencyIds(plugin.dependencies),
     permissions: plugin.permissions,
     config_schema: plugin.config_schema,
@@ -671,6 +674,9 @@ const PluginCard = ({
               count: permissions.length,
             })}
           </InfoChip>
+        ) : null}
+        {data.admin_only ? (
+          <InfoChip icon={<Shield size={12} />}>Admin</InfoChip>
         ) : null}
         {searchFieldCount > 0 ? (
           <InfoChip icon={<Search size={12} />}>

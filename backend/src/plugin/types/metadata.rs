@@ -98,6 +98,7 @@ pub fn parse_plugin_metadata_value(
     let repo = json["repo"].as_str().map(|s| s.to_string());
     let min_core_version = json["min_core_version"].as_str().map(|s| s.to_string());
     let min_flutter_version = json["min_flutter_version"].as_str().map(|s| s.to_string());
+    let admin_only = json["admin_only"].as_bool().unwrap_or(false);
     let mut description_i18n = localized_text_from_value(&json["description"]).unwrap_or_default();
     if let Some(text) = json["description_en"]
         .as_str()
@@ -161,6 +162,7 @@ pub fn parse_plugin_metadata_value(
         config_schema,
         min_core_version,
         min_flutter_version,
+        admin_only,
         supported_extensions,
         scraper,
         capabilities,
@@ -782,6 +784,28 @@ capabilities:
             serde_json::json!("web_container")
         );
         assert_eq!(metadata.plugin_type, PluginType::Utility);
+    }
+
+    #[test]
+    fn parses_admin_only_plugin_metadata() {
+        let manifest = r#"
+id: admin-tool
+name: Admin Tool
+version: 1.0.0
+runtime: javascript
+entry_point: plugin.js
+author: Ting Reader
+description: Admin tool
+admin_only: true
+capabilities:
+  - id: admin.panel
+    kind: ui_extension
+    invoke: open
+"#;
+
+        let metadata = parse_plugin_metadata_content(manifest, "test-plugin.yml").unwrap();
+
+        assert!(metadata.admin_only);
     }
 
     #[test]

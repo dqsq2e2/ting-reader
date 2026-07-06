@@ -58,6 +58,9 @@ pub struct PluginInfoResponse {
     /// Minimum Flutter client version required for client-facing plugins
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_flutter_version: Option<String>,
+    /// Whether this plugin is only visible/callable by admin users
+    #[serde(default)]
+    pub admin_only: bool,
     /// Scraper capability declaration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scraper: Option<ScraperCapabilities>,
@@ -110,6 +113,9 @@ pub struct PluginDetailResponse {
     /// Minimum Flutter client version required for client-facing plugins
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_flutter_version: Option<String>,
+    /// Whether this plugin is only visible/callable by admin users
+    #[serde(default)]
+    pub admin_only: bool,
     /// Whether the plugin is enabled
     pub is_enabled: bool,
     /// Plugin state
@@ -299,6 +305,9 @@ pub struct PluginCapabilityRegistrationResponse {
     pub plugin_id: String,
     /// Human-readable plugin name.
     pub plugin_name: String,
+    /// Whether the plugin is only visible/callable by admin users.
+    #[serde(default)]
+    pub admin_only: bool,
     /// Declared capability.
     pub capability: PluginCapability,
 }
@@ -340,6 +349,9 @@ pub struct ToolProviderRegistrationResponse {
     pub plugin_id: String,
     /// Human-readable plugin name.
     pub plugin_name: String,
+    /// Whether the plugin is only visible/callable by admin users.
+    #[serde(default)]
+    pub admin_only: bool,
     /// Declared tool_provider capability.
     pub capability: PluginCapability,
     /// Matched tool declaration when a name filter is provided.

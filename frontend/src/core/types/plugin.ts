@@ -20,6 +20,7 @@ export interface PluginCapability {
 export interface PluginCapabilityRegistration {
   plugin_id: string;
   plugin_name: string;
+  admin_only?: boolean;
   capability: PluginCapability;
 }
 
@@ -94,6 +95,7 @@ export interface Plugin {
   repo?: string;
   min_core_version?: string;
   min_flutter_version?: string;
+  admin_only?: boolean;
   description_i18n?: LocalizedText;
   is_enabled?: boolean;
   entry_point?: string;
@@ -131,5 +133,6 @@ export interface StorePlugin {
   config_schema?: Record<string, unknown>;
   min_core_version?: string;
   min_flutter_version?: string;
+  admin_only?: boolean;
   downloads?: { name: string; url: string }[];
 }
