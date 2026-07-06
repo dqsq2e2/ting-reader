@@ -26,6 +26,8 @@ pub mod library_watcher;
 pub mod logging;
 #[path = "security/master_key.rs"]
 pub mod master_key;
+#[path = "security/signing.rs"]
+pub mod signing;
 #[path = "books/merge_service.rs"]
 pub mod merge_service;
 #[path = "books/metadata_writer.rs"]

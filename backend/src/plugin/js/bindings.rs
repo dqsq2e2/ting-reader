@@ -302,7 +302,7 @@ pub fn create_js_runtime_with_bindings(
     fn get_client() -> &'static reqwest::Client {
         CLIENT.get_or_init(|| {
             reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
+                .timeout(std::time::Duration::from_secs(180))
                 .connect_timeout(std::time::Duration::from_secs(10))
                 .danger_accept_invalid_certs(true)
                 .no_proxy()
@@ -366,6 +366,10 @@ pub fn create_js_runtime_with_bindings(
             }
             if let Some(body) = opts.get("body").and_then(|b| b.as_str()) {
                 builder = builder.body(body.to_string());
+            }
+            if let Some(timeout_ms) = opts.get("timeout_ms").and_then(|v| v.as_u64()) {
+                let timeout_ms = timeout_ms.clamp(1_000, 600_000);
+                builder = builder.timeout(std::time::Duration::from_millis(timeout_ms));
             }
         }
 

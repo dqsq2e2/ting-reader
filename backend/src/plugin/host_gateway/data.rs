@@ -2,10 +2,17 @@ use super::{
     bool_param, required_string_param, string_param, usize_param, PluginHostGateway, PluginHostUser,
 };
 use crate::core::error::{Result, TingError};
+use crate::core::signing::{
+    normalize_plugin_route_sign_path, sign_media_stream_request, sign_plugin_route_request,
+    signature_expires_from_ttl, DEFAULT_MEDIA_SIGNATURE_TTL_SECONDS,
+    DEFAULT_PLUGIN_ROUTE_SIGNATURE_TTL_SECONDS, MAX_MEDIA_SIGNATURE_TTL_SECONDS,
+    MAX_PLUGIN_ROUTE_SIGNATURE_TTL_SECONDS,
+};
 use crate::core::task_queue::{Priority, Task, TaskPayload};
 use crate::db::models::Library;
 use crate::db::repository::Repository;
 use serde_json::{Map, Value};
+use std::collections::BTreeMap;
 
 impl PluginHostGateway {
     pub(super) async fn books_list(&self, user: &PluginHostUser, params: &Value) -> Result<Value> {
@@ -234,6 +241,159 @@ impl PluginHostGateway {
         }))
     }
 
+    pub(super) async fn media_get_signed_url(
+        &self,
+        user: &PluginHostUser,
+        params: &Value,
+    ) -> Result<Value> {
+        let chapter_id = required_string_param(params, "chapter_id")
+            .or_else(|_| required_string_param(params, "id"))?;
+        let chapter = self
+            .chapter_repo
+            .find_by_id(&chapter_id)
+            .await?
+            .ok_or_else(|| {
+                TingError::NotFound(format!("Chapter with id {} not found", chapter_id))
+            })?;
+
+        self.ensure_user_can_access_book(user, &chapter.book_id)
+            .await?;
+
+        let expires = signature_expires_from_ttl(
+            u64_param(params, "expires_in_seconds"),
+            DEFAULT_MEDIA_SIGNATURE_TTL_SECONDS,
+            MAX_MEDIA_SIGNATURE_TTL_SECONDS,
+        );
+        let transcode = string_param(params, "transcode");
+        if let Some(transcode) = transcode.as_deref() {
+            if !matches!(transcode, "hls" | "mp3" | "wav") {
+                return Err(TingError::InvalidRequest(format!(
+                    "Unsupported media transcode target: {}",
+                    transcode
+                )));
+            }
+        }
+        let seek = string_param(params, "seek");
+        let download = bool_param(params, "download").unwrap_or(false);
+        let signature = sign_media_stream_request(
+            self.encryption_key.as_ref(),
+            &chapter.id,
+            expires,
+            &user.id,
+            transcode.as_deref(),
+            seek.as_deref(),
+            download,
+        );
+
+        let mut query = vec![
+            format!("expires={}", expires),
+            format!("user={}", urlencoding::encode(&user.id)),
+        ];
+        if let Some(transcode) = transcode.as_deref() {
+            query.push(format!("transcode={}", urlencoding::encode(transcode)));
+        }
+        if let Some(seek) = seek.as_deref() {
+            query.push(format!("seek={}", urlencoding::encode(seek)));
+        }
+        if download {
+            query.push("download=1".to_string());
+        }
+        query.push(format!("signature={}", signature));
+
+        let url = format!(
+            "/api/v1/public/media/{}?{}",
+            urlencoding::encode(&chapter.id),
+            query.join("&")
+        );
+
+        Ok(serde_json::json!({
+            "chapter_id": chapter.id,
+            "book_id": chapter.book_id,
+            "url": url,
+            "expires": expires,
+            "signature": signature,
+            "user_id": user.id,
+            "requires_auth": false,
+            "auth": "signed",
+            "content_type": signed_media_content_type(&chapter.path, transcode.as_deref()),
+            "duration": chapter.duration,
+        }))
+    }
+
+    pub(super) async fn plugin_routes_sign(
+        &self,
+        plugin_id: &str,
+        user: &PluginHostUser,
+        params: &Value,
+    ) -> Result<Value> {
+        let method = string_param(params, "method")
+            .unwrap_or_else(|| "GET".to_string())
+            .to_uppercase();
+        let path = normalize_plugin_route_sign_path(&required_string_param(params, "path")?);
+        let matched = self
+            .plugin_manager
+            .find_http_route(&method, &path)
+            .await
+            .ok_or_else(|| {
+                TingError::NotFound(format!("Plugin route not found: {} {}", method, path))
+            })?;
+
+        if matched.registration.plugin_id != plugin_id {
+            return Err(TingError::PermissionDenied(format!(
+                "Plugin {} cannot sign route owned by {}",
+                plugin_id, matched.registration.plugin_id
+            )));
+        }
+
+        if !plugin_route_can_use_public_prefix(&matched.registration.capability.extra) {
+            return Err(TingError::PermissionDenied(format!(
+                "Plugin route cannot be exposed through public plugin-routes: {} {}",
+                method, path
+            )));
+        }
+
+        let expires = signature_expires_from_ttl(
+            u64_param(params, "expires_in_seconds"),
+            DEFAULT_PLUGIN_ROUTE_SIGNATURE_TTL_SECONDS,
+            MAX_PLUGIN_ROUTE_SIGNATURE_TTL_SECONDS,
+        );
+        let bind_current_user = params
+            .get("bind_current_user")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let signed_user_id = bind_current_user.then(|| user.id.clone());
+        let signature = sign_plugin_route_request(
+            self.encryption_key.as_ref(),
+            &method,
+            &path,
+            expires,
+            signed_user_id.as_deref(),
+        );
+        let signed_url = if let Some(user_id) = signed_user_id.as_deref() {
+            format!(
+                "/api/v1/public/plugin-routes{}?expires={}&user={}&signature={}",
+                path,
+                expires,
+                urlencoding::encode(user_id),
+                signature
+            )
+        } else {
+            format!(
+                "/api/v1/public/plugin-routes{}?expires={}&signature={}",
+                path, expires, signature
+            )
+        };
+
+        Ok(serde_json::json!({
+            "path": path,
+            "method": method,
+            "expires": expires,
+            "signature": signature,
+            "user_id": signed_user_id,
+            "signed_url": signed_url,
+        }))
+    }
+
     pub(super) async fn metadata_write(
         &self,
         user: &PluginHostUser,
@@ -404,6 +564,46 @@ impl PluginHostGateway {
             ))),
         }
     }
+}
+
+fn u64_param(params: &Value, name: &str) -> Option<u64> {
+    params.get(name).and_then(Value::as_u64)
+}
+
+fn signed_media_content_type(path: &str, transcode: Option<&str>) -> String {
+    match transcode {
+        Some("mp3") => "audio/mpeg".to_string(),
+        Some("wav") => "audio/wav".to_string(),
+        Some("hls") => "application/vnd.apple.mpegurl".to_string(),
+        _ => {
+            let ext = std::path::Path::new(path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            match ext.as_str() {
+                "m4a" | "mp4" => "audio/mp4".to_string(),
+                "mp3" => "audio/mpeg".to_string(),
+                "aac" => "audio/aac".to_string(),
+                "flac" => "audio/flac".to_string(),
+                "ogg" => "audio/ogg".to_string(),
+                "opus" => "audio/opus".to_string(),
+                "wav" => "audio/wav".to_string(),
+                _ => mime_guess::from_path(path)
+                    .first_or_octet_stream()
+                    .to_string(),
+            }
+        }
+    }
+}
+
+fn plugin_route_can_use_public_prefix(extra: &BTreeMap<String, Value>) -> bool {
+    let auth = extra
+        .get("route")
+        .and_then(|route| route.get("auth"))
+        .and_then(Value::as_str)
+        .unwrap_or("user");
+    matches!(auth, "public" | "signed" | "public_or_signed")
 }
 
 fn plugin_host_library_value(library: Library) -> Value {

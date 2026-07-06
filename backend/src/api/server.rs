@@ -221,6 +221,8 @@ impl ApiServer {
             task_queue.clone(),
             plugin_manager.clone(),
             plugin_cache.clone(),
+            Arc::new(encryption_key),
+            config.storage.local_storage_root.clone(),
         ));
         plugin_manager.set_host_gateway(&plugin_host_gateway);
 

@@ -2,6 +2,20 @@
 
 所有关于 **Ting Reader** 的重要变更都将记录在此文件中。
 
+## [1.5.0] - 2026-07-06
+
+### ✨ 新功能
+- **插件签名公共路由**：新增 `plugin_route_sign` 权限和签名模块，插件可以通过 HostGateway 为自己的公共 HTTP 路由（如 RSS 订阅链接）生成带签名的 URL，外部应用无需登录即可访问签名路由。
+- **签名媒体流端点**：新增 `/api/public/media/:chapterId` 公共端点，支持通过签名 URL 直接访问章节音频流，适用于 RSS 订阅等外部消费场景。
+- **HostGateway 数据与文件访问增强**：大幅扩展插件 HostGateway 的数据访问（+200 行）和文件操作（+114 行）能力，新增更多数据查询和文件管理方法。
+
+### 🛠️ 修复与优化
+- **媒体代理与流式传输改进**：优化媒体代理和 HLS 流式传输逻辑，支持签名访问和更稳定的 Range 请求处理。
+- **插件处理逻辑精简**：重构插件 API 处理器，减少约 100 行冗余代码。
+- **插件文档重组**：将旧的 js_scraper_guide、native_format_guide、wasm_scraper_guide 拆分重组为按主题组织的 capabilities、js_runtime_guide、native_runtime_guide、plugin-config、wasm_runtime_guide 五篇文档，plugin-dev.md 大幅精简。
+- **前端插件扩展改进**：优化插件扩展宿主、插槽和 Web 容器组件，支持自定义扩展图标。
+- **登录页面与书籍详情优化**：改进登录页面布局和书籍详情页头部展示。
+
 ## [1.4.9] - 2026-07-03
 
 ### ✨ 新功能

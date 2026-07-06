@@ -3,6 +3,7 @@ import { useState } from "react";
 import { invokePluginCapability } from "../../core/api/pluginCapabilities";
 import { useClientExtensions } from "../../core/hooks/useClientExtensions";
 import type { ClientExtensionDescriptor } from "../../core/pluginExtensions";
+import { usePlayerStore } from "../../core/stores/playerStore";
 import PluginExtensionIcon from "./PluginExtensionIcon";
 import PluginWebContainer from "./PluginWebContainer";
 
@@ -23,6 +24,7 @@ const PluginLauncherIcon = () => (
 
 const PluginExtensionHost = () => {
   const { registry } = useClientExtensions();
+  const hasCurrentChapter = usePlayerStore((state) => !!state.currentChapter);
   const floatingActions = registry.bySlot["global.floating_action"] || [];
   const panels = registry.bySlot["global.panel"] || [];
   const primaryActions = floatingActions.length > 0 ? floatingActions : panels;
@@ -73,7 +75,14 @@ const PluginExtensionHost = () => {
 
   return (
     <>
-      <div className="fixed bottom-[calc(var(--bottom-nav-h,0px)+1rem)] right-4 z-[90] flex flex-col items-center gap-2 xl:bottom-6">
+      <div
+        className="fixed right-4 z-[90] flex flex-col items-center gap-2"
+        style={{
+          bottom: hasCurrentChapter
+            ? "var(--safe-bottom-with-player)"
+            : "var(--safe-bottom-base)",
+        }}
+      >
         {menuOpen ? (
           <div className="mb-1 flex max-h-[min(60vh,24rem)] flex-col items-center gap-2 overflow-y-auto">
             {primaryActions.map((extension) => (

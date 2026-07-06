@@ -12,6 +12,11 @@ use crate::api::models::{
 };
 use crate::auth::middleware::AuthUser;
 use crate::core::error::{Result, TingError};
+use crate::core::signing::{
+    constant_time_eq, normalize_plugin_route_sign_path, sign_plugin_route_request,
+    signature_expires_from_ttl, signature_has_expired,
+    DEFAULT_PLUGIN_ROUTE_SIGNATURE_TTL_SECONDS, MAX_PLUGIN_ROUTE_SIGNATURE_TTL_SECONDS,
+};
 use crate::db::repository::Repository;
 use crate::plugin::tr_package::{self, TrPackageSignatureStatus};
 use crate::plugin::types::metadata::parse_plugin_metadata_content;
@@ -27,7 +32,6 @@ use axum::{
 use base64::Engine;
 use serde::Deserialize;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use std::path::{Component, Path as FsPath, PathBuf};
 use uuid::Uuid;
 
@@ -635,11 +639,11 @@ pub async fn sign_plugin_route(
         )));
     }
 
-    let ttl = req
-        .expires_in_seconds
-        .unwrap_or(DEFAULT_PLUGIN_ROUTE_SIGNATURE_TTL_SECONDS)
-        .clamp(1, MAX_PLUGIN_ROUTE_SIGNATURE_TTL_SECONDS);
-    let expires = chrono::Utc::now().timestamp() + ttl as i64;
+    let expires = signature_expires_from_ttl(
+        req.expires_in_seconds,
+        DEFAULT_PLUGIN_ROUTE_SIGNATURE_TTL_SECONDS,
+        MAX_PLUGIN_ROUTE_SIGNATURE_TTL_SECONDS,
+    );
     let signed_user_id = req
         .bind_current_user
         .unwrap_or(true)
@@ -713,9 +717,6 @@ impl PluginRouteAuthPolicy {
         matches!(self, Self::Public | Self::Signed | Self::PublicOrSigned)
     }
 }
-
-const DEFAULT_PLUGIN_ROUTE_SIGNATURE_TTL_SECONDS: u64 = 60 * 60;
-const MAX_PLUGIN_ROUTE_SIGNATURE_TTL_SECONDS: u64 = 30 * 24 * 60 * 60;
 
 fn plugin_route_context_json(access: PluginRouteAccess, user: Option<&AuthUser>) -> Value {
     let authenticated = matches!(
@@ -907,34 +908,6 @@ fn normalize_plugin_asset_path(asset_path: &str) -> Result<PathBuf> {
     Ok(normalized)
 }
 
-fn normalize_plugin_route_sign_path(path: &str) -> String {
-    let trimmed = path.trim().split('?').next().unwrap_or("").trim();
-    let normalized = if trimmed.is_empty() {
-        "/".to_string()
-    } else if trimmed.starts_with('/') {
-        trimmed.to_string()
-    } else {
-        format!("/{}", trimmed)
-    };
-
-    [
-        "/api/v1/public/plugin-routes",
-        "/api/public/plugin-routes",
-        "/api/v1/plugin-routes",
-        "/api/plugin-routes",
-    ]
-    .iter()
-    .find_map(|prefix| normalized.strip_prefix(prefix))
-    .map(|path| {
-        if path.is_empty() {
-            "/".to_string()
-        } else {
-            path.to_string()
-        }
-    })
-    .unwrap_or(normalized)
-}
-
 fn plugin_route_auth_policy(capability: &PluginCapability) -> PluginRouteAuthPolicy {
     let route = capability.extra.get("route");
     let auth = route
@@ -1015,7 +988,7 @@ fn validate_plugin_route_signature(
             TingError::PermissionDenied("Invalid plugin route signature expiry".to_string())
         })?;
 
-    if expires < chrono::Utc::now().timestamp() {
+    if signature_has_expired(expires) {
         return Err(TingError::PermissionDenied(
             "Plugin route signature has expired".to_string(),
         ));
@@ -1046,75 +1019,6 @@ fn query_param(uri: &Uri, name: &str) -> Option<String> {
         url::form_urlencoded::parse(query.as_bytes())
             .find_map(|(key, value)| (key == name).then(|| value.into_owned()))
     })
-}
-
-fn sign_plugin_route_request(
-    signing_key: &[u8; 32],
-    method: &str,
-    route_path: &str,
-    expires: i64,
-    user_id: Option<&str>,
-) -> String {
-    let payload = plugin_route_signature_payload(method, route_path, expires, user_id);
-    let signature = hmac_sha256(signing_key, payload.as_bytes());
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(signature)
-}
-
-fn plugin_route_signature_payload(
-    method: &str,
-    route_path: &str,
-    expires: i64,
-    user_id: Option<&str>,
-) -> String {
-    let base = format!("{}\n{}\n{}", method.to_uppercase(), route_path, expires);
-    match user_id {
-        Some(user_id) => format!("{}\nuser:{}", base, user_id),
-        None => base,
-    }
-}
-
-fn hmac_sha256(key: &[u8], payload: &[u8]) -> [u8; 32] {
-    const BLOCK_SIZE: usize = 64;
-
-    let mut key_block = [0_u8; BLOCK_SIZE];
-    if key.len() > BLOCK_SIZE {
-        let digest = Sha256::digest(key);
-        key_block[..digest.len()].copy_from_slice(&digest);
-    } else {
-        key_block[..key.len()].copy_from_slice(key);
-    }
-
-    let mut inner_pad = [0x36_u8; BLOCK_SIZE];
-    let mut outer_pad = [0x5c_u8; BLOCK_SIZE];
-    for index in 0..BLOCK_SIZE {
-        inner_pad[index] ^= key_block[index];
-        outer_pad[index] ^= key_block[index];
-    }
-
-    let mut inner = Sha256::new();
-    inner.update(inner_pad);
-    inner.update(payload);
-    let inner_hash = inner.finalize();
-
-    let mut outer = Sha256::new();
-    outer.update(outer_pad);
-    outer.update(inner_hash);
-    let signature = outer.finalize();
-
-    let mut out = [0_u8; 32];
-    out.copy_from_slice(&signature);
-    out
-}
-
-fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-
-    left.iter()
-        .zip(right.iter())
-        .fold(0_u8, |diff, (left, right)| diff | (*left ^ *right))
-        == 0
 }
 
 fn headers_to_json(headers: &HeaderMap) -> Value {

@@ -2,11 +2,13 @@
 
 use crate::api::handlers::AppState;
 use crate::core::error::{Result, TingError};
+use crate::db::repository::Repository;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
     response::IntoResponse,
 };
+use std::path::{Component, Path, PathBuf};
 
 /// Query parameters for cover image proxy
 #[derive(Debug, serde::Deserialize)]
@@ -18,7 +20,7 @@ pub struct ProxyCoverQuery {
 
 /// GET /api/proxy/cover - Proxy cover images (local files, external URLs, WebDAV)
 pub async fn proxy_cover(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Query(params): Query<ProxyCoverQuery>,
 ) -> Result<impl IntoResponse> {
     use axum::http::header;
@@ -96,37 +98,7 @@ pub async fn proxy_cover(
         }
     }
 
-    let normalized_path = params.path.replace('\\', "/");
-    let image_path = std::path::Path::new(&normalized_path);
-
-    let final_path = if image_path.exists() {
-        image_path.to_path_buf()
-    } else if let Ok(cwd) = std::env::current_dir() {
-        let abs_path = cwd.join(image_path);
-        if abs_path.exists() {
-            abs_path
-        } else if normalized_path.starts_with("./") {
-            let stripped = cwd.join(&normalized_path[2..]);
-            if stripped.exists() {
-                stripped
-            } else {
-                return Err(TingError::NotFound(format!(
-                    "Cover image not found: {}",
-                    params.path
-                )));
-            }
-        } else {
-            return Err(TingError::NotFound(format!(
-                "Cover image not found: {}",
-                params.path
-            )));
-        }
-    } else {
-        return Err(TingError::NotFound(format!(
-            "Cover image not found: {}",
-            params.path
-        )));
-    };
+    let final_path = resolve_cover_path(&state, &params).await?;
 
     let image_data = tokio::fs::read(&final_path).await?;
     let mime_type = mime_guess::from_path(&final_path)
@@ -140,7 +112,7 @@ pub async fn proxy_cover(
             (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".to_string()),
             (
                 header::CACHE_CONTROL,
-                "public, max-age=31536000".to_string(),
+                "no-cache, max-age=0, must-revalidate".to_string(),
             ),
             (
                 "Cross-Origin-Resource-Policy".parse().unwrap(),
@@ -150,4 +122,80 @@ pub async fn proxy_cover(
         image_data,
     )
         .into_response())
+}
+
+async fn resolve_cover_path(state: &AppState, params: &ProxyCoverQuery) -> Result<PathBuf> {
+    let normalized_path = params.path.replace('\\', "/");
+    let image_path = Path::new(&normalized_path);
+
+    if image_path.exists() {
+        return Ok(image_path.to_path_buf());
+    }
+
+    if !image_path.is_absolute() {
+        let relative = normalize_cover_relative_path(&normalized_path)?;
+
+        if let Some(book_id) = params.book_id.as_deref() {
+            if let Some(book) = state.book_repo.find_by_id(book_id).await? {
+                let candidate = Path::new(&book.path).join(&relative);
+                if candidate.exists() {
+                    return Ok(candidate);
+                }
+            }
+        }
+
+        if let Some(library_id) = params.library_id.as_deref() {
+            if let Some(library) = state.library_repo.find_by_id(library_id).await? {
+                let root_path = library.root_path.trim();
+                if !root_path.is_empty() {
+                    let candidate = Path::new(root_path).join(&relative);
+                    if candidate.exists() {
+                        return Ok(candidate);
+                    }
+                }
+            }
+        }
+
+        if let Ok(cwd) = std::env::current_dir() {
+            let candidate = cwd.join(&relative);
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    Err(TingError::NotFound(format!(
+        "Cover image not found: {}",
+        params.path
+    )))
+}
+
+fn normalize_cover_relative_path(value: &str) -> Result<PathBuf> {
+    let raw = Path::new(value.trim());
+    if raw.is_absolute() {
+        return Err(TingError::SecurityViolation(
+            "Cover image path must be relative".to_string(),
+        ));
+    }
+
+    let mut normalized = PathBuf::new();
+    for component in raw.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(TingError::SecurityViolation(
+                    "Cover image path cannot escape its base directory".to_string(),
+                ));
+            }
+        }
+    }
+
+    if normalized.as_os_str().is_empty() {
+        return Err(TingError::InvalidRequest(
+            "Cover image path is required".to_string(),
+        ));
+    }
+
+    Ok(normalized)
 }

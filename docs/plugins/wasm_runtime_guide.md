@@ -1,19 +1,19 @@
-# WASM 插件开发指南
+# WASM 运行时开发指南
 
-WASM 插件使用 Rust 语言编写并编译为 `.wasm` 文件，适合可移植的元数据解析、内容处理和计算型工具。插件仍然通过 `capabilities` 暴露能力；网络请求、数据库、存储库文件、缓存和任务等宿主能力统一通过 `ting_env` 宿主函数访问，并受 manifest 权限和当前用户上下文约束。
+WASM 运行时使用 Rust 语言编写并编译为 `.wasm` 文件，适合可移植的元数据解析、内容处理和计算型工具。插件仍然通过 `capabilities` 暴露能力；网络请求、数据库、存储库文件、缓存和任务等宿主能力统一通过 `ting_env` 宿主函数访问，并受 manifest 权限和当前用户上下文约束。
 
 ## 1. 快速开始
 
 ### 1.1 项目结构
 创建一个标准的 Rust 库项目：
 ```bash
-cargo new --lib my-scraper-wasm
+cargo new --lib my-wasm-plugin
 ```
 
 编辑 `Cargo.toml`：
 ```toml
 [package]
-name = "my-scraper-wasm"
+name = "my-wasm-plugin"
 version = "0.1.0"
 edition = "2021"
 
@@ -191,10 +191,10 @@ fn handle_search(params_json: &str) -> Result<SearchResult, String> {
 rustup target add wasm32-unknown-unknown
 cargo build --target wasm32-unknown-unknown --release
 ```
-编译产物位于 `target/wasm32-unknown-unknown/release/my_scraper_wasm.wasm`。
+编译产物位于 `target/wasm32-unknown-unknown/release/my_wasm_plugin.wasm`。
 
 ## 2. 宿主函数
-WASM 插件可以通过 `extern "C"` 调用宿主提供的功能。由于沙箱隔离，插件不能绕过宿主函数直接访问网络、数据库或存储库文件。
+WASM 运行时可以通过 `extern "C"` 调用宿主提供的功能。由于沙箱隔离，插件不能绕过宿主函数直接访问网络、数据库或存储库文件。
 
 ```rust
 #[link(wasm_import_module = "ting_env")]
@@ -266,6 +266,6 @@ fn fetch_url_custom(url: &str, method: &str, headers_json: &str, body_data: &[u8
 
 ```bash
 trpack validate .
-trpack build . --output dist/my-scraper-wasm.tr
-trpack verify dist/my-scraper-wasm.tr
+trpack build . --output dist/my-wasm-plugin.tr
+trpack verify dist/my-wasm-plugin.tr
 ```

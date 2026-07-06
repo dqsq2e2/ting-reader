@@ -4,17 +4,12 @@ import { useNavigate } from 'react-router-dom';
 import apiClient from '../../core/api/client';
 import { useAuthStore } from '../../core/stores/authStore';
 import { USER_AGREEMENT_URL, PRIVACY_POLICY_URL } from '../../core/constants/links';
-import { supportedLanguages, languageLabels, normalizeLanguage } from '../../core/i18n/locales';
-import { useAppLanguage } from '../../core/i18n/useAppLanguage';
-import { useTheme } from '../../core/hooks/useTheme';
 import { safeStorage } from '../../core/utils/storage';
 import { markSessionRestoreLogged } from '../../core/utils/sessionRestore';
-import { Languages, Lock, Moon, Server, Sun, User } from 'lucide-react';
+import { Lock, Server, User } from 'lucide-react';
 
 const LoginPage: React.FC = () => {
   const { t } = useTranslation();
-  const { theme, applyTheme } = useTheme();
-  const { language, setLanguage } = useAppLanguage();
   const [serverAddress, setServerAddress] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -30,7 +25,6 @@ const LoginPage: React.FC = () => {
   
   const navigate = useNavigate();
   const { setAuth, setServerUrl, setActiveUrl, serverUrl: storedServerUrl } = useAuthStore();
-  const isDarkTheme = theme === 'dark';
   
   // Check if running in Electron
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -125,41 +119,6 @@ const LoginPage: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
-      <div className="fixed top-4 right-4 z-10 flex items-center gap-2">
-        <label className="inline-flex h-10 items-center gap-2 rounded-full border border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 px-3 text-sm font-bold text-slate-600 dark:text-slate-300 shadow-sm backdrop-blur">
-          <Languages size={16} className="text-slate-500" />
-          <select
-            value={language}
-            aria-label={t('settings.language')}
-            onChange={(event) => {
-              void setLanguage(normalizeLanguage(event.target.value), false);
-            }}
-            className="bg-transparent outline-none cursor-pointer"
-          >
-            {supportedLanguages.map((option) => (
-              <option key={option} value={option}>
-                {languageLabels[option]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          type="button"
-          onClick={() => applyTheme(isDarkTheme ? 'light' : 'dark')}
-          aria-label={isDarkTheme ? t('settings.light') : t('settings.dark')}
-          className="inline-flex h-10 w-16 items-center rounded-full border border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 p-1 shadow-sm backdrop-blur transition-colors"
-        >
-          <span
-            className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition-transform ${
-              isDarkTheme
-                ? 'translate-x-6 bg-slate-800 text-amber-300'
-                : 'translate-x-0 bg-slate-100 text-slate-500'
-            }`}
-          >
-            {isDarkTheme ? <Moon size={16} /> : <Sun size={16} />}
-          </span>
-        </button>
-      </div>
       <div className="flex-1 flex items-center justify-center w-full">
         <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-xl p-8 space-y-8 border border-slate-200 dark:border-slate-800">
           <div className="text-center">

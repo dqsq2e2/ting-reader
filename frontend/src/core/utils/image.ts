@@ -44,8 +44,8 @@ export const getCoverUrl = (url?: string, libraryId?: string, bookId?: string) =
   if (libraryId) {
     let coverUrl = `${baseUrl}/api/proxy/cover?path=${encodeURIComponent(url)}&library_id=${libraryId}`;
     
-    if (url === 'embedded://first-chapter' && bookId) {
-      coverUrl += `&book_id=${bookId}`;
+    if (bookId) {
+      coverUrl += `&book_id=${encodeURIComponent(bookId)}`;
     }
     
     if (token) {

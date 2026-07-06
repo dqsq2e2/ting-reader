@@ -1,6 +1,6 @@
-# JavaScript 插件开发指南
+# JavaScript 运行时开发指南
 
-JavaScript 插件适合快速接入 HTTP API、解析网页、提供插件商店源、编写工具能力或轻量 UI 后端逻辑。运行时提供 `fetch`、`Ting.log`、`Ting.host.invoke` 和声明式 npm 依赖。
+JavaScript 运行时适合快速接入 HTTP API、解析网页、提供插件商店源、编写工具能力或轻量 UI 后端逻辑。它不局限于刮削；只要 capability 声明了调用入口，就可以承载工具、UI 后端、任务处理、插件商店源等能力。运行时提供 `fetch`、`Ting.log`、`Ting.host.invoke` 和声明式 npm 依赖。
 
 ## 项目结构
 
@@ -48,7 +48,7 @@ permissions:
 
 `metadata_provider` 中的 `search_fields` 决定前端搜索表单，`result_fields` 决定搜索结果可采用字段。需要进入存储库自动刮削配置时设置 `auto_scrape: true`，并提供必填书名字段。
 
-插件需要管理员填写 API 地址、密钥、开关或模型参数时，在 `plugin.yml` 顶层声明 `config_schema`。完整写法见 [插件开发指南：插件配置 config_schema](./plugin-dev.md#10-插件配置-config_schema)。
+插件需要管理员填写 API 地址、密钥、开关或模型参数时，在 `plugin.yml` 顶层声明 `config_schema`。完整写法见 [插件配置 `config_schema`](./plugin-config.md)。
 
 ```yaml
 config_schema:

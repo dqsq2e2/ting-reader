@@ -223,7 +223,7 @@ const PluginWebContainer = ({
           ref={iframeRef}
           srcDoc={srcDoc}
           title={extension.title || extension.capability.id}
-          sandbox="allow-scripts allow-forms"
+          sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
           className="h-full w-full border-0 bg-white dark:bg-slate-950"
           onLoad={handleLoad}
         />

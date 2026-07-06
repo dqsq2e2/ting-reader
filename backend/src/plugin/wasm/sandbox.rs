@@ -283,6 +283,10 @@ pub enum Permission {
     #[serde(rename = "media_read_url")]
     MediaReadUrl,
 
+    /// Sign this plugin's public HTTP routes through HostGateway
+    #[serde(rename = "plugin_route_sign")]
+    PluginRouteSign,
+
     /// Write metadata through HostGateway
     #[serde(rename = "metadata_write")]
     MetadataWrite,
@@ -345,6 +349,7 @@ impl std::fmt::Display for Permission {
             Permission::ProgressRead => write!(f, "ProgressRead"),
             Permission::MediaRead => write!(f, "MediaRead"),
             Permission::MediaReadUrl => write!(f, "MediaReadUrl"),
+            Permission::PluginRouteSign => write!(f, "PluginRouteSign"),
             Permission::MetadataWrite => write!(f, "MetadataWrite"),
             Permission::TaskCreate => write!(f, "TaskCreate"),
             Permission::CacheRead => write!(f, "CacheRead"),

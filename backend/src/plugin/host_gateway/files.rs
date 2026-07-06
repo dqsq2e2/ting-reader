@@ -3,8 +3,10 @@ use super::{
 };
 use crate::core::error::{Result, TingError};
 use crate::db::models::Library;
+use crate::db::repository::Repository;
 use base64::{engine::general_purpose, Engine as _};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::path::{Component, Path, PathBuf};
 
 const MAX_HOST_FILE_READ_BYTES: u64 = 20 * 1024 * 1024;
@@ -71,9 +73,13 @@ impl PluginHostGateway {
         user: &PluginHostUser,
         params: &Value,
     ) -> Result<Value> {
-        let (library, root, target, relative_path) = self
-            .resolve_library_file_target(user, params, false, false)
-            .await?;
+        let (library, root, target, relative_path) =
+            if string_param(params, "relative_to").as_deref() == Some("book") {
+                self.resolve_book_file_target(user, params).await?
+            } else {
+                self.resolve_library_file_target(user, params, false, false)
+                    .await?
+            };
         let metadata = tokio::fs::metadata(&target).await?;
         if !metadata.is_file() {
             return Err(TingError::InvalidRequest(format!(
@@ -117,9 +123,13 @@ impl PluginHostGateway {
             ));
         }
 
-        let (library, root, target, relative_path) = self
-            .resolve_library_file_target(user, params, false, true)
-            .await?;
+        let (library, root, target, relative_path) =
+            if string_param(params, "relative_to").as_deref() == Some("book") {
+                self.resolve_book_file_target(user, params).await?
+            } else {
+                self.resolve_library_file_target(user, params, false, true)
+                    .await?
+            };
         let bytes = library_file_write_bytes(params)?;
         if bytes.len() > MAX_HOST_FILE_WRITE_BYTES {
             return Err(TingError::ResourceLimitExceeded(format!(
@@ -172,7 +182,7 @@ impl PluginHostGateway {
             .ok_or_else(|| {
                 TingError::NotFound(format!("Library with id {} not found", library_id))
             })?;
-        let root = local_library_root(&library)?;
+        let root = self.local_library_root(&library)?;
         let requested_path = string_param(params, "path")
             .or_else(|| string_param(params, "relative_path"))
             .unwrap_or_default();
@@ -197,9 +207,87 @@ impl PluginHostGateway {
             relative.to_string_lossy().replace('\\', "/"),
         ))
     }
+
+    async fn resolve_book_file_target(
+        &self,
+        user: &PluginHostUser,
+        params: &Value,
+    ) -> Result<(Library, PathBuf, PathBuf, String)> {
+        let library_id = required_string_param(params, "library_id")?;
+        let book_id = required_string_param(params, "book_id")?;
+        self.ensure_user_can_access_library(user, &library_id)
+            .await?;
+        self.ensure_user_can_access_book(user, &book_id).await?;
+
+        let library = self
+            .library_repo
+            .find_by_id(&library_id)
+            .await?
+            .ok_or_else(|| {
+                TingError::NotFound(format!("Library with id {} not found", library_id))
+            })?;
+        let book = self
+            .book_repo
+            .find_by_id(&book_id)
+            .await?
+            .ok_or_else(|| TingError::NotFound(format!("Book with id {} not found", book_id)))?;
+        if book.library_id != library.id {
+            return Err(TingError::InvalidRequest(format!(
+                "Book {} does not belong to library {}",
+                book_id, library_id
+            )));
+        }
+
+        let requested_path = string_param(params, "path")
+            .or_else(|| string_param(params, "relative_path"))
+            .unwrap_or_default();
+        let relative = normalize_library_relative_path(&requested_path, false)?;
+        let (root, book_dir) = self.book_file_base_dir(&library, &book.path)?;
+        let target = book_dir.join(&relative);
+        let relative_path = target.to_string_lossy().replace('\\', "/");
+
+        if let Some(parent) = target.parent() {
+            if parent.exists() {
+                ensure_canonical_child(&root, parent)?;
+            }
+        }
+
+        Ok((library, root, target, relative_path))
+    }
 }
 
-fn local_library_root(library: &Library) -> Result<PathBuf> {
+fn book_file_base_dir_with_root(
+    local_storage_root: &Path,
+    library: &Library,
+    book_path: &str,
+) -> Result<(PathBuf, PathBuf)> {
+    if library.library_type == "local" {
+        let root = local_library_root_with_base(local_storage_root, library)?;
+        let book_dir = PathBuf::from(book_path);
+        let canonical_book_dir = std::fs::canonicalize(&book_dir)?;
+        ensure_path_inside(&root, &canonical_book_dir)?;
+        return Ok((root, canonical_book_dir));
+    }
+
+    let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let mut hasher = Sha256::new();
+    hasher.update(book_path.as_bytes());
+    let book_hash = format!("{:x}", hasher.finalize());
+    Ok((root.clone(), root.join("temp").join(book_hash)))
+}
+
+fn local_library_root_with_base(local_storage_root: &Path, library: &Library) -> Result<PathBuf> {
+    if library.library_type == "local" {
+        let root = std::fs::canonicalize(local_storage_root.join(library.url.trim()))?;
+        if !root.is_dir() {
+            return Err(TingError::InvalidRequest(format!(
+                "Library {} root path is not a directory",
+                library.id
+            )));
+        }
+        return Ok(root);
+    }
+
     let root = library.root_path.trim();
     if root.is_empty() {
         return Err(TingError::InvalidRequest(format!(
@@ -216,6 +304,16 @@ fn local_library_root(library: &Library) -> Result<PathBuf> {
         )));
     }
     Ok(root)
+}
+
+impl PluginHostGateway {
+    fn local_library_root(&self, library: &Library) -> Result<PathBuf> {
+        local_library_root_with_base(&self.local_storage_root, library)
+    }
+
+    fn book_file_base_dir(&self, library: &Library, book_path: &str) -> Result<(PathBuf, PathBuf)> {
+        book_file_base_dir_with_root(&self.local_storage_root, library, book_path)
+    }
 }
 
 fn normalize_library_relative_path(value: &str, allow_empty: bool) -> Result<PathBuf> {

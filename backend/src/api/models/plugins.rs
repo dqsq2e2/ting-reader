@@ -244,7 +244,7 @@ pub struct SignPluginRouteRequest {
     pub method: String,
     /// Declared plugin route path, e.g. /rss/main.xml.
     pub path: String,
-    /// Optional TTL in seconds. The server clamps this to a safe upper bound.
+    /// Optional TTL in seconds. Use 0 for a non-expiring signature; positive values are clamped to a safe upper bound.
     pub expires_in_seconds: Option<u64>,
     /// Whether the signed public URL should carry the current user's context.
     /// Defaults to true so external RSS/feed URLs can still use user-scoped HostGateway reads.
@@ -256,7 +256,7 @@ pub struct SignPluginRouteRequest {
 pub struct SignPluginRouteResponse {
     /// Normalized plugin route path.
     pub path: String,
-    /// Unix timestamp when the signature expires.
+    /// Unix timestamp when the signature expires. 0 means the signature does not expire.
     pub expires: i64,
     /// URL-safe signature string.
     pub signature: String,

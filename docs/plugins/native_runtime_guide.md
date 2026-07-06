@@ -1,21 +1,21 @@
-# Native 插件开发指南
+# Native 运行时开发指南
 
-Native 插件使用 Rust 语言编写并编译为动态链接库（`.dll`, `.so`, `.dylib`），适合平台相关能力：格式处理、流式解密、系统库调用、FFmpeg 供应等。Native 插件通过 `capabilities` 声明能力，发布时需要按服务端平台分别打包。
+Native 运行时使用 Rust 语言编写并编译为动态链接库（`.dll`, `.so`, `.dylib`），适合平台相关能力：格式处理、流式解密、系统库调用、FFmpeg 供应等。Native 运行时仍通过 `capabilities` 声明能力，发布时需要按服务端平台分别打包。
 
-**注意**: Native 插件具有完全的系统访问权限，开发和使用时需谨慎。
+**注意**: Native 运行时具有完全的系统访问权限，开发和使用时需谨慎。
 
 ## 1. 快速开始
 
 ### 1.1 项目结构
 创建一个新的 Rust 库项目：
 ```bash
-cargo new --lib my-format-plugin
+cargo new --lib my-native-plugin
 ```
 
 编辑 `Cargo.toml`：
 ```toml
 [package]
-name = "my-format-plugin"
+name = "my-native-plugin"
 version = "0.1.0"
 edition = "2021"
 
@@ -31,11 +31,11 @@ serde_json = "1.0"
 提供插件声明文件 `plugin.yml`（详情请参考 [插件开发指南](./plugin-dev.md)）。格式插件通过 `format_handler` 能力声明支持的扩展名：
 
 ```yaml
-id: my-format-plugin
-name: My Format Plugin
+id: my-native-runtime-demo
+name: My Native Runtime Demo
 version: 1.0.0
 runtime: native
-entry_point: my_format_plugin.dll
+entry_point: my_native_plugin.dll
 capabilities:
   - id: format.handler
     kind: format_handler
@@ -131,17 +131,17 @@ cargo build --release
 
 ### 1.4 HostGateway（可选）
 
-Native 插件需要读取书籍、存储库文件、缓存或受控数据库实体时，应通过 HostGateway，而不是直接访问 Ting Reader 数据库文件。插件可选导出 `plugin_set_host_api` 接收宿主函数表；在 `plugin_invoke` 执行期间调用 `host_invoke(method, params_json, result_ptr)`，并使用 `host_free` 释放返回字符串。
+Native 运行时需要读取书籍、存储库文件、缓存或受控数据库实体时，应通过 HostGateway，而不是直接访问 Ting Reader 数据库文件。插件可选导出 `plugin_set_host_api` 接收宿主函数表；在 `plugin_invoke` 执行期间调用 `host_invoke(method, params_json, result_ptr)`，并使用 `host_free` 释放返回字符串。
 
 HostGateway 方法、权限、返回格式和错误码见 [HostGateway 能力调用详解](./hostgateway.md)。调用依赖当前认证用户上下文；公共路由、初始化和后台无用户上下文的场景会被拒绝。
 
 ## 2. 部署
-将编译好的动态库文件放在 `plugin.yml` 同级，然后使用 `trpack build` 打包为 `.tr` 文件。Native 插件必须与宿主程序的操作系统和架构匹配，常用平台名包括 `windows-x86_64`、`linux-x86_64`、`linux-aarch64`。
+将编译好的动态库文件放在 `plugin.yml` 同级，然后使用 `trpack build` 打包为 `.tr` 文件。Native 运行时必须与宿主程序的操作系统和架构匹配，常用平台名包括 `windows-x86_64`、`linux-x86_64`、`linux-aarch64`。
 
 ```bash
 trpack validate .
-trpack build . --platform-tag windows-x86_64 --output dist/my-format-plugin-1.0.0-windows-x86_64.tr
-trpack verify dist/my-format-plugin-1.0.0-windows-x86_64.tr
+trpack build . --platform-tag windows-x86_64 --output dist/my-native-plugin-1.0.0-windows-x86_64.tr
+trpack verify dist/my-native-plugin-1.0.0-windows-x86_64.tr
 ```
 
 如果插件随包携带 FFmpeg 等二进制工具，建议放在 `bin/` 目录，并用 `tool_provider` 能力返回实际路径，不要让核心后端写死工具位置：
@@ -177,7 +177,7 @@ fn get_decryption_plan(params: Value) -> Result<Value, String> {
 ## 4. 转码支持 (可选)
 如果你的插件不需要 FFmpeg 转码（即可以直接输出 PCM/WAV/AAC 流），或者需要明确告知宿主程序不支持某些转码操作，请实现 `get_stream_url` 方法。
 
-对于不需要转码支持的插件（例如自身负责解码的 Native 插件），应返回空对象以避免后端日志报错：
+对于不需要转码支持的插件（例如自身负责解码的 Native 运行时插件），应返回空对象以避免后端日志报错：
 
 ```rust
 fn get_stream_url(_params: Value) -> Result<Value, String> {

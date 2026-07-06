@@ -1,6 +1,8 @@
 //! API routes
 
-use crate::api::handlers::media::stream::{get_hls_playlist, get_hls_segment, seek_hls_stream};
+use crate::api::handlers::media::stream::{
+    get_hls_playlist, get_hls_segment, seek_hls_stream, stream_signed_chapter,
+};
 use crate::api::handlers::{
     add_favorite,
     apply_scrape_result,
@@ -158,7 +160,15 @@ pub fn build_api_routes(state: AppState) -> Router {
             get(get_hls_playlist),
         )
         .route("/api/stream/hls/:sessionId/:filename", get(get_hls_segment))
-        .route("/api/stream/hls/:sessionId/seek", post(seek_hls_stream));
+        .route("/api/stream/hls/:sessionId/seek", post(seek_hls_stream))
+        .route(
+            "/api/v1/public/media/:chapterId",
+            get(stream_signed_chapter).head(stream_signed_chapter),
+        )
+        .route(
+            "/api/public/media/:chapterId",
+            get(stream_signed_chapter).head(stream_signed_chapter),
+        );
 
     // Protected routes (authentication required)
     let protected_routes = Router::new()

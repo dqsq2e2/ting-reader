@@ -13,6 +13,7 @@ use crate::plugin::manager::PluginManager;
 use crate::plugin::wasm::sandbox::Permission;
 use crate::plugin::PluginCache;
 use serde_json::Value;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock, Weak};
 
 #[derive(Clone)]
@@ -27,6 +28,8 @@ pub struct PluginHostGateway {
     task_queue: Arc<TaskQueue>,
     plugin_manager: Arc<PluginManager>,
     plugin_cache: Arc<PluginCache>,
+    encryption_key: Arc<[u8; 32]>,
+    local_storage_root: PathBuf,
 }
 
 #[derive(Clone, Default)]
@@ -86,6 +89,7 @@ pub enum PluginHostPermission {
     ChaptersRead,
     ProgressRead,
     MediaReadUrl,
+    PluginRouteSign,
     MetadataWrite,
     LibraryFileRead,
     LibraryFileWrite,
@@ -115,6 +119,8 @@ impl PluginHostGateway {
         task_queue: Arc<TaskQueue>,
         plugin_manager: Arc<PluginManager>,
         plugin_cache: Arc<PluginCache>,
+        encryption_key: Arc<[u8; 32]>,
+        local_storage_root: PathBuf,
     ) -> Self {
         Self {
             book_repo,
@@ -127,6 +133,8 @@ impl PluginHostGateway {
             task_queue,
             plugin_manager,
             plugin_cache,
+            encryption_key,
+            local_storage_root,
         }
     }
 
@@ -182,7 +190,8 @@ impl PluginHostGateway {
             }
             "chapters.list" | "chapters.get" => Some(PluginHostPermission::ChaptersRead),
             "progress.recent" => Some(PluginHostPermission::ProgressRead),
-            "media.get_url" => Some(PluginHostPermission::MediaReadUrl),
+            "media.get_url" | "media.get_signed_url" => Some(PluginHostPermission::MediaReadUrl),
+            "plugin_routes.sign" => Some(PluginHostPermission::PluginRouteSign),
             "metadata.write" => Some(PluginHostPermission::MetadataWrite),
             "library.file.list" | "library.file.stat" | "library.file.read" => {
                 Some(PluginHostPermission::LibraryFileRead)
@@ -222,6 +231,7 @@ impl PluginHostGateway {
                     | (PluginHostPermission::ProgressRead, Permission::DatabaseRead)
                     | (PluginHostPermission::MediaReadUrl, Permission::MediaReadUrl)
                     | (PluginHostPermission::MediaReadUrl, Permission::MediaRead)
+                    | (PluginHostPermission::PluginRouteSign, Permission::PluginRouteSign)
                     | (
                         PluginHostPermission::MetadataWrite,
                         Permission::MetadataWrite
@@ -299,6 +309,8 @@ impl PluginHostGateway {
             "chapters.get" => self.chapters_get(user, &params).await,
             "progress.recent" => self.progress_recent(user, &params).await,
             "media.get_url" => self.media_get_url(user, &params).await,
+            "media.get_signed_url" => self.media_get_signed_url(user, &params).await,
+            "plugin_routes.sign" => self.plugin_routes_sign(plugin_id, user, &params).await,
             "metadata.write" => self.metadata_write(user, &params).await,
             "library.file.list" => self.library_file_list(user, &params).await,
             "library.file.stat" => self.library_file_stat(user, &params).await,
@@ -443,6 +455,14 @@ mod tests {
             Some(PluginHostPermission::MediaReadUrl)
         );
         assert_eq!(
+            PluginHostGateway::required_permission("media.get_signed_url"),
+            Some(PluginHostPermission::MediaReadUrl)
+        );
+        assert_eq!(
+            PluginHostGateway::required_permission("plugin_routes.sign"),
+            Some(PluginHostPermission::PluginRouteSign)
+        );
+        assert_eq!(
             PluginHostGateway::required_permission("metadata.write"),
             Some(PluginHostPermission::MetadataWrite)
         );
@@ -490,6 +510,10 @@ mod tests {
         assert!(PluginHostGateway::has_permission(
             &[Permission::MediaRead],
             PluginHostPermission::MediaReadUrl
+        ));
+        assert!(PluginHostGateway::has_permission(
+            &[Permission::PluginRouteSign],
+            PluginHostPermission::PluginRouteSign
         ));
         assert!(!PluginHostGateway::has_permission(
             &[Permission::BooksRead],

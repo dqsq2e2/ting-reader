@@ -394,6 +394,7 @@ fn parse_permissions(json: &Value) -> Vec<Permission> {
                 "progress_read" => Some(Permission::ProgressRead),
                 "media_read" => Some(Permission::MediaRead),
                 "media_read_url" => Some(Permission::MediaReadUrl),
+                "plugin_route_sign" => Some(Permission::PluginRouteSign),
                 "metadata_write" => Some(Permission::MetadataWrite),
                 "task_create" => Some(Permission::TaskCreate),
                 "cache_read" => Some(Permission::CacheRead),
@@ -802,6 +803,7 @@ permissions:
   - type: chapters_read
   - type: progress_read
   - type: media_read_url
+  - type: plugin_route_sign
   - type: network_access
     value: example.com
 "#;
@@ -812,6 +814,7 @@ permissions:
         assert!(metadata.permissions.contains(&Permission::ChaptersRead));
         assert!(metadata.permissions.contains(&Permission::ProgressRead));
         assert!(metadata.permissions.contains(&Permission::MediaReadUrl));
+        assert!(metadata.permissions.contains(&Permission::PluginRouteSign));
         assert!(metadata
             .permissions
             .contains(&Permission::NetworkAccess("example.com".to_string())));

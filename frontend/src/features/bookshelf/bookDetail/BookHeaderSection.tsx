@@ -206,10 +206,10 @@ const BookHeaderSection: React.FC<Props> = ({
             )}
           </button>
 
-          <div className="w-full flex gap-2 sm:gap-3">
+          <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(6rem,1fr))] sm:gap-3">
             <button
               onClick={onToggleFavorite}
-              className={`flex-1 min-w-0 px-3 sm:px-4 py-3 rounded-2xl border transition-all active:scale-95 flex items-center justify-center gap-2 font-bold text-sm ${
+              className={`w-full min-w-0 px-3 sm:px-4 py-3 rounded-2xl border transition-all active:scale-95 flex items-center justify-center gap-2 font-bold text-sm ${
                 isFavorite
                   ? "bg-red-50 border-red-100 text-red-500 dark:bg-red-900/20 dark:border-red-900/30"
                   : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-red-500"
@@ -223,7 +223,7 @@ const BookHeaderSection: React.FC<Props> = ({
               <>
                 <button
                   onClick={onOpenScrapeDiff}
-                  className="flex-1 min-w-0 px-3 sm:px-4 py-3 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center gap-2 font-bold text-sm"
+                  className="w-full min-w-0 px-3 sm:px-4 py-3 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center gap-2 font-bold text-sm"
                   title={t("bookshelf.scrapeMetadata")}
                 >
                   <RefreshCw size={20} />
@@ -231,28 +231,29 @@ const BookHeaderSection: React.FC<Props> = ({
                 </button>
                 <button
                   onClick={onOpenEditModal}
-                  className="flex-1 min-w-0 px-3 sm:px-4 py-3 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center gap-2 font-bold text-sm"
+                  className="w-full min-w-0 px-3 sm:px-4 py-3 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center gap-2 font-bold text-sm"
                 >
                   <Edit size={20} />
                   {t("common.edit")}
                 </button>
               </>
             )}
+            <PluginExtensionSlot
+              slot="book.detail_action"
+              className="relative min-w-0"
+              buttonClassName="w-full min-w-0 px-3 sm:px-4 py-3 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center gap-2 font-bold text-sm"
+              menuLabel={t("bookshelf.more")}
+              context={{
+                book_id: book.id,
+                book_title: book.title,
+                book_path: book.path,
+                library_id: book.library_id || displayLibraryId,
+                author: book.author,
+                narrator: book.narrator,
+                chapter_count: chapterTotalCount,
+              }}
+            />
           </div>
-
-          <PluginExtensionSlot
-            slot="book.detail_action"
-            className="flex justify-center gap-2 md:justify-start"
-            context={{
-              book_id: book.id,
-              book_title: book.title,
-              book_path: book.path,
-              library_id: book.library_id || displayLibraryId,
-              author: book.author,
-              narrator: book.narrator,
-              chapter_count: chapterTotalCount,
-            }}
-          />
         </div>
 
         <div

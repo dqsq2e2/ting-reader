@@ -1,4 +1,4 @@
-import { Loader2, X } from "lucide-react";
+import { Loader2, MoreHorizontal, X } from "lucide-react";
 import type { FormEvent, ReactNode } from "react";
 import { useEffect, useState } from "react";
 import {
@@ -19,6 +19,9 @@ type PluginExtensionSlotProps = {
   context?: Record<string, unknown>;
   className?: string;
   buttonClassName?: string;
+  showLabel?: boolean;
+  menuLabel?: string;
+  menuClassName?: string;
   limit?: number;
   empty?: ReactNode;
 };
@@ -92,6 +95,9 @@ const PluginExtensionSlot = ({
   context,
   className = "flex items-center gap-1",
   buttonClassName = defaultButtonClassName,
+  showLabel = false,
+  menuLabel,
+  menuClassName = "absolute right-0 top-full z-30 mt-2 min-w-44 overflow-hidden rounded-lg border border-slate-200 bg-white p-1 shadow-xl shadow-slate-900/10 dark:border-slate-700 dark:bg-slate-900 dark:shadow-slate-950/30",
   limit,
   empty = null,
 }: PluginExtensionSlotProps) => {
@@ -105,6 +111,7 @@ const PluginExtensionSlot = ({
     "idle" | "running" | "success" | "error"
   >("idle");
   const [actionMessage, setActionMessage] = useState<string>();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   if (visibleExtensions.length === 0) {
     return <>{empty}</>;
@@ -143,6 +150,7 @@ const PluginExtensionSlot = ({
   };
 
   const openExtension = (extension: ClientExtensionDescriptor) => {
+    setMenuOpen(false);
     if (
       extension.renderMode === "web_container" ||
       extension.renderMode === "schema" ||
@@ -160,7 +168,42 @@ const PluginExtensionSlot = ({
   return (
     <>
       <div className={className}>
-        {visibleExtensions.map((extension) => (
+        {menuLabel ? (
+          <>
+            <button
+              type="button"
+              onClick={() => setMenuOpen((open) => !open)}
+              className={buttonClassName}
+              title={menuLabel}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+            >
+              <MoreHorizontal size={18} />
+              <span className="truncate">{menuLabel}</span>
+            </button>
+            {menuOpen ? (
+              <div className={menuClassName} role="menu">
+                {visibleExtensions.map((extension) => (
+                  <button
+                    key={extension.id}
+                    type="button"
+                    onClick={() => openExtension(extension)}
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-primary-700 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-primary-300"
+                    title={extensionLabel(extension)}
+                    role="menuitem"
+                  >
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                      <PluginExtensionIcon extension={extension} size={16} />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {extensionLabel(extension)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </>
+        ) : visibleExtensions.map((extension) => (
           <button
             key={extension.id}
             type="button"
@@ -169,6 +212,9 @@ const PluginExtensionSlot = ({
             title={extensionLabel(extension)}
           >
             <PluginExtensionIcon extension={extension} size={17} />
+            {showLabel ? (
+              <span className="truncate">{extensionLabel(extension)}</span>
+            ) : null}
           </button>
         ))}
       </div>

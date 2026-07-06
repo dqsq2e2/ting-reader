@@ -113,6 +113,8 @@ WASM 的 `host_invoke` 返回响应句柄；负数表示桥接层错误，例如
 | `chapters.get` | `chapters_read` 或 `database_read` | 读取单个章节 |
 | `progress.recent` | `progress_read` 或 `database_read` | 读取当前用户最近播放进度 |
 | `media.get_url` | `media_read_url` 或 `media_read` | 获取受控播放地址 |
+| `media.get_signed_url` | `media_read_url` 或 `media_read` | 获取绑定当前用户权限的公开签名播放地址 |
+| `plugin_routes.sign` | `plugin_route_sign` | 为当前插件自己声明的公开插件路由生成签名 URL |
 | `metadata.write` | `metadata_write` | 创建元数据写入任务，需要管理员 |
 | `library.file.list` | `file_read` | 列出本地存储库目录 |
 | `library.file.stat` | `file_read` | 读取本地存储库文件或目录信息 |
@@ -324,6 +326,48 @@ const media = await Ting.host.invoke("media.get_url", {
   "auth": "current_user"
 }
 ```
+
+### media.get_signed_url
+
+生成可给外部 RSS/播客客户端访问的公开签名媒体地址。签名绑定当前用户，公共路由会恢复该用户上下文并重新校验书籍访问权限。
+
+```javascript
+const media = await Ting.host.invoke("media.get_signed_url", {
+  chapter_id: "chapter-id",
+  transcode: "mp3",
+  expires_in_seconds: 365 * 24 * 60 * 60
+});
+```
+
+`expires_in_seconds` 传 `0` 表示永久有效；传正数时服务端会按安全上限截断。
+
+返回：
+
+```json
+{
+  "chapter_id": "chapter-id",
+  "book_id": "book-id",
+  "url": "/api/v1/public/media/chapter-id?expires=...&user=user-id&signature=...",
+  "requires_auth": false,
+  "auth": "signed",
+  "content_type": "audio/mpeg"
+}
+```
+
+### plugin_routes.sign
+
+为当前插件自己声明、且 `auth` 为 `public` / `signed` / `public_or_signed` 的 `http_route` 生成签名 URL。不能给其他插件或私有路由签名。
+
+```javascript
+const signed = await Ting.host.invoke("plugin_routes.sign", {
+  method: "GET",
+  path: "/rss/book/book-id.xml",
+  expires_in_seconds: 30 * 24 * 60 * 60,
+  bind_current_user: true
+});
+```
+
+`expires_in_seconds` 传 `0` 表示永久有效；传正数时服务端会按安全上限截断。
 
 ## 5. 库文件读写
 
@@ -543,6 +587,33 @@ const cached = await Ting.host.invoke("cache.get", {
 
 `web_container` UI 页面不能直接拿到后端对象，需要通过 `postMessage` 调用宿主。
 
+页面加载后宿主会发送初始化消息：
+
+```json
+{
+  "type": "ting-plugin:init",
+  "pluginId": "assistant-tools@1.0.0",
+  "pluginName": "Assistant Tools",
+  "capabilityId": "assistant.panel",
+  "slot": "global.floating_action",
+  "contexts": ["global"],
+  "context": {
+    "book_id": "book-id"
+  },
+  "theme": {
+    "colorScheme": "dark",
+    "brightness": "dark",
+    "cssVariables": {
+      "--bg": "#020617",
+      "--panel": "#0f172a",
+      "--text": "#f8fafc"
+    }
+  }
+}
+```
+
+Web 客户端当前不会附带 `theme` 字段；Flutter 客户端会附带并注入主题变量。插件 UI 应把 `theme` 当成可选字段处理。Flutter 端主题变化时还会发送 `ting-plugin:theme` 消息，并设置 `window.__tingPluginTheme`、`data-ting-theme`、`data-theme`、`dark/light` class 和 CSS 变量。
+
 ```javascript
 const id = crypto.randomUUID();
 
@@ -598,9 +669,17 @@ window.parent.postMessage({
 }, "*");
 ```
 
+外部链接可以使用普通浏览器写法：
+
+```html
+<a href="https://example.com/register" target="_blank" rel="noopener noreferrer">注册服务</a>
+```
+
+Web 端 iframe 允许弹窗逃离 sandbox；Flutter 端会拦截非插件资产的 `http/https` 导航、`target="_blank"` 和 `window.open()`，再交给系统浏览器打开。插件不需要用 `window.open()` 返回值判断是否成功，因为某些 WebView 即使已经打开外部浏览器也可能返回 `null`。
+
 ## 9. WASM 桥接
 
-WASM 插件通过 `ting_env` 导入函数调用 HostGateway：
+WASM 运行时通过 `ting_env` 导入函数调用 HostGateway：
 
 ```rust
 #[link(wasm_import_module = "ting_env")]
@@ -640,7 +719,7 @@ extern "C" {
 
 ## 10. Native 桥接
 
-Native 插件可以导出 `plugin_set_host_api` 接收宿主 API：
+Native 运行时可以导出 `plugin_set_host_api` 接收宿主 API：
 
 ```rust
 #[repr(C)]
