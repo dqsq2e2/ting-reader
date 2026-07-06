@@ -9,10 +9,11 @@ use crate::core::signing::{
     MAX_PLUGIN_ROUTE_SIGNATURE_TTL_SECONDS,
 };
 use crate::core::task_queue::{Priority, Task, TaskPayload};
-use crate::db::models::Library;
+use crate::db::models::{Book, Library};
 use crate::db::repository::Repository;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 impl PluginHostGateway {
     pub(super) async fn books_list(&self, user: &PluginHostUser, params: &Value) -> Result<Value> {
@@ -514,11 +515,16 @@ impl PluginHostGateway {
                     self.book_repo.find_by_id(&id).await?.ok_or_else(|| {
                         TingError::NotFound(format!("Book with id {} not found", id))
                     })?;
+                let cover_url_patched = patch.contains_key("cover_url");
+                let theme_color_patched = patch.contains_key("theme_color");
                 patch_optional_string(patch, "title", &mut book.title)?;
                 patch_optional_string(patch, "author", &mut book.author)?;
                 patch_optional_string(patch, "narrator", &mut book.narrator)?;
                 patch_optional_string(patch, "cover_url", &mut book.cover_url)?;
                 patch_optional_string(patch, "theme_color", &mut book.theme_color)?;
+                if cover_url_patched && !theme_color_patched {
+                    book.theme_color = self.calculate_book_cover_theme_color(&book).await;
+                }
                 patch_optional_string(patch, "description", &mut book.description)?;
                 patch_optional_string(patch, "tags", &mut book.tags)?;
                 patch_optional_string(patch, "genre", &mut book.genre)?;
@@ -563,6 +569,123 @@ impl PluginHostGateway {
                 entity
             ))),
         }
+    }
+
+    async fn calculate_book_cover_theme_color(&self, book: &Book) -> Option<String> {
+        let library = match self.library_repo.find_by_id(&book.library_id).await {
+            Ok(library) => library,
+            Err(error) => {
+                tracing::warn!(
+                    book_id = %book.id,
+                    library_id = %book.library_id,
+                    error = %error,
+                    message_key = "book.theme_color.library_lookup_failed",
+                    message_params = %serde_json::json!({
+                        "book_id": book.id,
+                        "library_id": book.library_id,
+                        "error": error.to_string(),
+                    }),
+                    "Failed to load library while recalculating book theme color"
+                );
+                None
+            }
+        };
+
+        for source in book_cover_theme_sources(book, library.as_ref()) {
+            match crate::core::color::calculate_theme_color(&source).await {
+                Ok(Some(color)) => {
+                    tracing::info!(
+                        book_id = %book.id,
+                        cover_source = %source,
+                        theme_color = %color,
+                        message_key = "book.theme_color.updated",
+                        message_params = %serde_json::json!({
+                            "book_id": book.id,
+                            "theme_color": color,
+                        }),
+                        "Updated book theme color from cover"
+                    );
+                    return Some(color);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(
+                        book_id = %book.id,
+                        cover_source = %source,
+                        error = %error,
+                        message_key = "book.theme_color.calculate_failed",
+                        message_params = %serde_json::json!({
+                            "book_id": book.id,
+                            "error": error.to_string(),
+                        }),
+                        "Book theme color calculation failed"
+                    );
+                }
+            }
+        }
+
+        None
+    }
+}
+
+fn book_cover_theme_sources(book: &Book, library: Option<&Library>) -> Vec<String> {
+    let Some(cover_url) = book
+        .cover_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+    else {
+        return Vec::new();
+    };
+
+    let normalized_cover = cover_url.replace('\\', "/");
+    if normalized_cover.starts_with("http://")
+        || normalized_cover.starts_with("https://")
+        || normalized_cover.starts_with("//")
+        || normalized_cover.starts_with("embedded://")
+    {
+        return vec![normalized_cover];
+    }
+
+    let mut sources = Vec::new();
+    let cover_path = Path::new(&normalized_cover);
+    if cover_path.is_absolute() {
+        push_unique_source(&mut sources, normalized_cover);
+        return sources;
+    }
+
+    if !book.path.trim().is_empty() {
+        push_unique_source(
+            &mut sources,
+            pathbuf_to_theme_source(Path::new(&book.path).join(cover_path)),
+        );
+    }
+
+    if let Some(library) = library {
+        let root_path = library.root_path.trim();
+        if !root_path.is_empty() {
+            push_unique_source(
+                &mut sources,
+                pathbuf_to_theme_source(Path::new(root_path).join(cover_path)),
+            );
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        push_unique_source(&mut sources, pathbuf_to_theme_source(cwd.join(cover_path)));
+    }
+
+    push_unique_source(&mut sources, normalized_cover);
+    sources
+}
+
+fn pathbuf_to_theme_source(path: PathBuf) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn push_unique_source(sources: &mut Vec<String>, source: String) {
+    if !source.trim().is_empty() && !sources.iter().any(|existing| existing == &source) {
+        sources.push(source);
     }
 }
 
@@ -697,4 +820,77 @@ fn value_to_i32(value: &Value, key: &str) -> Result<i32> {
     };
     i32::try_from(number)
         .map_err(|_| TingError::InvalidRequest(format!("Patch field {} is out of i32 range", key)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_book(path: String, cover_url: Option<&str>) -> Book {
+        Book {
+            id: "book-1".to_string(),
+            library_id: "library-1".to_string(),
+            path,
+            cover_url: cover_url.map(ToOwned::to_owned),
+            ..Book::default()
+        }
+    }
+
+    fn test_library(root_path: String) -> Library {
+        Library {
+            id: "library-1".to_string(),
+            name: "Library".to_string(),
+            library_type: "local".to_string(),
+            url: String::new(),
+            username: None,
+            password: None,
+            root_path,
+            last_scanned_at: None,
+            created_at: String::new(),
+            scraper_config: None,
+        }
+    }
+
+    #[test]
+    fn book_cover_theme_sources_try_book_relative_path_first() {
+        let temp = tempfile::tempdir().unwrap();
+        let book_path = temp.path().join("book");
+        let library_root = temp.path().join("library");
+        let book = test_book(
+            pathbuf_to_theme_source(book_path.clone()),
+            Some("cover.png"),
+        );
+        let library = test_library(pathbuf_to_theme_source(library_root.clone()));
+
+        let sources = book_cover_theme_sources(&book, Some(&library));
+
+        assert_eq!(
+            sources.first().map(String::as_str),
+            Some(pathbuf_to_theme_source(book_path.join("cover.png")).as_str())
+        );
+        assert!(sources.contains(&pathbuf_to_theme_source(library_root.join("cover.png"))));
+    }
+
+    #[test]
+    fn book_cover_theme_sources_keep_absolute_cover_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let cover_path = temp.path().join("cover.png");
+        let cover = pathbuf_to_theme_source(cover_path);
+        let book = test_book(String::new(), Some(&cover));
+
+        assert_eq!(book_cover_theme_sources(&book, None), vec![cover]);
+    }
+
+    #[test]
+    fn book_cover_theme_sources_keep_remote_cover_url() {
+        let book = test_book(
+            "book-dir".to_string(),
+            Some("https://example.com/cover.png"),
+        );
+
+        assert_eq!(
+            book_cover_theme_sources(&book, None),
+            vec!["https://example.com/cover.png".to_string()]
+        );
+    }
 }
