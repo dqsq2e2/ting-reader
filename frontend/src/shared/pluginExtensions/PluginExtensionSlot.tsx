@@ -21,6 +21,7 @@ type PluginExtensionSlotProps = {
   buttonClassName?: string;
   showLabel?: boolean;
   menuLabel?: string;
+  menuLabelClassName?: string;
   menuClassName?: string;
   limit?: number;
   empty?: ReactNode;
@@ -97,6 +98,7 @@ const PluginExtensionSlot = ({
   buttonClassName = defaultButtonClassName,
   showLabel = false,
   menuLabel,
+  menuLabelClassName = "truncate",
   menuClassName = "absolute right-0 top-full z-30 mt-2 min-w-44 overflow-hidden rounded-lg border border-slate-200 bg-white p-1 shadow-xl shadow-slate-900/10 dark:border-slate-700 dark:bg-slate-900 dark:shadow-slate-950/30",
   limit,
   empty = null,
@@ -175,11 +177,12 @@ const PluginExtensionSlot = ({
               onClick={() => setMenuOpen((open) => !open)}
               className={buttonClassName}
               title={menuLabel}
+              aria-label={menuLabel}
               aria-haspopup="menu"
               aria-expanded={menuOpen}
             >
               <MoreHorizontal size={18} />
-              <span className="truncate">{menuLabel}</span>
+              <span className={menuLabelClassName}>{menuLabel}</span>
             </button>
             {menuOpen ? (
               <div className={menuClassName} role="menu">

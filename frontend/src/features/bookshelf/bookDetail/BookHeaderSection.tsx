@@ -87,6 +87,45 @@ const BookHeaderSection: React.FC<Props> = ({
       : hasResumeChapter && resumeChapterTitle
         ? `${t("bookshelf.continuePlayingChapter", { title: resumeChapterTitle })}    `
         : t("bookshelf.playNow");
+  const favoriteLabel = t(
+    isFavorite ? "bookshelf.favorited" : "bookshelf.favorite",
+  );
+  const scrapeLabel = t("bookshelf.scrape");
+  const editLabel = t("common.edit");
+  const moreLabel = t("bookshelf.more");
+  const actionButtonLabels = isAdmin
+    ? [favoriteLabel, scrapeLabel, editLabel, moreLabel]
+    : [favoriteLabel, moreLabel];
+  const actionButtonWidthLabels = isAdmin
+    ? [
+        t("bookshelf.favorite"),
+        t("bookshelf.favorited"),
+        scrapeLabel,
+        editLabel,
+        moreLabel,
+      ]
+    : [t("bookshelf.favorite"), t("bookshelf.favorited"), moreLabel];
+  const actionButtonCount = actionButtonLabels.length;
+  const longestActionLabelWidth = Math.max(
+    ...actionButtonWidthLabels.map((label) =>
+      Array.from(label).reduce((width, char) => {
+        if (/[\u3400-\u9fff\uf900-\ufaff]/.test(char)) return width + 14;
+        if (/\s/.test(char)) return width + 4;
+        return width + 8;
+      }, 0),
+    ),
+  );
+  const actionButtonWidth = Math.max(
+    100,
+    Math.ceil(longestActionLabelWidth + 68),
+  );
+  const actionButtonRowWidth =
+    actionButtonWidth * actionButtonCount +
+    Math.max(0, actionButtonCount - 1) * 12;
+  const actionButtonGroupStyle = {
+    width: "100%",
+    maxWidth: `${Math.max(320, actionButtonRowWidth)}px`,
+  } as React.CSSProperties;
 
   return (
     <div
@@ -178,7 +217,10 @@ const BookHeaderSection: React.FC<Props> = ({
           )}
         </div>
 
-        <div className="w-full flex flex-col gap-3 md:max-w-md mx-auto md:mx-0">
+        <div
+          className="w-full flex flex-col gap-3 mx-auto md:mx-0"
+          style={actionButtonGroupStyle}
+        >
           <button
             ref={playButtonContainerRef}
             onClick={onPlayClick}
@@ -206,43 +248,63 @@ const BookHeaderSection: React.FC<Props> = ({
             )}
           </button>
 
-          <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(6rem,1fr))] sm:gap-3">
+          <div
+            className="grid w-full grid-flow-col auto-cols-fr gap-1 min-[430px]:gap-1.5 md:gap-3"
+          >
             <button
               onClick={onToggleFavorite}
-              className={`w-full min-w-0 px-3 sm:px-4 py-3 rounded-2xl border transition-all active:scale-95 flex items-center justify-center gap-2 font-bold text-sm ${
+              className={`w-full min-w-0 px-1.5 min-[430px]:px-2 lg:px-4 py-2.5 lg:py-3 rounded-xl lg:rounded-2xl border transition-all active:scale-95 flex items-center justify-center gap-1 min-[430px]:gap-1.5 lg:gap-2 font-bold text-[11px] min-[430px]:text-xs lg:text-sm whitespace-nowrap ${
                 isFavorite
                   ? "bg-red-50 border-red-100 text-red-500 dark:bg-red-900/20 dark:border-red-900/30"
                   : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-red-500"
               }`}
+              aria-label={favoriteLabel}
             >
-              <Heart size={20} fill={isFavorite ? "currentColor" : "none"} />
-              {t(isFavorite ? "bookshelf.favorited" : "bookshelf.favorite")}
+              <Heart
+                size={20}
+                className="h-4 w-4 shrink-0 lg:h-5 lg:w-5"
+                fill={isFavorite ? "currentColor" : "none"}
+              />
+              <span className="hidden min-[380px]:inline">
+                {favoriteLabel}
+              </span>
             </button>
 
             {isAdmin && (
               <>
                 <button
                   onClick={onOpenScrapeDiff}
-                  className="w-full min-w-0 px-3 sm:px-4 py-3 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center gap-2 font-bold text-sm"
+                  className="w-full min-w-0 px-1.5 min-[430px]:px-2 lg:px-4 py-2.5 lg:py-3 rounded-xl lg:rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center gap-1 min-[430px]:gap-1.5 lg:gap-2 font-bold text-[11px] min-[430px]:text-xs lg:text-sm whitespace-nowrap"
                   title={t("bookshelf.scrapeMetadata")}
                 >
-                  <RefreshCw size={20} />
-                  {t("bookshelf.scrape")}
+                  <RefreshCw
+                    size={20}
+                    className="h-4 w-4 shrink-0 lg:h-5 lg:w-5"
+                  />
+                  <span className="hidden min-[380px]:inline">
+                    {scrapeLabel}
+                  </span>
                 </button>
                 <button
                   onClick={onOpenEditModal}
-                  className="w-full min-w-0 px-3 sm:px-4 py-3 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center gap-2 font-bold text-sm"
+                  className="w-full min-w-0 px-1.5 min-[430px]:px-2 lg:px-4 py-2.5 lg:py-3 rounded-xl lg:rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center gap-1 min-[430px]:gap-1.5 lg:gap-2 font-bold text-[11px] min-[430px]:text-xs lg:text-sm whitespace-nowrap"
                 >
-                  <Edit size={20} />
-                  {t("common.edit")}
+                  <Edit
+                    size={20}
+                    className="h-4 w-4 shrink-0 lg:h-5 lg:w-5"
+                  />
+                  <span className="hidden min-[380px]:inline">
+                    {editLabel}
+                  </span>
                 </button>
               </>
             )}
             <PluginExtensionSlot
               slot="book.detail_action"
               className="relative min-w-0"
-              buttonClassName="w-full min-w-0 px-3 sm:px-4 py-3 rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center gap-2 font-bold text-sm"
-              menuLabel={t("bookshelf.more")}
+              buttonClassName="w-full min-w-0 px-1.5 min-[430px]:px-2 lg:px-4 py-2.5 lg:py-3 rounded-xl lg:rounded-2xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-300 hover:text-primary-600 transition-all active:scale-95 flex items-center justify-center gap-1 min-[430px]:gap-1.5 lg:gap-2 font-bold text-[11px] min-[430px]:text-xs lg:text-sm whitespace-nowrap"
+              menuLabel={moreLabel}
+              menuLabelClassName="hidden min-[380px]:inline"
               context={{
                 book_id: book.id,
                 book_title: book.title,
