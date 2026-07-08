@@ -172,7 +172,7 @@ jobs:
           mv ting-reader.fpk "$FN_OUTPUT"
 
           # fygopack 打包
-          fygopack pack --directory .github/ting-reader-fpk-native
+          fygopack build --directory .github/ting-reader-fpk-native
           mv ting-reader.fpk "$FYGO_OUTPUT"
 
       - name: Update Beta Tag

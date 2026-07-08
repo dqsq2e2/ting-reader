@@ -171,7 +171,7 @@ jobs:
           fnpack build --directory .github/ting-reader-fpk
           mv ting-reader.fpk ting-reader-$VERSION.fpk
 
-          fygopack pack --directory .github/ting-reader-fpk
+          fygopack build --directory .github/ting-reader-fpk
           mv ting-reader.fpk ting-reader-fygo-$VERSION.fpk
 
           mv .github/ting-reader-fpk/manifest.bak .github/ting-reader-fpk/manifest
@@ -184,7 +184,7 @@ jobs:
           fnpack build --directory .github/ting-reader-fpk
           mv ting-reader.fpk ting-reader-beta.fpk
 
-          fygopack pack --directory .github/ting-reader-fpk
+          fygopack build --directory .github/ting-reader-fpk
           mv ting-reader.fpk ting-reader-fygo-beta.fpk
 
       - name: Update Beta Tag
