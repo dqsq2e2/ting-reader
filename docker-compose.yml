@@ -12,6 +12,12 @@ services:
       - ./plugins:/app/plugins
       - ./temp:/app/temp
       - ./storage:/app/storage
+      # Optional: mount multiple host media folders under /app/storage.
+      # They will appear as subdirectories in the admin directory picker.
+      # Use :ro for scan/playback only, or :rw if metadata/NFO writing is enabled.
+      # - /mnt/disk1/audiobooks:/app/storage/audiobooks:ro
+      # - /mnt/disk2/story:/app/storage/story:ro
+      # - /mnt/nas/books:/app/storage/nas-books:rw
     environment:
       - RUST_LOG=info
       - TING_SERVER__HOST=0.0.0.0

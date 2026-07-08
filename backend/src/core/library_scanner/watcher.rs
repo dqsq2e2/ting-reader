@@ -1,4 +1,6 @@
+use crate::core::config::Config;
 use crate::core::error::Result;
+use crate::core::local_paths::{path_to_display_string, resolve_existing_local_library_root};
 use crate::core::task_queue::TaskQueue;
 use crate::db::repository::LibraryRepository;
 use notify::event::ModifyKind;
@@ -13,7 +15,7 @@ use tracing::{error, info, warn};
 pub struct LibraryWatcher {
     library_repo: Arc<LibraryRepository>,
     task_queue: Arc<TaskQueue>,
-    storage_root: PathBuf,
+    config: Config,
     // Map of library_id -> notify::RecommendedWatcher
     watchers: RwLock<HashMap<String, notify::RecommendedWatcher>>,
     // Map of library_id -> mpsc::Sender for debounce
@@ -24,12 +26,12 @@ impl LibraryWatcher {
     pub fn new(
         library_repo: Arc<LibraryRepository>,
         task_queue: Arc<TaskQueue>,
-        storage_root: PathBuf,
+        config: Config,
     ) -> Self {
         Self {
             library_repo,
             task_queue,
-            storage_root,
+            config,
             watchers: RwLock::new(HashMap::new()),
             debounce_senders: RwLock::new(HashMap::new()),
         }
@@ -47,9 +49,19 @@ impl LibraryWatcher {
                     .unwrap_or_default();
 
                 if !scraper_config.disable_watcher {
-                    let full_path = self.storage_root.join(&library.url);
+                    let full_path =
+                        match resolve_existing_local_library_root(&library, &self.config) {
+                            Ok(path) => path,
+                            Err(e) => {
+                                warn!(
+                                    "Failed to resolve watcher path for library {}: {}",
+                                    library.id, e
+                                );
+                                continue;
+                            }
+                    };
                     if let Err(e) = self
-                        .watch_library(&library.id, &full_path.to_string_lossy())
+                        .watch_library(&library.id, &path_to_display_string(&full_path))
                         .await
                     {
                         warn!("Failed to start watcher for library {}: {}", library.id, e);

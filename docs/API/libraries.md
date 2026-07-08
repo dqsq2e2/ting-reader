@@ -34,7 +34,7 @@
 {
   "name": "string",
   "library_type": "local | webdav",
-  "path": "string (本地库路径，可选)",
+  "path": "string (本地库路径，可选；可为授权根内绝对路径或旧版 storage 相对路径)",
   "webdav_url": "string (WebDAV 地址，可选)",
   "webdav_username": "string (可选)",
   "webdav_password": "string (可选)",
@@ -70,6 +70,9 @@
 说明：
 
 - 创建成功后会自动提交一次媒体库扫描任务。
+- 本地媒体库路径会在后端解析为真实绝对路径并保存；未在授权本地根目录内的绝对路径会被拒绝。
+- 旧版相对路径仍按 `storage.local_storage_root` 下的子路径解析，兼容已有库和旧客户端。
+- 如果启用 NFO 或 metadata 写入，目标目录必须可写；只扫描/播放的只读目录仍可作为媒体库。
 - 如果配置了 Webhook 监听，会触发 `library.created`；扫描完成后会触发 `library.scan_completed`。
 
 ---
@@ -179,13 +182,14 @@
 
 ## GET /api/storage/folders
 
-获取存储目录列表（管理员）。
+获取本地存储目录列表（管理员）。
 
 **查询参数：**
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| sub_path | string | 子路径（可选） |
+| root | string | 授权根目录路径（可选；应来自 `/api/storage/roots` 返回值） |
+| sub_path | string | `root` 下的相对子路径（可选） |
 
 **响应：** `200 OK`
 
@@ -198,3 +202,42 @@
   }
 ]
 ```
+
+说明：
+
+- 未传 `root` 时保留旧行为，默认浏览 `storage.local_storage_root`。
+- `root` 必须是授权本地根目录；`sub_path` 必须是相对路径，不能包含 `..` 或绝对子路径。
+- 返回的 `path` 是相对当前 `root` 的子路径，前端可用 `root + path` 组合成完整本地库路径。
+- 符号链接解析后的真实路径如果逃逸授权根，会被跳过。
+
+---
+
+## GET /api/storage/roots
+
+获取当前应用可访问的本地存储根目录（管理员）。
+
+**响应：** `200 OK`
+
+```json
+[
+  {
+    "path": "/app/storage",
+    "source": "legacy_storage",
+    "readable": true,
+    "writable": true
+  },
+  {
+    "path": "/mnt/media",
+    "source": "config",
+    "readable": true,
+    "writable": false
+  }
+]
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| path | string | 规范化后的本地根目录路径 |
+| source | string | 来源：`fnos`、`config` 或 `legacy_storage` |
+| readable | boolean | 当前进程是否可读取 |
+| writable | boolean | 当前进程是否可写入 |

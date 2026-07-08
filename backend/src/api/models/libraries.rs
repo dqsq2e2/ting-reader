@@ -115,6 +115,26 @@ pub struct FolderInfo {
     pub is_directory: bool,
 }
 
+/// Authorized local storage root information
+#[derive(Debug, Serialize)]
+pub struct StorageRootInfo {
+    pub path: String,
+    pub source: String,
+    pub readable: bool,
+    pub writable: bool,
+}
+
+impl From<crate::core::local_paths::AuthorizedRoot> for StorageRootInfo {
+    fn from(root: crate::core::local_paths::AuthorizedRoot) -> Self {
+        Self {
+            path: crate::core::local_paths::path_to_display_string(&root.path),
+            source: root.source,
+            readable: root.readable,
+            writable: root.writable,
+        }
+    }
+}
+
 /// Request for testing WebDAV connection
 #[derive(Debug, Deserialize)]
 pub struct TestWebDavRequest {

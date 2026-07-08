@@ -1,5 +1,5 @@
 # Ting Reader Backend Configuration
-version = "1.5.1"
+version = "1.5.2"
 
 [server]
 host = "0.0.0.0"
@@ -44,7 +44,8 @@ hsts_max_age = 31536000  # 1 year in seconds
 [storage]
 data_dir = "./data"
 temp_dir = "./temp"
-local_storage_root = "./storage"  # Root directory for local libraries
+local_storage_root = "./storage"  # Default/legacy root for local libraries
+local_library_roots = []  # Additional allowed local library roots, e.g. ["/mnt/media", "D:/Audiobooks"]
 max_disk_usage = 2147483648  # 2 GB
 
 [audio]

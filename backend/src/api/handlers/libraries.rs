@@ -1,10 +1,14 @@
 use super::AppState;
 use crate::api::models::{
     CreateLibraryRequest, FolderInfo, LibraryResponse, LibraryScanRequest, LibraryScanResponse,
-    TestWebDavRequest, TestWebDavResponse, UpdateLibraryRequest,
+    StorageRootInfo, TestWebDavRequest, TestWebDavResponse, UpdateLibraryRequest,
 };
 use crate::api::require_admin;
 use crate::core::error::{Result, TingError};
+use crate::core::local_paths::{
+    discover_authorized_roots, ensure_path_inside_root, resolve_existing_local_library_root,
+    path_to_display_string, resolve_local_library_path, resolve_storage_folder_target,
+};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -15,6 +19,41 @@ use uuid::Uuid;
 
 fn is_http_url(value: &str) -> bool {
     value.starts_with("http://") || value.starts_with("https://")
+}
+
+fn scraper_config_value_requires_writes(config: Option<&serde_json::Value>) -> bool {
+    config
+        .and_then(|value| {
+            serde_json::from_value::<crate::db::models::ScraperConfig>(value.clone()).ok()
+        })
+        .map(|config| config.nfo_writing_enabled || config.metadata_writing_enabled)
+        .unwrap_or(false)
+}
+
+fn scraper_config_str_requires_writes(config: Option<&str>) -> bool {
+    config
+        .and_then(|value| serde_json::from_str::<crate::db::models::ScraperConfig>(value).ok())
+        .map(|config| config.nfo_writing_enabled || config.metadata_writing_enabled)
+        .unwrap_or(false)
+}
+
+fn ensure_metadata_write_allowed(
+    library_path: &std::path::Path,
+    writes_enabled: bool,
+) -> Result<()> {
+    if !writes_enabled {
+        return Ok(());
+    }
+
+    let metadata = std::fs::metadata(library_path)?;
+    if metadata.permissions().readonly() {
+        return Err(TingError::ValidationError(format!(
+            "Local library path '{}' is read-only, but metadata/NFO writing is enabled",
+            library_path.display()
+        )));
+    }
+
+    Ok(())
 }
 
 /// Handler for GET /api/libraries - Get all libraries
@@ -42,7 +81,7 @@ pub async fn create_library(
     require_admin(&user)?;
 
     let library_type = req.library_type.trim().to_ascii_lowercase();
-    let url = match library_type.as_str() {
+    let mut url = match library_type.as_str() {
         "local" => req.path.unwrap_or_default(),
         "webdav" => req.webdav_url.unwrap_or_default(),
         "rss" => req.rss_feed_url.unwrap_or_default(),
@@ -67,26 +106,12 @@ pub async fn create_library(
 
     if library_type == "local" {
         let config = state.config.read().await;
-        let storage_root = config.storage.local_storage_root.clone();
-        drop(config);
-
-        let full_path = storage_root.join(&url);
-
-        let canonical_path = full_path.canonicalize().map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                TingError::ValidationError(format!("Path '{}' does not exist", url))
-            } else {
-                TingError::IoError(e)
-            }
-        })?;
-
-        let canonical_root = storage_root
-            .canonicalize()
-            .map_err(|e| TingError::IoError(e))?;
-
-        if !canonical_path.starts_with(&canonical_root) {
-            return Err(TingError::ValidationError("Invalid local path".to_string()));
-        }
+        let canonical_path = resolve_local_library_path(&url, &config)?;
+        ensure_metadata_write_allowed(
+            &canonical_path,
+            scraper_config_value_requires_writes(req.scraper_config.as_ref()),
+        )?;
+        url = path_to_display_string(&canonical_path);
     }
 
     if library_type == "webdav" {
@@ -195,11 +220,8 @@ pub async fn create_library(
 
     let library_path = if library.library_type == "local" {
         let config = state.config.read().await;
-        let storage_root = config.storage.local_storage_root.clone();
-        drop(config);
-
-        let full_path = storage_root.join(&library.url);
-        full_path.to_string_lossy().to_string()
+        let library_root = resolve_existing_local_library_root(&library, &config)?;
+        path_to_display_string(&library_root)
     } else {
         library.url.clone()
     };
@@ -296,17 +318,8 @@ pub async fn update_library(
     if library.library_type == "local" {
         if let Some(path) = req.path {
             let config = state.config.read().await;
-            let storage_root = config.storage.local_storage_root.clone();
-            drop(config);
-
-            let full_path = storage_root.join(&path);
-            if !full_path.exists() {
-                return Err(TingError::ValidationError(format!(
-                    "Path '{}' does not exist",
-                    path
-                )));
-            }
-            library.url = path;
+            let canonical_path = resolve_local_library_path(&path, &config)?;
+            library.url = path_to_display_string(&canonical_path);
         }
     } else if library.library_type == "webdav" {
         if let Some(webdav_url) = req.webdav_url {
@@ -361,6 +374,15 @@ pub async fn update_library(
         library.scraper_config = Some(config.to_string());
     }
 
+    if library.library_type == "local" {
+        let config = state.config.read().await;
+        let library_path = resolve_existing_local_library_root(&library, &config)?;
+        ensure_metadata_write_allowed(
+            &library_path,
+            scraper_config_str_requires_writes(library.scraper_config.as_deref()),
+        )?;
+    }
+
     state.library_repo.update(&library).await?;
 
     // Update watcher
@@ -374,11 +396,8 @@ pub async fn update_library(
 
         if !scraper_config.disable_watcher {
             let config = state.config.read().await;
-            let storage_root = config.storage.local_storage_root.clone();
-            drop(config);
-
-            let full_path = storage_root.join(&library.url);
-            let library_path = full_path.to_string_lossy().to_string();
+            let library_path =
+                path_to_display_string(&resolve_existing_local_library_root(&library, &config)?);
 
             if let Err(e) = state
                 .library_watcher
@@ -552,11 +571,8 @@ pub async fn scan_library(
 
     let library_path = if library.library_type == "local" {
         let config = state.config.read().await;
-        let storage_root = config.storage.local_storage_root.clone();
-        drop(config);
-
-        let full_path = storage_root.join(&library.url);
-        full_path.to_string_lossy().to_string()
+        let library_root = resolve_existing_local_library_root(&library, &config)?;
+        path_to_display_string(&library_root)
     } else {
         library.url.clone()
     };
@@ -605,6 +621,22 @@ pub async fn scan_library(
     ))
 }
 
+/// Handler for GET /api/storage/roots - Get authorized local storage roots
+pub async fn get_storage_roots(
+    State(state): State<AppState>,
+    user: crate::auth::middleware::AuthUser,
+) -> Result<impl IntoResponse> {
+    require_admin(&user)?;
+
+    let config = state.config.read().await;
+    let roots: Vec<StorageRootInfo> = discover_authorized_roots(&config)
+        .into_iter()
+        .map(Into::into)
+        .collect();
+
+    Ok(Json(roots))
+}
+
 /// Handler for GET /api/storage/folders - Get storage folders
 pub async fn get_storage_folders(
     State(state): State<AppState>,
@@ -614,8 +646,6 @@ pub async fn get_storage_folders(
     require_admin(&user)?;
 
     let config = state.config.read().await;
-    let storage_root = config.storage.local_storage_root.clone();
-    drop(config);
 
     let sub_path = params
         .get("sub_path")
@@ -623,37 +653,8 @@ pub async fn get_storage_folders(
         .map(|s| s.as_str())
         .unwrap_or("");
 
-    if sub_path.contains("..") {
-        return Err(TingError::ValidationError(
-            "Invalid path: contains '..'".to_string(),
-        ));
-    }
-
-    let target_path = if sub_path.is_empty() {
-        storage_root.clone()
-    } else {
-        storage_root.join(sub_path)
-    };
-
-    if !storage_root.exists() {
-        if let Err(e) = std::fs::create_dir_all(&storage_root) {
-            return Err(TingError::IoError(e));
-        }
-    }
-
-    if !target_path.exists() {
-        return Err(TingError::ValidationError(format!(
-            "Path '{}' does not exist",
-            sub_path
-        )));
-    }
-
-    if !target_path.is_dir() {
-        return Err(TingError::ValidationError(format!(
-            "Path '{}' is not a directory",
-            sub_path
-        )));
-    }
+    let root_param = params.get("root").map(|s| s.as_str());
+    let (storage_root, target_path) = resolve_storage_folder_target(root_param, sub_path, &config)?;
 
     let mut folders = Vec::new();
 
@@ -676,13 +677,21 @@ pub async fn get_storage_folders(
         let entry_path = entry.path();
 
         if entry_path.is_dir() {
+            let canonical_entry = match std::fs::canonicalize(&entry_path) {
+                Ok(path) => path,
+                Err(_) => continue,
+            };
+            if ensure_path_inside_root(&storage_root, &canonical_entry).is_err() {
+                continue;
+            }
+
             if let Some(name) = entry_path.file_name().and_then(|n| n.to_str()) {
                 if !name.starts_with('.') {
-                    let relative_path = if sub_path.is_empty() {
-                        name.to_string()
-                    } else {
-                        format!("{}/{}", sub_path.replace("\\", "/"), name)
-                    };
+                    let relative_path = canonical_entry
+                        .strip_prefix(&storage_root)
+                        .unwrap_or(&canonical_entry)
+                        .to_string_lossy()
+                        .replace('\\', "/");
 
                     folders.push(FolderInfo {
                         name: name.to_string(),

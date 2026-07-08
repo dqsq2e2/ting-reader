@@ -111,7 +111,7 @@ const ChapterEditDialog: React.FC<Props> = ({ chapter, location, onClose, onSave
               <Folder size={16} />
               {t('chapterManager.storageLocation')}
             </div>
-            <p className="break-all text-sm font-normal leading-6 text-slate-500 dark:text-slate-400">
+            <p className="break-all text-sm font-normal leading-6 text-slate-500 dark:text-slate-400" title={location}>
               {location}
             </p>
           </div>

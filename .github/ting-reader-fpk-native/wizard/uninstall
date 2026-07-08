@@ -1,34 +1,34 @@
 [
     {
-        "stepTitle": "确认卸载",
+        "stepTitle": "${uninstall.stepTitle}",
         "items": [
             {
                 "type": "tips",
-                "helpText": "您即将卸载 听悦。请选择是否需要清理应用数据："
+                "helpText": "${uninstall.helpText}"
             },
             {
                 "type": "checkbox",
                 "field": "wizard_clean_options",
-                "label": "数据清理选项",
+                "label": "${uninstall.label}",
                 "initValue": "",
                 "options": [
                     {
-                        "label": "清理数据库与配置 (data)",
+                        "label": "${uninstall.option1Label}",
                         "value": "data"
                     },
                     {
-                        "label": "清理插件 (plugins)",
+                        "label": "${uninstall.option2Label}",
                         "value": "plugins"
                     },
                     {
-                        "label": "清理临时文件 (temp)",
+                        "label": "${uninstall.option3Label}",
                         "value": "temp"
                     }
                 ]
             },
             {
                 "type": "tips",
-                "helpText": "<strong>说明：</strong><br/>1. 默认不勾选则保留所有数据。<br/>2. 为保护您的有声书数据安全，卸载程序<strong>不会</strong>清理存储目录下的音频文件。如需删除，请前往文件管理手动清理。"
+                "helpText": "${uninstall.noteHelpText}"
             }
         ]
     }

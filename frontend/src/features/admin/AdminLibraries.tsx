@@ -30,6 +30,44 @@ const DEFAULT_SCRAPER_CONFIG = JSON.stringify({
   cloud_mode: false,
 }, null, 2);
 
+interface StorageRoot {
+  path: string;
+  source: string;
+  readable: boolean;
+  writable: boolean;
+}
+
+const normalizeComparePath = (value: string) => (
+  value.replace(/\\/g, '/').replace(/\/+$/g, '').toLowerCase()
+);
+
+const joinRootAndSubPath = (root: string, subPath: string) => {
+  const cleanRoot = root.replace(/[\\/]+$/g, '');
+  const cleanSubPath = subPath.replace(/^[\\/]+|[\\/]+$/g, '');
+  if (!cleanRoot) return cleanSubPath;
+  return cleanSubPath ? `${cleanRoot}/${cleanSubPath}` : cleanRoot;
+};
+
+const relativePathFromRoot = (path: string, root: string) => {
+  const normalizedPath = normalizeComparePath(path);
+  const normalizedRoot = normalizeComparePath(root);
+  if (!normalizedPath || !normalizedRoot) return '';
+  if (normalizedPath === normalizedRoot) return '';
+  if (!normalizedPath.startsWith(`${normalizedRoot}/`)) return '';
+  return path.replace(/\\/g, '/').slice(root.replace(/\\/g, '/').replace(/\/+$/g, '').length + 1);
+};
+
+const findRootForPath = (path: string, roots: StorageRoot[]) => {
+  const normalizedPath = normalizeComparePath(path);
+  if (!normalizedPath) return null;
+  return roots
+    .filter((root) => {
+      const normalizedRoot = normalizeComparePath(root.path);
+      return normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`);
+    })
+    .sort((a, b) => b.path.length - a.path.length)[0] || null;
+};
+
 const libraryTypeLabel = (type: Library['library_type'], t: (key: string) => string) => {
   if (type === 'local') return t('adminLibraries.localStorage');
   if (type === 'rss') return t('adminLibraries.rssSubscription');
@@ -56,6 +94,8 @@ const AdminLibraries: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [availableFolders, setAvailableFolders] = useState<{name: string, path: string}[]>([]);
+  const [storageRoots, setStorageRoots] = useState<StorageRoot[]>([]);
+  const [selectedStorageRoot, setSelectedStorageRoot] = useState('');
   const [currentBrowsePath, setCurrentBrowsePath] = useState('');
   const [isFolderMenuOpen, setIsFolderMenuOpen] = useState(false);
   const [scraperSources, setScraperSources] = useState<Pick<ScraperSource, 'id' | 'name' | 'auto_scrape'>[]>([]);
@@ -91,16 +131,45 @@ const AdminLibraries: React.FC = () => {
 
   useEffect(() => {
     if (isModalOpen && formData.type === 'local') {
+      fetchStorageRoots();
+    }
+  }, [isModalOpen, formData.type]);
+
+  useEffect(() => {
+    if (isModalOpen && formData.type === 'local') {
       fetchFolders(currentBrowsePath);
     }
-  }, [isModalOpen, formData.type, currentBrowsePath]);
+  }, [isModalOpen, formData.type, currentBrowsePath, selectedStorageRoot]);
 
   const fetchFolders = async (subPath: string) => {
     try {
-      const response = await apiClient.get('/api/storage/folders', { params: { sub_path: subPath } });
+      const params: Record<string, string> = { sub_path: subPath };
+      if (selectedStorageRoot) {
+        params.root = selectedStorageRoot;
+      }
+      const response = await apiClient.get('/api/storage/folders', { params });
       setAvailableFolders(response.data);
     } catch (err) {
       console.error('Failed to fetch folders', err);
+      setAvailableFolders([]);
+    }
+  };
+
+  const fetchStorageRoots = async () => {
+    try {
+      const response = await apiClient.get('/api/storage/roots');
+      const roots = response.data as StorageRoot[];
+      setStorageRoots(roots);
+
+      const matchedRoot = findRootForPath(formData.url, roots);
+      const nextRoot = matchedRoot?.path || selectedStorageRoot || roots[0]?.path || '';
+      setSelectedStorageRoot(nextRoot);
+      setCurrentBrowsePath(nextRoot ? relativePathFromRoot(formData.url, nextRoot) : '');
+    } catch (err) {
+      console.error('Failed to fetch storage roots', err);
+      setStorageRoots([]);
+      setSelectedStorageRoot('');
+      setCurrentBrowsePath('');
     }
   };
 
@@ -117,6 +186,8 @@ const AdminLibraries: React.FC = () => {
 
   const openEditModal = (lib: Library) => {
     setEditingId(lib.id);
+    setCurrentBrowsePath('');
+    setSelectedStorageRoot('');
 
     // Determine the type safely
     const libType = lib.library_type === 'local' || lib.library_type === 'rss' ? lib.library_type : 'webdav';
@@ -260,6 +331,10 @@ const AdminLibraries: React.FC = () => {
     }
   };
 
+  const selectedBrowsePath = selectedStorageRoot
+    ? joinRootAndSubPath(selectedStorageRoot, currentBrowsePath)
+    : currentBrowsePath;
+
   return (
     <div className="w-full max-w-screen-2xl mx-auto p-4 sm:p-6 md:p-8 lg:p-10 space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -274,6 +349,8 @@ const AdminLibraries: React.FC = () => {
           <button
             onClick={() => {
               setEditingId(null);
+              setCurrentBrowsePath('');
+              setSelectedStorageRoot('');
               setFormData({ name: '', type: 'webdav', url: '', username: '', password: '', root_path: '/', scraper_config: DEFAULT_SCRAPER_CONFIG });
               setIsModalOpen(true);
             }}
@@ -445,7 +522,11 @@ const AdminLibraries: React.FC = () => {
                     <button
                       type="button"
                       disabled={!!editingId}
-                      onClick={() => setFormData({...formData, type: 'local', url: '', root_path: '/'})}
+                      onClick={() => {
+                        setCurrentBrowsePath('');
+                        setSelectedStorageRoot('');
+                        setFormData({...formData, type: 'local', url: '', root_path: '/'});
+                      }}
                       className={`py-2.5 rounded-xl font-bold transition-all border ${
                         formData.type === 'local'
                           ? 'bg-primary-50 border-primary-200 text-primary-600'
@@ -543,6 +624,14 @@ const AdminLibraries: React.FC = () => {
                   <div className="space-y-4">
                     <div className="space-y-2">
                       <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('adminLibraries.localPath')}</label>
+                      <input
+                        type="text"
+                        required
+                        value={formData.url}
+                        onChange={e => setFormData({...formData, url: e.target.value})}
+                        placeholder={t('adminLibraries.localPathPlaceholder')}
+                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                      />
                       <div className="relative">
                         {/* Selector Trigger */}
                         <button
@@ -554,8 +643,8 @@ const AdminLibraries: React.FC = () => {
                             <Folder size={18} className="text-primary-500 shrink-0" />
                             <div className="flex flex-col items-start overflow-hidden">
                               <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{t('adminLibraries.currentSelected')}</span>
-                              <span className="text-sm dark:text-white truncate font-medium">
-                                {formData.url || t('adminLibraries.storageRoot')}
+                              <span className="text-sm dark:text-white truncate font-medium" title={formData.url || selectedBrowsePath}>
+                                {formData.url || selectedBrowsePath || t('adminLibraries.storageRoot')}
                               </span>
                             </div>
                           </div>
@@ -568,6 +657,27 @@ const AdminLibraries: React.FC = () => {
                         {/* Dropdown Menu */}
                         {isFolderMenuOpen && (
                           <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl z-[100] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                            {storageRoots.length > 0 && (
+                              <div className="p-3 border-b border-slate-100 dark:border-slate-800">
+                                <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                  {t('adminLibraries.authorizedRoot')}
+                                </label>
+                                <select
+                                  value={selectedStorageRoot}
+                                  onChange={(event) => {
+                                    setSelectedStorageRoot(event.target.value);
+                                    setCurrentBrowsePath('');
+                                  }}
+                                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-primary-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                                >
+                                  {storageRoots.map((root) => (
+                                    <option key={root.path} value={root.path}>
+                                      {root.path} · {root.source}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
                             {/* Breadcrumbs */}
                             <div className="px-4 py-3 bg-slate-50/50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2 overflow-x-auto no-scrollbar">
                               <button
@@ -596,13 +706,13 @@ const AdminLibraries: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setFormData({...formData, url: currentBrowsePath, root_path: '/'});
+                                  setFormData({...formData, url: selectedBrowsePath, root_path: '/'});
                                   setIsFolderMenuOpen(false);
                                 }}
                                 className="flex-1 py-2 bg-primary-600 text-white text-xs font-bold rounded-xl hover:bg-primary-700 shadow-lg shadow-primary-500/20 transition-all flex items-center justify-center gap-2"
                               >
                                 <CheckCircle2 size={14} />
-                                {t('adminLibraries.chooseThisDirectory', { path: currentBrowsePath || t('adminLibraries.rootDirectory') })}
+                                {t('adminLibraries.chooseThisDirectory', { path: selectedBrowsePath || t('adminLibraries.rootDirectory') })}
                               </button>
                             </div>
 

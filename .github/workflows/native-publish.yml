@@ -6,6 +6,10 @@ on:
     tags:
       - 'v*'
 
+env:
+  FNPACK_VERSION: "1.2.3"
+  FYGOPACK_VERSION: "1.2.3"
+
 jobs:
   native:
     runs-on: ubuntu-latest
@@ -103,19 +107,19 @@ jobs:
           echo "Listing target directory:"
           find backend/target -type f | grep "ting_reader" || true
           find backend/target -type f | grep "ting-reader" || true
-          
+
           # Try to find binary with underscore (default for cargo) or hyphen
           BINARY_PATH=$(find backend/target -type f \( -name "ting_reader" -o -name "ting-reader" \) | grep "${{ matrix.target }}/release/ting[-_]reader$" | head -n 1)
-          
+
           if [ -z "$BINARY_PATH" ]; then
             echo "Error: ting-reader binary not found in target directory!"
             exit 1
           fi
-          
+
           echo "Found binary at: $BINARY_PATH"
           # Always copy as ting-reader (hyphen) to match scripts
           cp "$BINARY_PATH" .github/ting-reader-fpk-native/app/server/ting-reader
-          
+
           cp backend/config.toml .github/ting-reader-fpk-native/app/server/
           cp -r frontend/dist .github/ting-reader-fpk-native/app/server/static
           PLUGIN_STORE_VERSION="1.0.0"
@@ -124,31 +128,35 @@ jobs:
           chmod +x .github/ting-reader-fpk-native/app/server/ting-reader
           chmod +x .github/ting-reader-fpk-native/cmd/*
 
-      - name: Prepare fnpack
-        run: |
-          # Use local fnpack if available, otherwise assume it's in PATH or download it
-          if [ ! -f /usr/local/bin/fnpack ]; then
-            chmod +x .github/workflows/fnpack
-            sudo cp .github/workflows/fnpack /usr/local/bin/fnpack
-          fi
+      - name: Setup fnpack
+        uses: ./.github/actions/setup-fnpack
+        with:
+          version: ${{ env.FNPACK_VERSION }}
+
+      - name: Setup fygopack
+        uses: ./.github/actions/setup-fygopack
+        with:
+          version: ${{ env.FYGOPACK_VERSION }}
 
       - name: Build FPK
         run: |
           VERSION="${{ env.VERSION }}"
           TARGET="${{ steps.release_context.outputs.target }}"
-          
+
           if [ "$TARGET" = "beta" ]; then
             echo "Building for Beta release..."
             VERSION="beta"
-            OUTPUT_NAME="ting-reader-native-${{ matrix.fpk_suffix }}-beta.fpk"
+            FN_OUTPUT="ting-reader-native-${{ matrix.fpk_suffix }}-beta.fpk"
+            FYGO_OUTPUT="ting-reader-native-fygo-${{ matrix.fpk_suffix }}-beta.fpk"
           else
             echo "Building for Formal release v$VERSION..."
-            OUTPUT_NAME="ting-reader-native-${{ matrix.fpk_suffix }}-${VERSION}.fpk"
+            FN_OUTPUT="ting-reader-native-${{ matrix.fpk_suffix }}-${VERSION}.fpk"
+            FYGO_OUTPUT="ting-reader-native-fygo-${{ matrix.fpk_suffix }}-${VERSION}.fpk"
           fi
-          
+
           # Update manifest with version
           sed -i "s/^version[[:space:]]*=.*/version = $VERSION/" .github/ting-reader-fpk-native/manifest
-          
+
           # 删除可能已存在的 arch/platform 行
           sed -i "/^arch[[:space:]]*=/d" .github/ting-reader-fpk-native/manifest
           sed -i "/^platform[[:space:]]*=/d" .github/ting-reader-fpk-native/manifest
@@ -158,9 +166,14 @@ jobs:
 
           # 在 version 行之后插入 platform 行
           sed -i "/^version[[:space:]]*=/a platform = ${{ matrix.arch }}" .github/ting-reader-fpk-native/manifest
-          
+
+          # fnpack 打包
           fnpack build --directory .github/ting-reader-fpk-native
-          mv ting-reader.fpk "$OUTPUT_NAME"
+          mv ting-reader.fpk "$FN_OUTPUT"
+
+          # fygopack 打包
+          fygopack pack --directory .github/ting-reader-fpk-native
+          mv ting-reader.fpk "$FYGO_OUTPUT"
 
       - name: Update Beta Tag
         if: steps.release_context.outputs.target == 'beta'
@@ -180,7 +193,9 @@ jobs:
           prerelease: true
           make_latest: false
           overwrite_files: true
-          files: ting-reader-native-${{ matrix.fpk_suffix }}-beta.fpk
+          files: |
+            ting-reader-native-${{ matrix.fpk_suffix }}-beta.fpk
+            ting-reader-native-fygo-${{ matrix.fpk_suffix }}-beta.fpk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -189,7 +204,9 @@ jobs:
         if: steps.release_context.outputs.target == 'formal'
         with:
           tag_name: v${{ env.VERSION }}
-          files: ting-reader-native-${{ matrix.fpk_suffix }}-${{ env.VERSION }}.fpk
+          files: |
+            ting-reader-native-${{ matrix.fpk_suffix }}-${{ env.VERSION }}.fpk
+            ting-reader-native-fygo-${{ matrix.fpk_suffix }}-${{ env.VERSION }}.fpk
           fail_on_unmatched_files: false
           overwrite_files: true
         env:

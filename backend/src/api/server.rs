@@ -222,7 +222,7 @@ impl ApiServer {
             plugin_manager.clone(),
             plugin_cache.clone(),
             Arc::new(encryption_key),
-            config.storage.local_storage_root.clone(),
+            config.clone(),
         ));
         plugin_manager.set_host_gateway(&plugin_host_gateway);
 
@@ -230,7 +230,7 @@ impl ApiServer {
         let library_watcher = Arc::new(crate::core::library_watcher::LibraryWatcher::new(
             library_repo.clone(),
             task_queue.clone(),
-            config.storage.local_storage_root.clone(),
+            config.clone(),
         ));
 
         // Start watching all local libraries

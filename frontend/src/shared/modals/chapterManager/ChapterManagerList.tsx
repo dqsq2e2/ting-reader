@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type { Book, Library } from '../../../core/types';
 import AutoSizer from '../../widgets/AutoSizer';
 import FixedSizeList from '../../widgets/VirtualList';
-import { formatChapterLocation } from './pathUtils';
+import { formatChapterDisplayPath } from './pathUtils';
 import type { EditableChapter } from './types';
 
 interface Props {
@@ -97,7 +97,7 @@ const ChapterRow: React.FC<ChapterRowProps> = ({
   onEdit,
 }) => {
   const { t } = useTranslation();
-  const location = formatChapterLocation(chapter, book, pathLibrary, t('chapterManager.unknownLibrary'));
+  const location = formatChapterDisplayPath(chapter, book, pathLibrary);
 
   const handleRowClick = () => {
     if (selectionMode) {
@@ -142,7 +142,7 @@ const ChapterRow: React.FC<ChapterRowProps> = ({
           </span>
           <span className="mt-1 hidden min-w-0 items-center gap-1.5 text-xs font-normal text-slate-400 lg:flex">
             <Folder size={13} className="shrink-0" />
-            <span className="truncate">{location}</span>
+            <span className="truncate" title={location}>{location}</span>
           </span>
         </span>
 

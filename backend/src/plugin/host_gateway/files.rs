@@ -2,6 +2,8 @@ use super::{
     bool_param, required_string_param, string_param, usize_param, PluginHostGateway, PluginHostUser,
 };
 use crate::core::error::{Result, TingError};
+use crate::core::local_paths::resolve_existing_local_library_root;
+use crate::core::Config;
 use crate::db::models::Library;
 use crate::db::repository::Repository;
 use base64::{engine::general_purpose, Engine as _};
@@ -226,11 +228,9 @@ impl PluginHostGateway {
             .ok_or_else(|| {
                 TingError::NotFound(format!("Library with id {} not found", library_id))
             })?;
-        let book = self
-            .book_repo
-            .find_by_id(&book_id)
-            .await?
-            .ok_or_else(|| TingError::NotFound(format!("Book with id {} not found", book_id)))?;
+        let book = self.book_repo.find_by_id(&book_id).await?.ok_or_else(|| {
+            TingError::NotFound(format!("Book with id {} not found", book_id))
+        })?;
         if book.library_id != library.id {
             return Err(TingError::InvalidRequest(format!(
                 "Book {} does not belong to library {}",
@@ -257,12 +257,12 @@ impl PluginHostGateway {
 }
 
 fn book_file_base_dir_with_root(
-    local_storage_root: &Path,
+    config: &Config,
     library: &Library,
     book_path: &str,
 ) -> Result<(PathBuf, PathBuf)> {
     if library.library_type == "local" {
-        let root = local_library_root_with_base(local_storage_root, library)?;
+        let root = local_library_root_with_config(config, library)?;
         let book_dir = PathBuf::from(book_path);
         let canonical_book_dir = std::fs::canonicalize(&book_dir)?;
         ensure_path_inside(&root, &canonical_book_dir)?;
@@ -276,9 +276,9 @@ fn book_file_base_dir_with_root(
     Ok((root.clone(), root.join("temp").join(book_hash)))
 }
 
-fn local_library_root_with_base(local_storage_root: &Path, library: &Library) -> Result<PathBuf> {
+fn local_library_root_with_config(config: &Config, library: &Library) -> Result<PathBuf> {
     if library.library_type == "local" {
-        let root = std::fs::canonicalize(local_storage_root.join(library.url.trim()))?;
+        let root = resolve_existing_local_library_root(library, config)?;
         if !root.is_dir() {
             return Err(TingError::InvalidRequest(format!(
                 "Library {} root path is not a directory",
@@ -308,11 +308,11 @@ fn local_library_root_with_base(local_storage_root: &Path, library: &Library) ->
 
 impl PluginHostGateway {
     fn local_library_root(&self, library: &Library) -> Result<PathBuf> {
-        local_library_root_with_base(&self.local_storage_root, library)
+        local_library_root_with_config(&self.config, library)
     }
 
     fn book_file_base_dir(&self, library: &Library, book_path: &str) -> Result<(PathBuf, PathBuf)> {
-        book_file_base_dir_with_root(&self.local_storage_root, library, book_path)
+        book_file_base_dir_with_root(&self.config, library, book_path)
     }
 }
 

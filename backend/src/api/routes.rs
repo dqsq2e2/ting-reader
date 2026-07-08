@@ -59,6 +59,7 @@ use crate::api::handlers::{
     get_series,
     get_stats,
     get_storage_folders,
+    get_storage_roots,
     get_store_plugins,
     get_system_logs,
     get_tags,
@@ -225,6 +226,7 @@ pub fn build_api_routes(state: AppState) -> Router {
             "/api/libraries/test-connection",
             post(test_webdav_connection),
         )
+        .route("/api/storage/roots", get(get_storage_roots))
         .route("/api/storage/folders", get(get_storage_folders))
         // Series management endpoints
         .route("/api/v1/series", get(list_series).post(create_series))

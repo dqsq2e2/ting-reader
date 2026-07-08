@@ -35,6 +35,18 @@ impl PluginManager {
                 continue;
             }
 
+            if !has_plugin_manifest(&path) {
+                let error = "plugin.yml/plugin.yaml not found";
+                warn!(
+                    "Failed to discover plugin from {}: {}",
+                    path.display(),
+                    error
+                );
+                self.register_failed_plugin_directory(&path, error.to_string())
+                    .await;
+                continue;
+            }
+
             if !tr_package::has_installed_signature_metadata(&path) {
                 warn!(
                     "Skipping plugin directory {} because it has no installed .tr signature metadata",
@@ -52,30 +64,19 @@ impl PluginManager {
                 continue;
             }
 
-            if has_plugin_manifest(&path) {
-                match self.read_plugin_metadata(&path) {
-                    Ok(metadata) => {
-                        let id = metadata.id.clone();
-                        potential_plugins
-                            .entry(id)
-                            .or_default()
-                            .push((metadata, path));
-                    }
-                    Err(e) => {
-                        error!("Failed to read metadata from {}: {}", path.display(), e);
-                        self.register_failed_plugin_directory(&path, e.to_string())
-                            .await;
-                    }
+            match self.read_plugin_metadata(&path) {
+                Ok(metadata) => {
+                    let id = metadata.id.clone();
+                    potential_plugins
+                        .entry(id)
+                        .or_default()
+                        .push((metadata, path));
                 }
-            } else {
-                let error = "plugin.yml/plugin.yaml not found";
-                warn!(
-                    "Failed to discover plugin from {}: {}",
-                    path.display(),
-                    error
-                );
-                self.register_failed_plugin_directory(&path, error.to_string())
-                    .await;
+                Err(e) => {
+                    error!("Failed to read metadata from {}: {}", path.display(), e);
+                    self.register_failed_plugin_directory(&path, e.to_string())
+                        .await;
+                }
             }
         }
 

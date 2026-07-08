@@ -878,6 +878,12 @@ pub async fn get_config(State(state): State<AppState>) -> Result<impl IntoRespon
             data_dir: config.storage.data_dir.display().to_string(),
             temp_dir: config.storage.temp_dir.display().to_string(),
             local_storage_root: config.storage.local_storage_root.display().to_string(),
+            local_library_roots: config
+                .storage
+                .local_library_roots
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect(),
             max_disk_usage: config.storage.max_disk_usage,
         },
     };
@@ -1050,6 +1056,12 @@ pub async fn update_config(
             new_config.storage.temp_dir = PathBuf::from(temp_dir);
             updated_fields.push("storage.temp_dir".to_string());
             requires_restart.push("storage.temp_dir".to_string());
+        }
+        if let Some(local_library_roots) = storage_update.local_library_roots {
+            new_config.storage.local_library_roots =
+                local_library_roots.into_iter().map(PathBuf::from).collect();
+            updated_fields.push("storage.local_library_roots".to_string());
+            requires_restart.push("storage.local_library_roots".to_string());
         }
         if let Some(max_disk_usage) = storage_update.max_disk_usage {
             new_config.storage.max_disk_usage = max_disk_usage;

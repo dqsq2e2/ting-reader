@@ -1,0 +1,23 @@
+[common]
+displayName="Ting Reader"
+desc="<b>Ting Reader</b> is a self-hosted audiobook management system for audiobook enthusiasts. Connect directly to your NAS or WebDAV storage, and instantly transform it into a beautiful, intelligent personal audio library.<br/><br/>🌟 <b>Key Features</b><br/><br/><b>⚡ Rust Core</b>: Built with Rust backend for low resource usage and fast response.<br/><b>🔌 Plugin System</b>: Supports JS, WASM and Native plugins to easily extend metadata scraping sources and audio format support.<br/><b>📚 Auto Scraping</b>: Integrated metadata scraping to automatically fetch book titles, authors, narrators, descriptions and tags.<br/><b>🎨 Adaptive Theme</b>: Automatically extracts dominant colors from book covers and adjusts the interface style in real-time for an immersive experience.<br/><b>🎵 Full Format Support</b>: Supports MP3, M4A, M4B, WAV, FLAC, OGG, OPUS, AAC, WMA.<br/><b>🎧 Immersive Playback</b>: Supports speed adjustment, sleep timer, skip intro/outro and progress sync.<br/><br/>🚀 <b>Deployment & Setup</b><br/><br/><b>Initial Credentials</b>: For first login, use admin account <b>admin</b> with password <b>admin123</b>. Please change the password immediately after login.<br/><b>Storage Mapping</b>: Supports customizing audiobook storage path during installation wizard (default: <b>@appshare/ting-reader/storage</b>). Other system data (database, plugins, cache) will be automatically stored in default directories.<br/><br/>💰 <b>About the Project</b><br/><br/><b>Open Source</b>: This project is dedicated to providing a clean audiobook listening experience, completely free and continuously updated.<br/><b>Join the Community</b>: Join QQ group <a href=\"https://qm.qq.com/q/gGrl1fzeiQ\" target=\"_blank\">1082770534</a> for latest updates, technical support and usage tips. Feedback is welcome!"
+
+[entry]
+title="Ting Reader"
+
+[install]
+stepTitle="App Configuration"
+portLabel="Access Port"
+portRequired="Please enter a port number"
+portPattern="Port number must be digits only"
+storageLabel="Audiobook Storage Path (Host)"
+storageHelpText="<strong>Storage Info:</strong><br/>1. This field is <strong>optional</strong>. If left empty, the system will use the default <strong>@appshare/ting-reader/storage</strong> directory on the installation volume.<br/>2. If you specify a custom path, please ensure the container has permission to access it.<br/>3. Other application data (database, plugins, cache) will be automatically stored in corresponding subdirectories under <strong>@appshare/ting-reader</strong>, no configuration needed."
+
+[uninstall]
+stepTitle="Confirm Uninstall"
+helpText="You are about to uninstall Ting Reader. Please choose whether to clean up application data:"
+label="Data Cleanup Options"
+option1Label="Clean database and config (data)"
+option2Label="Clean plugins (plugins)"
+option3Label="Clean temporary files (temp)"
+noteHelpText="<strong>Note:</strong><br/>1. If nothing is selected, all data will be preserved.<br/>2. To protect your audiobook data, the uninstaller will <strong>not</strong> clean audio files in the storage directory. To delete them, please go to File Manager and clean up manually."

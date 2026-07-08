@@ -249,6 +249,7 @@ pub struct StorageConfigResponse {
     pub data_dir: String,
     pub temp_dir: String,
     pub local_storage_root: String,
+    pub local_library_roots: Vec<String>,
     pub max_disk_usage: u64,
 }
 
@@ -333,6 +334,7 @@ pub struct UpdateSecurityConfigRequest {
 pub struct UpdateStorageConfigRequest {
     pub data_dir: Option<String>,
     pub temp_dir: Option<String>,
+    pub local_library_roots: Option<Vec<String>>,
     pub max_disk_usage: Option<u64>,
 }
 

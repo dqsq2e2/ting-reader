@@ -6,6 +6,10 @@ on:
     tags:
       - 'v*'
 
+env:
+  FNPACK_VERSION: "1.2.3"
+  FYGOPACK_VERSION: "1.2.3"
+
 jobs:
   prepare:
     runs-on: ubuntu-latest
@@ -116,7 +120,7 @@ jobs:
         working-directory: /tmp/digests
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          
+
           if [ "${{ needs.prepare.outputs.target }}" = "beta" ]; then
             echo "Building beta image..."
             docker buildx imagetools create \
@@ -147,10 +151,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Prepare fnpack
-        run: |
-          chmod +x .github/workflows/fnpack
-          sudo mv .github/workflows/fnpack /usr/local/bin/fnpack
+      - name: Setup fnpack
+        uses: ./.github/actions/setup-fnpack
+        with:
+          version: ${{ env.FNPACK_VERSION }}
+
+      - name: Setup fygopack
+        uses: ./.github/actions/setup-fygopack
+        with:
+          version: ${{ env.FYGOPACK_VERSION }}
 
       - name: Build FPK (Formal)
         if: needs.prepare.outputs.target == 'formal'
@@ -158,16 +167,25 @@ jobs:
           VERSION="${{ needs.prepare.outputs.version }}"
           cp .github/ting-reader-fpk/manifest .github/ting-reader-fpk/manifest.bak
           sed -i "s/^version[[:space:]]*=.*/version = $VERSION/" .github/ting-reader-fpk/manifest
+
           fnpack build --directory .github/ting-reader-fpk
           mv ting-reader.fpk ting-reader-$VERSION.fpk
+
+          fygopack pack --directory .github/ting-reader-fpk
+          mv ting-reader.fpk ting-reader-fygo-$VERSION.fpk
+
           mv .github/ting-reader-fpk/manifest.bak .github/ting-reader-fpk/manifest
 
       - name: Build FPK (Beta)
         if: needs.prepare.outputs.target == 'beta'
         run: |
           sed -i "s/^version[[:space:]]*=.*/version = beta/" .github/ting-reader-fpk/manifest
+
           fnpack build --directory .github/ting-reader-fpk
           mv ting-reader.fpk ting-reader-beta.fpk
+
+          fygopack pack --directory .github/ting-reader-fpk
+          mv ting-reader.fpk ting-reader-fygo-beta.fpk
 
       - name: Update Beta Tag
         if: needs.prepare.outputs.target == 'beta'
@@ -187,7 +205,9 @@ jobs:
           prerelease: true
           make_latest: false
           overwrite_files: true
-          files: ting-reader-beta.fpk
+          files: |
+            ting-reader-beta.fpk
+            ting-reader-fygo-beta.fpk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -215,5 +235,6 @@ jobs:
           overwrite_files: true
           files: |
             ting-reader-${{ needs.prepare.outputs.version }}.fpk
+            ting-reader-fygo-${{ needs.prepare.outputs.version }}.fpk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

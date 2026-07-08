@@ -1,119 +1,68 @@
 import type { Book, Library } from '../../../core/types';
 import type { EditableChapter } from './types';
 
-const safeDecode = (str: string) => {
+const decodeSegment = (segment: string) => {
   try {
-    return decodeURIComponent(str);
+    return decodeURIComponent(segment);
   } catch {
-    return str;
+    return segment;
   }
 };
 
-const normalizePath = (path: string) => {
-  return safeDecode(path)
+const decodePathBySegment = (path: string) => (
+  path.split('/').map(decodeSegment).join('/')
+);
+
+const stripWindowsVerbatimPrefix = (path: string) => {
+  if (path.startsWith('\\\\?\\UNC\\')) return `//${path.slice(8)}`;
+  if (path.startsWith('//?/UNC/')) return `//${path.slice(8)}`;
+  if (path.startsWith('\\\\?\\')) return path.slice(4);
+  if (path.startsWith('//?/')) return path.slice(4);
+  return path;
+};
+
+const normalizePath = (path: string) => (
+  stripWindowsVerbatimPrefix(path)
     .replace(/\\/g, '/')
     .replace(/([^:])\/{2,}/g, '$1/')
-    .replace(/\/+$/g, '');
-};
+    .replace(/\/+$/g, '')
+);
 
-const stripOuterSlashes = (path: string) => {
-  return path.replace(/^\/+|\/+$/g, '');
-};
+const formatRemoteDisplayPath = (path: string) => {
+  const trimmed = path.trim();
+  if (!trimmed) return '';
 
-const joinDisplayPath = (...parts: Array<string | undefined | null>) => {
-  return parts
-    .map((part) => stripOuterSlashes(part || ''))
-    .filter(Boolean)
-    .join('/');
-};
-
-const getPathName = (path: string) => {
-  const parts = stripOuterSlashes(normalizePath(path)).split('/').filter(Boolean);
-  return parts[parts.length - 1] || path;
-};
-
-const relativeFromRoot = (path: string, root: string) => {
-  const normalizedPath = normalizePath(path);
-  const normalizedRoot = normalizePath(root);
-  if (!normalizedRoot || normalizedRoot === '/') return null;
-
-  const lowerPath = normalizedPath.toLowerCase();
-  const lowerRoot = normalizedRoot.toLowerCase();
-  if (lowerPath === lowerRoot) return '';
-  if (lowerPath.startsWith(`${lowerRoot}/`)) {
-    return stripOuterSlashes(normalizedPath.slice(normalizedRoot.length + 1));
+  try {
+    const url = new URL(trimmed);
+    const decodedPath = decodePathBySegment(url.pathname);
+    return normalizePath(`${url.origin}${decodedPath}${url.search}${url.hash}`);
+  } catch {
+    return normalizePath(decodePathBySegment(trimmed.replace(/\\/g, '/')));
   }
-  return null;
 };
 
-const relativeFromPathSegment = (path: string, segment: string) => {
-  const pathParts = stripOuterSlashes(normalizePath(path)).split('/').filter(Boolean);
-  const segmentParts = stripOuterSlashes(normalizePath(segment)).split('/').filter(Boolean);
-  if (segmentParts.length === 0 || segmentParts.length > pathParts.length) return null;
-
-  const lowerPathParts = pathParts.map((part) => part.toLowerCase());
-  const lowerSegmentParts = segmentParts.map((part) => part.toLowerCase());
-
-  for (let i = 0; i <= pathParts.length - segmentParts.length; i += 1) {
-    const matched = lowerSegmentParts.every(
-      (part, offset) => lowerPathParts[i + offset] === part,
-    );
-    if (matched) {
-      return pathParts.slice(i + segmentParts.length).join('/');
-    }
+export const formatChapterDisplayPath = (
+  chapter: EditableChapter,
+  _book: Book,
+  pathLibrary: Library | null,
+) => {
+  const path = chapter.path || '';
+  if (pathLibrary?.library_type === 'local') {
+    return normalizePath(path);
   }
 
-  return null;
+  return formatRemoteDisplayPath(path);
 };
 
 export const getRelativeChapterPath = (
   chapterPath: string,
   book: Book,
   pathLibrary: Library | null,
-) => {
-  const roots: string[] = [];
-
-  if (pathLibrary) {
-    if (pathLibrary.library_type === 'webdav') {
-      roots.push(joinDisplayPath(pathLibrary.url, pathLibrary.root_path));
-    }
-    roots.push(pathLibrary.url);
-    roots.push(pathLibrary.root_path);
-  }
-
-  for (const root of roots.filter(Boolean).sort((a, b) => b.length - a.length)) {
-    const relativePath = relativeFromRoot(chapterPath, root);
-    if (relativePath !== null) return relativePath;
-  }
-
-  if (pathLibrary?.library_type === 'local') {
-    for (const segment of [pathLibrary.url, pathLibrary.root_path].filter(Boolean)) {
-      const relativePath = relativeFromPathSegment(chapterPath, segment);
-      if (relativePath !== null) return relativePath;
-    }
-  }
-
-  if (book.path) {
-    const relativeToBook = relativeFromRoot(chapterPath, book.path);
-    if (relativeToBook !== null) {
-      return joinDisplayPath(getPathName(book.path), relativeToBook);
-    }
-  }
-
-  const normalizedPath = normalizePath(chapterPath);
-  if (!normalizedPath.includes(':') && !normalizedPath.startsWith('/')) {
-    return stripOuterSlashes(normalizedPath);
-  }
-  return getPathName(chapterPath);
-};
+) => formatChapterDisplayPath({ path: chapterPath } as EditableChapter, book, pathLibrary);
 
 export const formatChapterLocation = (
   chapter: EditableChapter,
   book: Book,
   pathLibrary: Library | null,
-  unknownLibrary: string,
-) => {
-  const libraryName = pathLibrary?.name || unknownLibrary;
-  const relativePath = getRelativeChapterPath(chapter.path, book, pathLibrary);
-  return relativePath ? `${libraryName} / ${relativePath}` : libraryName;
-};
+  _unknownLibrary: string,
+) => formatChapterDisplayPath(chapter, book, pathLibrary);

@@ -149,9 +149,14 @@ services:
       # - "[::]:3000:3000"
     volumes:
       - ./data:/app/data        # 数据库和配置
-      - ./storage:/app/storage  # 有声书文件目录
+      - ./storage:/app/storage  # 默认有声书文件目录
       - ./plugins:/app/plugins  # 插件目录
       - ./temp:/app/temp        # 临时缓存目录
+      # 可选：把多个宿主机目录挂到 /app/storage 下的不同子目录。
+      # 后台存储库管理会在 /app/storage 中看到这些子目录。
+      # 只扫描/播放用 :ro；需要写入 NFO/metadata 时改用 :rw。
+      # - /mnt/disk1/audiobooks:/app/storage/audiobooks:ro
+      # - /mnt/disk2/story:/app/storage/story:ro
     restart: unless-stopped
     environment:
       - RUST_LOG=info
@@ -163,6 +168,8 @@ services:
 ```
 
 > IPv6 访问需要 Docker 守护进程和宿主机网络同时启用 IPv6。直接运行二进制时，也可以将 `TING_SERVER__HOST` 设为 `::` 监听 IPv4/IPv6 双栈。
+
+Docker 中最简单的多目录方式是继续把目录挂到 `/app/storage` 的子目录下；Ting Reader 不要求所有文件实际来自同一个宿主机目录。裸机、fnOS 或其他部署方式也可以通过 `storage.local_library_roots` 或 fnOS 授权目录把应用已获准访问的本地目录加入存储库选择器。
 
 启动容器：
 

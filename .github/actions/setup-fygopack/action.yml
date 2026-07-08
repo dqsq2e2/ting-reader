@@ -1,0 +1,75 @@
+name: Setup fygopack
+description: Download and cache the official fygopack CLI.
+
+inputs:
+  version:
+    description: fygopack version to install.
+    required: false
+    default: "1.2.3"
+
+outputs:
+  path:
+    description: Path to the installed fygopack executable.
+    value: ${{ steps.resolve.outputs.bin }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve fygopack download
+      id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        case "${RUNNER_OS}-${RUNNER_ARCH}" in
+          Linux-X64)
+            suffix="linux-amd64"
+            ;;
+          Linux-ARM64)
+            suffix="linux-arm64"
+            ;;
+          macOS-X64)
+            suffix="darwin-amd64"
+            ;;
+          macOS-ARM64)
+            suffix="darwin-arm64"
+            ;;
+          *)
+            echo "::error::Unsupported fygopack runner: ${RUNNER_OS}-${RUNNER_ARCH}"
+            exit 1
+            ;;
+        esac
+
+        version="${{ inputs.version }}"
+        install_dir="$HOME/.cache/fygopack/${version}/${suffix}"
+        bin="${install_dir}/fygopack"
+        url="https://static2.fygonas.com/fygopack/fygopack-${version}-${suffix}"
+
+        echo "suffix=${suffix}" >> "$GITHUB_OUTPUT"
+        echo "install_dir=${install_dir}" >> "$GITHUB_OUTPUT"
+        echo "bin=${bin}" >> "$GITHUB_OUTPUT"
+        echo "url=${url}" >> "$GITHUB_OUTPUT"
+        echo "cache_key=fygopack-${version}-${suffix}" >> "$GITHUB_OUTPUT"
+
+    - name: Cache fygopack
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.resolve.outputs.install_dir }}
+        key: ${{ steps.resolve.outputs.cache_key }}
+
+    - name: Download fygopack
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "${{ steps.resolve.outputs.install_dir }}"
+        curl -fL --retry 3 --retry-delay 2 "${{ steps.resolve.outputs.url }}" -o "${{ steps.resolve.outputs.bin }}"
+
+    - name: Activate fygopack
+      shell: bash
+      run: |
+        set -euo pipefail
+        chmod +x "${{ steps.resolve.outputs.bin }}"
+        echo "${{ steps.resolve.outputs.install_dir }}" >> "$GITHUB_PATH"
+        "${{ steps.resolve.outputs.bin }}" --help >/dev/null

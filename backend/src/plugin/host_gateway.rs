@@ -1,4 +1,5 @@
 use crate::core::error::{Result, TingError};
+use crate::core::Config;
 mod data;
 mod files;
 mod personal;
@@ -13,7 +14,6 @@ use crate::plugin::manager::PluginManager;
 use crate::plugin::wasm::sandbox::Permission;
 use crate::plugin::PluginCache;
 use serde_json::Value;
-use std::path::PathBuf;
 use std::sync::{Arc, RwLock, Weak};
 
 #[derive(Clone)]
@@ -29,7 +29,7 @@ pub struct PluginHostGateway {
     plugin_manager: Arc<PluginManager>,
     plugin_cache: Arc<PluginCache>,
     encryption_key: Arc<[u8; 32]>,
-    local_storage_root: PathBuf,
+    config: Config,
 }
 
 #[derive(Clone, Default)]
@@ -120,7 +120,7 @@ impl PluginHostGateway {
         plugin_manager: Arc<PluginManager>,
         plugin_cache: Arc<PluginCache>,
         encryption_key: Arc<[u8; 32]>,
-        local_storage_root: PathBuf,
+        config: Config,
     ) -> Self {
         Self {
             book_repo,
@@ -134,7 +134,7 @@ impl PluginHostGateway {
             plugin_manager,
             plugin_cache,
             encryption_key,
-            local_storage_root,
+            config,
         }
     }
 

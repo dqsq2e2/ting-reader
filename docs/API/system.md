@@ -239,10 +239,16 @@
     "data_dir": "string",
     "temp_dir": "string",
     "local_storage_root": "string",
+    "local_library_roots": ["string"],
     "max_disk_usage": 50
   }
 }
 ```
+
+说明：
+
+- `local_storage_root` 是旧版默认本地库根目录，仍用于兼容相对路径库和 Docker 默认 `/app/storage`。
+- `local_library_roots` 可额外配置多个允许作为本地媒体库的根目录；配置后需要重启服务生效。
 
 ### PUT /api/system/config
 

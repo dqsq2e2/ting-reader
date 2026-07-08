@@ -8,7 +8,7 @@ import ChapterEditDialog from './chapterManager/ChapterEditDialog';
 import ChapterManagerHeader from './chapterManager/ChapterManagerHeader';
 import ChapterManagerList from './chapterManager/ChapterManagerList';
 import ChapterManagerToolbar from './chapterManager/ChapterManagerToolbar';
-import { formatChapterLocation } from './chapterManager/pathUtils';
+import { formatChapterDisplayPath } from './chapterManager/pathUtils';
 import type { ChapterEditDraft, ChapterGroup, ChapterTab, EditableChapter } from './chapterManager/types';
 
 interface Props {
@@ -90,7 +90,7 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
     if (!query) return tabChapters;
 
     return tabChapters.filter((chapter) => {
-      const location = formatChapterLocation(chapter, book, pathLibrary, t('chapterManager.unknownLibrary')).toLowerCase();
+      const location = formatChapterDisplayPath(chapter, book, pathLibrary).toLowerCase();
       return (
         chapter.title.toLowerCase().includes(query) ||
         String(chapter.chapter_index).includes(query) ||
@@ -250,7 +250,7 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
   };
 
   const editingLocation = editingChapter
-    ? formatChapterLocation(editingChapter, book, pathLibrary, t('chapterManager.unknownLibrary'))
+    ? formatChapterDisplayPath(editingChapter, book, pathLibrary)
     : '';
 
   return (

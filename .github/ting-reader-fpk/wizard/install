@@ -1,33 +1,33 @@
 [
     {
-        "stepTitle": "应用配置",
+        "stepTitle": "${install.stepTitle}",
         "items": [
             {
                 "type": "text",
                 "field": "wizard_port",
-                "label": "访问端口",
+                "label": "${install.portLabel}",
                 "initValue": "3000",
                 "rules": [
                     {
                         "required": true,
-                        "message": "请输入端口号"
+                        "message": "${install.portRequired}"
                     },
                     {
                         "pattern": "^[0-9]+$",
-                        "message": "端口号必须是数字"
+                        "message": "${install.portPattern}"
                     }
                 ]
             },
             {
                 "type": "text",
                 "field": "wizard_storage_path",
-                "label": "有声书存储路径 (宿主机)",
+                "label": "${install.storageLabel}",
                 "initValue": "",
                 "rules": []
             },
             {
                 "type": "tips",
-                "helpText": "<strong>存储说明：</strong><br/>1. 本项为<strong>可选</strong>。如果不填写，系统将默认使用安装磁盘的 <strong>@appshare/ting-reader/storage</strong> 目录。<br/>2. 如果您填写了自定义路径，请确保容器有权限访问该路径。<br/>3. 其他应用数据（如数据库、插件、缓存）将自动存储在 <strong>@appshare/ting-reader</strong> 下的对应子目录中，无需配置。"
+                "helpText": "${install.storageHelpText}"
             }
         ]
     }

@@ -1,7 +1,7 @@
 {
     ".url": {
         "ting-reader.main": {
-            "title": "听悦",
+            "title": "${entry.title}",
             "icon": "images/icon-{0}.png",
             "type": "url",
             "protocol": "http",

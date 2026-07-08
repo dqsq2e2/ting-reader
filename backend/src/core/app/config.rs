@@ -96,6 +96,7 @@ impl Config {
             .set_default("storage.data_dir", "./data")?
             .set_default("storage.temp_dir", "./temp")?
             .set_default("storage.local_storage_root", "./storage")?
+            .set_default("storage.local_library_roots", Vec::<String>::new())?
             .set_default("storage.max_disk_usage", 10737418240u64)? // 10 GB
             .set_default("audio.cache_enabled", true)?
             .set_default("audio.cache_size", 104857600)? // 100 MB
@@ -202,6 +203,8 @@ impl Config {
             .set_default("security.hsts_max_age", 31536000)?
             .set_default("storage.data_dir", "./data")?
             .set_default("storage.temp_dir", "./temp")?
+            .set_default("storage.local_storage_root", "./storage")?
+            .set_default("storage.local_library_roots", Vec::<String>::new())?
             .set_default("storage.max_disk_usage", 10737418240u64)?
             .set_default("audio.cache_enabled", true)?
             .set_default("audio.cache_size", 104857600)? // 100 MB
@@ -509,6 +512,8 @@ pub struct StorageConfig {
     pub temp_dir: PathBuf,
     pub max_disk_usage: u64,         // bytes
     pub local_storage_root: PathBuf, // Root directory for local libraries
+    #[serde(default)]
+    pub local_library_roots: Vec<PathBuf>, // Additional allowed roots for local libraries
 }
 
 impl StorageConfig {
@@ -522,6 +527,22 @@ impl StorageConfig {
         if self.temp_dir.as_os_str().is_empty() {
             return Err(ConfigError::InvalidStorage(
                 "temp_dir cannot be empty".to_string(),
+            ));
+        }
+
+        if self.local_storage_root.as_os_str().is_empty() {
+            return Err(ConfigError::InvalidStorage(
+                "local_storage_root cannot be empty".to_string(),
+            ));
+        }
+
+        if self
+            .local_library_roots
+            .iter()
+            .any(|root| root.as_os_str().is_empty())
+        {
+            return Err(ConfigError::InvalidStorage(
+                "local_library_roots cannot contain empty paths".to_string(),
             ));
         }
 
