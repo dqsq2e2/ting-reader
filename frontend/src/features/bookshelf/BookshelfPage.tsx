@@ -34,10 +34,17 @@ const BookshelfPage: React.FC = () => {
   const [activeLetter, setActiveLetter] = useState<string | null>(null);
   const [isTouchingIndex, setIsTouchingIndex] = useState(false);
   
-  // Selection mode for creating series
+  // Selection mode for creating series and bulk actions
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedBookIds, setSelectedBookIds] = useState<string[]>([]);
+  const [selectedSeriesIds, setSelectedSeriesIds] = useState<string[]>([]);
   const [isSeriesModalOpen, setIsSeriesModalOpen] = useState(false);
+  const [isOperationsOpen, setIsOperationsOpen] = useState(false);
+  const [isDeleteBookOpen, setIsDeleteBookOpen] = useState(false);
+  const [isDeleteSeriesOpen, setIsDeleteSeriesOpen] = useState(false);
+  const [deletingBooks, setDeletingBooks] = useState(false);
+  const [deletingSeries, setDeletingSeries] = useState(false);
+  const [deleteSourceFiles, setDeleteSourceFiles] = useState(false);
 
   // Lazy loading state
   const [visibleCount, setVisibleCount] = useState(50);
@@ -190,17 +197,83 @@ const BookshelfPage: React.FC = () => {
     );
   };
 
+  const toggleSeriesSelection = (id: string) => {
+    setSelectedSeriesIds(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const exitSelectionMode = () => {
+    setIsSelectionMode(false);
+    setSelectedBookIds([]);
+    setSelectedSeriesIds([]);
+    setIsOperationsOpen(false);
+    fetchData();
+  };
+
   const handleSelectAll = () => {
-    if (filteredBooks.length === 0) return;
+    if (filteredBooks.length === 0 && filteredSeries.length === 0) return;
     
-    const allVisibleSelected = filteredBooks.every(b => selectedBookIds.includes(b.id));
+    const allBooksSelected = filteredBooks.every(b => selectedBookIds.includes(b.id));
+    const allSeriesSelected = filteredSeries.every(s => selectedSeriesIds.includes(s.id));
     
-    if (allVisibleSelected) {
-      const visibleIds = new Set(filteredBooks.map(b => b.id));
-      setSelectedBookIds(prev => prev.filter(id => !visibleIds.has(id)));
+    if (allBooksSelected && allSeriesSelected) {
+      setSelectedBookIds([]);
+      setSelectedSeriesIds([]);
     } else {
-      const visibleIds = filteredBooks.map(b => b.id);
-      setSelectedBookIds(prev => [...new Set([...prev, ...visibleIds])]);
+      setSelectedBookIds(filteredBooks.map(b => b.id));
+      setSelectedSeriesIds(filteredSeries.map(s => s.id));
+    }
+  };
+
+  const handleDeleteClick = () => {
+    if (selectedSeriesIds.length > 0) {
+      setIsDeleteSeriesOpen(true);
+    } else if (selectedBookIds.length > 0) {
+      setIsDeleteBookOpen(true);
+    }
+  };
+
+  const handleDeleteBooks = async () => {
+    try {
+      setDeletingBooks(true);
+      await Promise.all(
+        selectedBookIds.map(id =>
+          apiClient.delete(`/api/books/${id}?delete_files=${deleteSourceFiles}`)
+        )
+      );
+      exitSelectionMode();
+      fetchData();
+    } catch (err) {
+      console.error('Failed to delete books', err);
+      alert(t('bookshelf.deleteBookFailed'));
+    } finally {
+      setDeletingBooks(false);
+      setIsDeleteBookOpen(false);
+    }
+  };
+
+  const handleDeleteSeries = async () => {
+    try {
+      setDeletingSeries(true);
+      await Promise.all(
+        selectedSeriesIds.map(id =>
+          apiClient.delete(`/api/v1/series/${id}`)
+        )
+      );
+      setIsDeleteSeriesOpen(false);
+      if (selectedBookIds.length > 0) {
+        setIsDeleteBookOpen(true);
+      } else {
+        exitSelectionMode();
+        fetchData();
+      }
+    } catch (err) {
+      console.error('Failed to delete series', err);
+      alert(t('bookshelf.deleteSeriesFailed'));
+      setIsDeleteSeriesOpen(false);
+    } finally {
+      setDeletingSeries(false);
     }
   };
 
@@ -300,7 +373,7 @@ const BookshelfPage: React.FC = () => {
     return { groups: newGroups, sortedKeys: newSortedKeys };
   }, [groupedItems, visibleCount]);
 
-  const visibleSeries = !isSelectionMode ? filteredSeries.slice(0, visibleCount) : [];
+  const visibleSeries = filteredSeries.slice(0, visibleCount);
   const remainingCount = Math.max(0, visibleCount - visibleSeries.length);
   const visibleBooks = filteredBooks.slice(0, remainingCount);
 
@@ -340,6 +413,30 @@ const BookshelfPage: React.FC = () => {
     );
   }
 
+  const mockBookForDeletion = React.useMemo(() => {
+    if (selectedBookIds.length === 0) return null;
+    if (selectedBookIds.length === 1) {
+      return books.find(b => b.id === selectedBookIds[0]) || null;
+    }
+    const firstBook = books.find(b => b.id === selectedBookIds[0]);
+    return {
+      id: 'bulk',
+      title: t('bookshelf.selectedCount', { count: selectedBookIds.length }),
+      library_type: firstBook?.library_type || 'local',
+    } as Book;
+  }, [selectedBookIds, books, t]);
+
+  const mockSeriesForDeletion = React.useMemo(() => {
+    if (selectedSeriesIds.length === 0) return null;
+    if (selectedSeriesIds.length === 1) {
+      return series.find(s => s.id === selectedSeriesIds[0]) || null;
+    }
+    return {
+      id: 'bulk',
+      title: t('bookshelf.selectedCount', { count: selectedSeriesIds.length }),
+    } as Series;
+  }, [selectedSeriesIds, series, t]);
+
   return (
     <div className="flex-1 min-h-full flex flex-col p-4 sm:p-6 md:p-8">
       <div className="flex-1 space-y-6">
@@ -354,9 +451,9 @@ const BookshelfPage: React.FC = () => {
           
           <div className="flex flex-wrap min-[550px]:flex-nowrap items-center gap-2 sm:gap-3 w-full min-[880px]:w-auto justify-end">
             {isSelectionMode ? (
-              <div className="flex items-center gap-2 order-1">
+              <div className="flex items-center gap-2 order-1 relative">
                 <span className="text-sm font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap hidden sm:inline">
-                  {t('bookshelf.selectedCount', { count: selectedBookIds.length })}
+                  {t('bookshelf.selectedCount', { count: selectedBookIds.length + selectedSeriesIds.length })}
                 </span>
                 <button
                   onClick={handleSelectAll}
@@ -367,17 +464,49 @@ const BookshelfPage: React.FC = () => {
                   <span>{t('bookshelf.selectAll')}</span>
                 </button>
                 {isAdmin && (
-                  <button
-                    onClick={() => setIsSeriesModalOpen(true)}
-                    disabled={selectedBookIds.length === 0}
-                    className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-primary-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-primary-500/30 disabled:opacity-50 whitespace-nowrap shrink-0"
-                  >
-                    <Layers size={18} />
-                    <span>{t('bookshelf.createSeries')}</span>
-                  </button>
+                  <div className="relative">
+                    <button
+                      onClick={() => setIsOperationsOpen(!isOperationsOpen)}
+                      disabled={selectedBookIds.length === 0 && selectedSeriesIds.length === 0}
+                      className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-primary-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-primary-500/30 disabled:opacity-50 whitespace-nowrap shrink-0 transition-all active:scale-95"
+                    >
+                      <span>{t('bookshelf.batchOperations', '操作')}</span>
+                      <ChevronDown size={14} className={`transition-transform duration-200 ${isOperationsOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    {isOperationsOpen && (
+                      <>
+                        <div className="fixed inset-0 z-40 cursor-default" onClick={() => setIsOperationsOpen(false)} />
+                        <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                          <div className="p-1.5 space-y-1">
+                            <button
+                              onClick={() => {
+                                setIsOperationsOpen(false);
+                                setIsSeriesModalOpen(true);
+                              }}
+                              disabled={selectedBookIds.length === 0 || selectedSeriesIds.length > 0}
+                              className="w-full text-left px-4 py-2.5 text-sm font-semibold rounded-xl transition-colors text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800 flex items-center gap-2 disabled:opacity-50 disabled:hover:bg-transparent"
+                            >
+                              <Layers size={16} />
+                              <span>{t('bookshelf.createSeries')}</span>
+                            </button>
+                            <button
+                              onClick={() => {
+                                setIsOperationsOpen(false);
+                                handleDeleteClick();
+                              }}
+                              className="w-full text-left px-4 py-2.5 text-sm font-semibold rounded-xl transition-colors text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 flex items-center gap-2"
+                            >
+                              <Trash2 size={16} />
+                              <span>{t('common.delete')}</span>
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 )}
                 <button
-                  onClick={() => { setIsSelectionMode(false); setSelectedBookIds([]); }}
+                  onClick={exitSelectionMode}
                   className="p-2.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl shrink-0"
                 >
                   <X size={20} />
@@ -532,7 +661,24 @@ const BookshelfPage: React.FC = () => {
                    <div className={`grid ${getGridCols()}`}>
                      {visibleGroupedItems.groups[key].map(item => (
                        'books' in item ? (
-                         <SeriesCard key={item.id} series={item as Series} coverShape={coverShape} />
+                          <div key={item.id} className="relative">
+                            {isSelectionMode ? (
+                              <>
+                                <div className={`absolute top-2 right-2 z-30 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all pointer-events-none ${selectedSeriesIds.includes(item.id) ? 'bg-primary-600 border-primary-600 text-white' : 'bg-white/80 dark:bg-slate-900/80 border-slate-300 dark:border-slate-600'}`}>
+                                  {selectedSeriesIds.includes(item.id) && <Check size={14} />}
+                                </div>
+                                <div className={`transition-opacity duration-200 ${selectedSeriesIds.includes(item.id) ? 'opacity-100' : 'opacity-60 grayscale-[0.5]'}`}>
+                                  <SeriesCard 
+                                    series={item as Series} 
+                                    onClick={() => toggleSeriesSelection(item.id)} 
+                                    coverShape={coverShape} 
+                                  />
+                                </div>
+                              </>
+                            ) : (
+                              <SeriesCard series={item as Series} coverShape={coverShape} />
+                            )}
+                          </div>
                        ) : (
                          <div key={item.id} className="relative">
                           {isSelectionMode ? (
@@ -563,7 +709,24 @@ const BookshelfPage: React.FC = () => {
             // Default Layout (Recent)
             <div className={`grid ${getGridCols()}`}>
               {visibleSeries.map((s) => (
-                <SeriesCard key={s.id} series={s} coverShape={coverShape} />
+                <div key={s.id} className="relative">
+                  {isSelectionMode ? (
+                    <>
+                      <div className={`absolute top-2 right-2 z-30 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all pointer-events-none ${selectedSeriesIds.includes(s.id) ? 'bg-primary-600 border-primary-600 text-white' : 'bg-white/80 dark:bg-slate-900/80 border-slate-300 dark:border-slate-600'}`}>
+                        {selectedSeriesIds.includes(s.id) && <Check size={14} />}
+                      </div>
+                      <div className={`transition-opacity duration-200 ${selectedSeriesIds.includes(s.id) ? 'opacity-100' : 'opacity-60 grayscale-[0.5]'}`}>
+                        <SeriesCard 
+                          series={s} 
+                          onClick={() => toggleSeriesSelection(s.id)} 
+                          coverShape={coverShape} 
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <SeriesCard series={s} coverShape={coverShape} />
+                  )}
+                </div>
               ))}
               {visibleBooks.map((book) => (
                 <div key={book.id} className="relative">
@@ -625,12 +788,28 @@ const BookshelfPage: React.FC = () => {
         isOpen={isSeriesModalOpen}
         onClose={() => setIsSeriesModalOpen(false)}
         selectedBooks={books.filter(b => selectedBookIds.includes(b.id))}
-        onSuccess={() => {
-          setIsSelectionMode(false);
-          setSelectedBookIds([]);
-          fetchData();
-        }}
+        onSuccess={exitSelectionMode}
       />
+
+      {isDeleteBookOpen && mockBookForDeletion && (
+        <DeleteBookModal
+          book={mockBookForDeletion}
+          deleting={deletingBooks}
+          deleteSourceFiles={deleteSourceFiles}
+          onToggleDeleteSourceFiles={() => setDeleteSourceFiles(!deleteSourceFiles)}
+          onClose={() => setIsDeleteBookOpen(false)}
+          onConfirm={handleDeleteBooks}
+        />
+      )}
+
+      {isDeleteSeriesOpen && mockSeriesForDeletion && (
+        <DeleteSeriesModal
+          series={mockSeriesForDeletion}
+          deleting={deletingSeries}
+          onClose={() => setIsDeleteSeriesOpen(false)}
+          onConfirm={handleDeleteSeries}
+        />
+      )}
 
       {/* Dynamic Safe Bottom Spacer */}
       <div 

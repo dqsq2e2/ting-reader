@@ -12,6 +12,7 @@ import { localeCompare } from '../../core/utils/locale';
 import { usePlayerStore } from '../../core/stores/playerStore';
 import { useAuthStore } from '../../core/stores/authStore';
 import { getCoverAspectClass, useBookshelfCoverShape } from '../../core/hooks/useBookshelfCoverShape';
+import DeleteSeriesModal from './bookDetail/DeleteSeriesModal';
 
 type SeriesSortBy = 'default' | 'title' | 'author';
 
@@ -27,6 +28,8 @@ const SeriesDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [showBookSelector, setShowBookSelector] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const { setIsSeriesEditing } = usePlayerStore();
   
   // Filter & Sort state
@@ -141,12 +144,16 @@ const SeriesDetailPage: React.FC = () => {
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(t('bookshelf.deleteSeriesConfirm'))) return;
     try {
+      setDeleting(true);
       await apiClient.delete(`/api/v1/series/${id}`);
       navigate('/bookshelf');
     } catch (err) {
       console.error('Failed to delete series', err);
+      alert(t('bookshelf.deleteSeriesFailed'));
+    } finally {
+      setDeleting(false);
+      setIsDeleteModalOpen(false);
     }
   };
 
@@ -269,7 +276,7 @@ const SeriesDetailPage: React.FC = () => {
                   {t('common.cancel')}
                 </button>
               </div>
-              <button onClick={handleDelete} className="w-full p-2 bg-red-50 text-red-600 rounded hover:bg-red-100 flex items-center justify-center gap-2">
+              <button onClick={() => setIsDeleteModalOpen(true)} className="w-full p-2 bg-red-50 text-red-600 rounded hover:bg-red-100 flex items-center justify-center gap-2">
                   <Trash2 size={18} /> {t('bookshelf.deleteSeries')}
               </button>
             </div>
@@ -367,6 +374,15 @@ const SeriesDetailPage: React.FC = () => {
             setBooks([...books, book]);
             setShowBookSelector(false);
           }}
+        />
+      )}
+
+      {isDeleteModalOpen && series && (
+        <DeleteSeriesModal
+          series={series}
+          deleting={deleting}
+          onClose={() => setIsDeleteModalOpen(false)}
+          onConfirm={handleDelete}
         />
       )}
     </div>
