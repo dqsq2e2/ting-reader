@@ -624,14 +624,6 @@ const AdminLibraries: React.FC = () => {
                   <div className="space-y-4">
                     <div className="space-y-2">
                       <label className="text-sm font-bold text-slate-600 dark:text-slate-400">{t('adminLibraries.localPath')}</label>
-                      <input
-                        type="text"
-                        required
-                        value={formData.url}
-                        onChange={e => setFormData({...formData, url: e.target.value})}
-                        placeholder={t('adminLibraries.localPathPlaceholder')}
-                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
-                      />
                       <div className="relative">
                         {/* Selector Trigger */}
                         <button
