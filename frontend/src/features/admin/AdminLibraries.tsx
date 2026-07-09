@@ -672,7 +672,7 @@ const AdminLibraries: React.FC = () => {
                                 >
                                   {storageRoots.map((root) => (
                                     <option key={root.path} value={root.path}>
-                                      {root.path} · {root.source}
+                                      {root.path}
                                     </option>
                                   ))}
                                 </select>

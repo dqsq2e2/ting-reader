@@ -1,5 +1,7 @@
 #!/bin/bash
 
-### This script is called after the user change environment variables in application setting page.
+# Restart the application when configuration/authorization changes
+"$(dirname "$0")/main" stop
+"$(dirname "$0")/main" start
 
 exit 0
