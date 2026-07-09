@@ -633,14 +633,20 @@ const BookDetailPage: React.FC = () => {
 
   const handleEditSave = async () => {
     try {
-      const dataToSave = { ...editData };
-      // If cover changed, clear theme color so it's recalculated
-    if (editData.cover_url && editData.cover_url !== displayCoverUrl) {
-        dataToSave.theme_color = undefined;
-      }
-      
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const payload: Record<string, any> = { ...dataToSave };
+      const payload: Record<string, any> = {
+        title: editData.title,
+        author: editData.author,
+        narrator: editData.narrator,
+        tags: editData.tags,
+        genre: editData.genre,
+        year: editData.year,
+        cover_url: editData.cover_url,
+        skip_intro: editData.skip_intro,
+        skip_outro: editData.skip_outro,
+        chapter_regex: editData.chapter_regex,
+        description: editData.description,
+      };
       
       const res = await apiClient.patch(`/api/books/${id}`, payload);
       const updatedBookData = res.data;

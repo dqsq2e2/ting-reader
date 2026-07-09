@@ -264,6 +264,7 @@ const zhCN = {
     autoGenerate: "自动生成",
     chapterRegexHelp: "用于从文件名提取章节号和标题。修改后需重新扫描生效。",
     coverUrl: "封面 URL",
+    bookLocation: "书籍位置",
     skipIntroSeconds: "跳过片头 (秒)",
     skipOutroSeconds: "跳过片尾 (秒)",
     groupDisplayOrder: "分组展示顺序",

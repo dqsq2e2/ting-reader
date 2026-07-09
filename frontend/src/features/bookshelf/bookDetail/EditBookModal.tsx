@@ -55,7 +55,9 @@ const EditBookModal: React.FC<Props> = ({
   onWriteMetadata,
 }) => {
   const { t } = useTranslation();
+  const [locationExpanded, setLocationExpanded] = React.useState(false);
   const update = (patch: Partial<Book>) => onChangeEditData({ ...editData, ...patch });
+  const bookLocation = editData.path || '';
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
@@ -242,6 +244,19 @@ const EditBookModal: React.FC<Props> = ({
                   onChange={e => update({ cover_url: e.target.value })}
                   className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-sm sm:text-base bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                 />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">{t('bookshelf.bookLocation')}</label>
+                <button
+                  type="button"
+                  title={bookLocation}
+                  onClick={() => setLocationExpanded(value => !value)}
+                  className={`w-full px-3 py-2 sm:px-4 sm:py-2.5 text-left text-xs sm:text-sm font-mono bg-slate-100 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 rounded-xl outline-none text-slate-600 dark:text-slate-300 cursor-pointer ${
+                    locationExpanded ? 'whitespace-pre-wrap break-all' : 'truncate'
+                  }`}
+                >
+                  {bookLocation}
+                </button>
               </div>
               <div className="grid grid-cols-2 gap-3 sm:gap-4">
                 <div className="space-y-1">

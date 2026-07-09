@@ -278,6 +278,7 @@ const enUS = {
     chapterRegexHelp:
       "Extract chapter numbers and titles from filenames. Rescan after editing for changes to take effect.",
     coverUrl: "Cover URL",
+    bookLocation: "Book Location",
     skipIntroSeconds: "Skip Intro (sec)",
     skipOutroSeconds: "Skip Outro (sec)",
     groupDisplayOrder: "Group Display Order",
