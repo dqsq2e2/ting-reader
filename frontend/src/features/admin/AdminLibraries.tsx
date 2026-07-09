@@ -7,7 +7,7 @@ import {
   Database,
   RefreshCw,
   Trash2,
-  Globe,
+  Home,
   Folder,
   Loader2,
   CheckCircle2,
@@ -685,7 +685,7 @@ const AdminLibraries: React.FC = () => {
                                 onClick={() => setCurrentBrowsePath('')}
                                 className={`p-1.5 rounded-lg transition-colors ${currentBrowsePath === '' ? 'bg-primary-100 text-primary-600' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                               >
-                                <Globe size={16} />
+                                <Home size={16} />
                               </button>
                               {currentBrowsePath.split('/').filter(Boolean).map((part, i, arr) => (
                                 <React.Fragment key={i}>

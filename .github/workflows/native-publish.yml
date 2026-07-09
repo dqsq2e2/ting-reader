@@ -167,13 +167,19 @@ jobs:
           # 在 version 行之后插入 platform 行
           sed -i "/^version[[:space:]]*=/a platform = ${{ matrix.arch }}" .github/ting-reader-fpk-native/manifest
 
-          # fnpack 打包
+          # fnpack 打包 (用目前中文版的)
           fnpack build --directory .github/ting-reader-fpk-native
           mv ting-reader.fpk "$FN_OUTPUT"
 
-          # fygopack 打包
+          # fygopack 打包 (切换为英文版 LICENSE)
+          cp .github/ting-reader-fpk-native/LICENSE .github/ting-reader-fpk-native/LICENSE.bak
+          cp .github/ting-reader-fpk-native/LICENSE.en .github/ting-reader-fpk-native/LICENSE
+
           fygopack build --directory .github/ting-reader-fpk-native
           mv ting-reader.fpk "$FYGO_OUTPUT"
+
+          # 还原中文版 LICENSE
+          mv .github/ting-reader-fpk-native/LICENSE.bak .github/ting-reader-fpk-native/LICENSE
 
       - name: Update Beta Tag
         if: steps.release_context.outputs.target == 'beta'
