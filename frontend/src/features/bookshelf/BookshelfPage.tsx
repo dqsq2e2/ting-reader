@@ -493,8 +493,7 @@ const BookshelfPage: React.FC = () => {
                         e.stopPropagation();
                         setIsOperationsOpen(!isOperationsOpen);
                       }}
-                      disabled={selectedBookIds.length === 0 && selectedSeriesIds.length === 0}
-                      className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-primary-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-primary-500/30 disabled:opacity-50 whitespace-nowrap shrink-0 transition-all active:scale-95"
+                      className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-sm font-bold shadow-lg shadow-primary-500/30 whitespace-nowrap shrink-0 transition-all active:scale-95"
                     >
                       <span>{t('bookshelf.batchOperations', '操作')}</span>
                       <ChevronDown size={14} className={`transition-transform duration-200 ${isOperationsOpen ? 'rotate-180' : ''}`} />
@@ -502,27 +501,35 @@ const BookshelfPage: React.FC = () => {
                     {isOperationsOpen && (
                       <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                         <div className="p-1.5 space-y-1">
-                          <button
-                            onClick={() => {
-                              setIsOperationsOpen(false);
-                              setIsSeriesModalOpen(true);
-                            }}
-                            disabled={selectedBookIds.length === 0 || selectedSeriesIds.length > 0}
-                            className="w-full text-left px-4 py-2.5 text-sm font-semibold rounded-xl transition-colors text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800 flex items-center gap-2 disabled:opacity-50 disabled:hover:bg-transparent"
-                          >
-                            <Layers size={16} />
-                            <span>{t('bookshelf.createSeries')}</span>
-                          </button>
-                          <button
-                            onClick={() => {
-                              setIsOperationsOpen(false);
-                              handleDeleteClick();
-                            }}
-                            className="w-full text-left px-4 py-2.5 text-sm font-semibold rounded-xl transition-colors text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 flex items-center gap-2"
-                          >
-                            <Trash2 size={16} />
-                            <span>{t('common.delete')}</span>
-                          </button>
+                          {selectedBookIds.length === 0 && selectedSeriesIds.length === 0 ? (
+                            <div className="px-4 py-3 text-xs text-center text-slate-400 dark:text-slate-500 font-medium">
+                              {t('bookshelf.selectItemsFirst', '请先在下方勾选书籍或系列')}
+                            </div>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setIsOperationsOpen(false);
+                                  setIsSeriesModalOpen(true);
+                                }}
+                                disabled={selectedBookIds.length === 0 || selectedSeriesIds.length > 0}
+                                className="w-full text-left px-4 py-2.5 text-sm font-semibold rounded-xl transition-colors text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800 flex items-center gap-2 disabled:opacity-50 disabled:hover:bg-transparent"
+                              >
+                                <Layers size={16} />
+                                <span>{t('bookshelf.createSeries')}</span>
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setIsOperationsOpen(false);
+                                  handleDeleteClick();
+                                }}
+                                className="w-full text-left px-4 py-2.5 text-sm font-semibold rounded-xl transition-colors text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 flex items-center gap-2"
+                              >
+                                <Trash2 size={16} />
+                                <span>{t('common.delete')}</span>
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
                     )}
