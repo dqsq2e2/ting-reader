@@ -64,5 +64,4 @@ export const formatChapterLocation = (
   chapter: EditableChapter,
   book: Book,
   pathLibrary: Library | null,
-  _unknownLibrary: string,
 ) => formatChapterDisplayPath(chapter, book, pathLibrary);

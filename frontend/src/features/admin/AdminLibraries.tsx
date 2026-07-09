@@ -133,12 +133,14 @@ const AdminLibraries: React.FC = () => {
     if (isModalOpen && formData.type === 'local') {
       fetchStorageRoots();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isModalOpen, formData.type]);
 
   useEffect(() => {
     if (isModalOpen && formData.type === 'local') {
       fetchFolders(currentBrowsePath);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isModalOpen, formData.type, currentBrowsePath, selectedStorageRoot]);
 
   const fetchFolders = async (subPath: string) => {

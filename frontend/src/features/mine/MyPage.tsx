@@ -60,6 +60,7 @@ const MyPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setAccountData((current) => ({
       ...current,
       username: user?.username || "",

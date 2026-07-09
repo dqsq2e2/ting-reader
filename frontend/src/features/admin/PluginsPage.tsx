@@ -152,7 +152,6 @@ const PluginsPage: React.FC = () => {
         return;
       }
       console.error('Failed to install plugin', err);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const msg = response?.data?.error || (err as Error)?.message || t('adminPlugins.unknownError');
       alert(t('adminPlugins.installFailed', { message: msg }));
     } finally {

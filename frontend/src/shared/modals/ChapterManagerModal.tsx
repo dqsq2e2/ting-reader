@@ -97,7 +97,7 @@ const ChapterManagerModal: React.FC<Props> = ({ book, bookId, initialChapters, o
         location.includes(query)
       );
     });
-  }, [book, pathLibrary, search, t, tabChapters]);
+  }, [book, pathLibrary, search, tabChapters]);
 
   const groups = useMemo<ChapterGroup[]>(() => {
     const count = Math.ceil(filteredChapters.length / groupSize);
