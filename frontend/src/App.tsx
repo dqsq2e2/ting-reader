@@ -20,7 +20,7 @@ import AdminLibraries from './features/admin/AdminLibraries';
 import AdminUsers from './features/admin/AdminUsers';
 import LogsPage from './features/admin/LogsPage';
 import PluginsPage from './features/admin/PluginsPage';
-import DownloadsPage from './features/admin/DownloadsPage';
+import CacheManagementPage from './features/mine/CacheManagementPage';
 import WidgetPage from './features/widget/WidgetPage';
 import { useAuthStore } from './core/stores/authStore';
 
@@ -67,7 +67,11 @@ function App() {
           } />
           <Route path="about" element={<AboutPage />} />
           <Route path="settings" element={<Navigate to="/personalization" replace />} />
-          <Route path="downloads" element={<DownloadsPage />} />
+          <Route path="cache" element={
+            <AdminRoute>
+              <CacheManagementPage />
+            </AdminRoute>
+          } />
           <Route path="statistics" element={
             <AdminRoute>
               <AdminStatisticsPage />

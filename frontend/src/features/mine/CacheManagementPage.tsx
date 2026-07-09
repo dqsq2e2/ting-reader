@@ -2,10 +2,10 @@ import React, { useEffect, useState } from 'react';
 import apiClient from '../../core/api/client';
 import { Trash2, HardDrive, Download, Database, ChevronDown, ChevronRight } from 'lucide-react';
 import { getCoverAspectClass, useBookshelfCoverShape } from '../../core/hooks/useBookshelfCoverShape';
-// import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import BackButton from '../../shared/widgets/BackButton';
 
-const DownloadsPage: React.FC = () => {
+const CacheManagementPage: React.FC = () => {
   const { t, i18n } = useTranslation();
   const coverShape = useBookshelfCoverShape();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -109,8 +109,10 @@ const DownloadsPage: React.FC = () => {
 
   return (
     <div className="flex-1 min-h-full flex flex-col p-4 sm:p-6 md:p-8 animate-in fade-in duration-500">
-      <div className="flex items-center justify-between mb-8">
-        <div>
+      <div className="mb-8 space-y-4">
+        <BackButton fallback="/mine" />
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div>
             <div className="flex items-center gap-3">
                 <h1 className="text-2xl md:text-3xl font-bold dark:text-white flex items-center gap-3">
                     <Download size={28} className="text-primary-600 md:w-8 md:h-8" />
@@ -120,8 +122,8 @@ const DownloadsPage: React.FC = () => {
             <p className="text-sm md:text-base text-slate-500 mt-1 ml-10">
                 {t('downloadsPage.subtitle')}
             </p>
-        </div>
-        <div className="flex gap-2">
+          </div>
+          <div className="flex gap-2 shrink-0">
             {cachedFiles.length > 0 && (
                 <button 
                     onClick={handleClearAll} 
@@ -131,6 +133,7 @@ const DownloadsPage: React.FC = () => {
                     {t('downloadsPage.clearAll')}
                 </button>
             )}
+          </div>
         </div>
       </div>
 
@@ -236,4 +239,4 @@ const DownloadsPage: React.FC = () => {
   );
 };
 
-export default DownloadsPage;
+export default CacheManagementPage;

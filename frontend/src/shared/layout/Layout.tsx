@@ -11,8 +11,6 @@ import {
   Database,
   Users,
   Terminal,
-  // Headphones,
-  Download,
   ListMusic,
   Puzzle
 } from 'lucide-react';
@@ -117,12 +115,11 @@ const Layout: React.FC = () => {
     { icon: <Home size={20} />, label: t('nav.home'), path: '/' },
     { icon: <Library size={20} />, label: t('nav.bookshelf'), path: '/bookshelf', matches: ['/bookshelf', '/book/', '/series/', '/search'] },
     { icon: <ListMusic size={20} />, label: t('nav.playlists'), path: '/playlists', matches: ['/playlists'] },
-    { icon: <User size={20} />, label: t('nav.mine'), path: '/mine', matches: ['/mine', '/history', '/favorites', '/personalization', '/notifications', '/statistics', '/admin/statistics'] },
+    { icon: <User size={20} />, label: t('nav.mine'), path: '/mine', matches: ['/mine', '/history', '/favorites', '/personalization', '/notifications', '/statistics', '/admin/statistics', '/cache'] },
   ] satisfies NavItem[];
 
   const adminItems = [
     { icon: <Database size={20} />, label: t('nav.libraries'), path: '/admin/libraries' },
-    { icon: <Download size={20} />, label: t('nav.downloads'), path: '/downloads' },
     { icon: <Puzzle size={20} />, label: t('nav.plugins'), path: '/admin/plugins' },
     { icon: <Terminal size={20} />, label: t('nav.logs'), path: '/admin/logs' },
     { icon: <Users size={20} />, label: t('nav.users'), path: '/admin/users' },

@@ -9,6 +9,7 @@ import {
   ChevronRight,
   BarChart3,
   BellRing,
+  Download,
   Heart,
   History,
   Info,
@@ -257,6 +258,15 @@ const MyPage: React.FC = () => {
               description={t("mine.personalizationDescription")}
               tone="text-blue-600 bg-blue-50 dark:bg-blue-900/20"
             />
+            {user?.role === "admin" && (
+              <EntryItem
+                to="/cache"
+                icon={<Download size={22} />}
+                title={t("downloadsPage.title")}
+                description={t("mine.cacheManagementDescription")}
+                tone="text-sky-600 bg-sky-50 dark:bg-sky-900/20"
+              />
+            )}
             {user?.role === "admin" && (
               <EntryItem
                 to="/notifications"

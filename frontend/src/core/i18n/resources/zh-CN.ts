@@ -134,6 +134,7 @@ const zhCN = {
     favoritesDescription: "收藏夹里有 {{count}} 部作品",
     settingsManagement: "设置与管理",
     personalizationDescription: "外观展示与播放偏好",
+    cacheManagementDescription: "清理和查看服务端音频缓存",
     notificationTitle: "通知与事件",
     notificationDescription: "配置 Webhook 监听登录、播放、入库和删除",
     statisticsTitle: "数据统计",

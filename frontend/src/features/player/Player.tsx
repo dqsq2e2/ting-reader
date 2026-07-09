@@ -799,7 +799,7 @@ const Player: React.FC = () => {
     [t],
   );
 
-  const hiddenPaths = ["/admin", "/settings", "/downloads", "/cache"];
+  const hiddenPaths = ["/admin", "/settings", "/cache"];
   const isHiddenPage = hiddenPaths.some((path) =>
     location.pathname.startsWith(path),
   );

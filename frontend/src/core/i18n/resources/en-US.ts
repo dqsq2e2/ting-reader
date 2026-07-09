@@ -143,6 +143,7 @@ const enUS = {
     favoritesDescription: "{{count}} works in favorites",
     settingsManagement: "Settings & Admin",
     personalizationDescription: "Appearance and playback preferences",
+    cacheManagementDescription: "Review and clear server-side audio cache",
     notificationTitle: "Notifications & Events",
     notificationDescription:
       "Configure webhooks for login, playback, library import, and deletion",
