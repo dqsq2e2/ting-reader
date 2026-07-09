@@ -6,8 +6,10 @@ import type { Book, Library, Series } from '../../core/types';
 import BookCard from '../../shared/cards/BookCard';
 import SeriesCard from '../../shared/cards/SeriesCard';
 import SeriesModal from '../../shared/modals/SeriesModal';
+import DeleteBookModal from './bookDetail/DeleteBookModal';
+import DeleteSeriesModal from './bookDetail/DeleteSeriesModal';
 import DisplaySettingsMenu from '../../shared/widgets/DisplaySettingsMenu';
-import { Search, Database, Plus, Library as LibraryIcon, Layers, Check, X, CheckSquare } from 'lucide-react';
+import { Search, Database, Plus, Library as LibraryIcon, Layers, Check, X, CheckSquare, ChevronDown, Trash2 } from 'lucide-react';
 import { usePlayerStore } from '../../core/stores/playerStore';
 import { useAuthStore } from '../../core/stores/authStore';
 import { getPinyinInitial } from '../../core/utils/pinyin';
@@ -104,6 +106,27 @@ const BookshelfPage: React.FC = () => {
     };
     loadSettings();
   }, []);
+
+  // Close operations menu when clicking outside
+  useEffect(() => {
+    if (!isOperationsOpen) return;
+    
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.operations-dropdown-container')) {
+        setIsOperationsOpen(false);
+      }
+    };
+    
+    const timer = setTimeout(() => {
+      document.addEventListener('click', handleOutsideClick);
+    }, 50);
+    
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('click', handleOutsideClick);
+    };
+  }, [isOperationsOpen]);
 
   const handleLibraryChange = (newId: string) => {
     setSelectedLibraryId(newId);
@@ -404,15 +427,6 @@ const BookshelfPage: React.FC = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center min-h-full">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-        <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">{t('common.loading')}</p>
-      </div>
-    );
-  }
-
   const mockBookForDeletion = React.useMemo(() => {
     if (selectedBookIds.length === 0) return null;
     if (selectedBookIds.length === 1) {
@@ -436,6 +450,15 @@ const BookshelfPage: React.FC = () => {
       title: t('bookshelf.selectedCount', { count: selectedSeriesIds.length }),
     } as Series;
   }, [selectedSeriesIds, series, t]);
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center min-h-full">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+        <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">{t('common.loading')}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 min-h-full flex flex-col p-4 sm:p-6 md:p-8">
@@ -464,9 +487,12 @@ const BookshelfPage: React.FC = () => {
                   <span>{t('bookshelf.selectAll')}</span>
                 </button>
                 {isAdmin && (
-                  <div className="relative">
+                  <div className="relative operations-dropdown-container">
                     <button
-                      onClick={() => setIsOperationsOpen(!isOperationsOpen)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsOperationsOpen(!isOperationsOpen);
+                      }}
                       disabled={selectedBookIds.length === 0 && selectedSeriesIds.length === 0}
                       className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-primary-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-primary-500/30 disabled:opacity-50 whitespace-nowrap shrink-0 transition-all active:scale-95"
                     >
@@ -474,34 +500,31 @@ const BookshelfPage: React.FC = () => {
                       <ChevronDown size={14} className={`transition-transform duration-200 ${isOperationsOpen ? 'rotate-180' : ''}`} />
                     </button>
                     {isOperationsOpen && (
-                      <>
-                        <div className="fixed inset-0 z-40 cursor-default" onClick={() => setIsOperationsOpen(false)} />
-                        <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                          <div className="p-1.5 space-y-1">
-                            <button
-                              onClick={() => {
-                                setIsOperationsOpen(false);
-                                setIsSeriesModalOpen(true);
-                              }}
-                              disabled={selectedBookIds.length === 0 || selectedSeriesIds.length > 0}
-                              className="w-full text-left px-4 py-2.5 text-sm font-semibold rounded-xl transition-colors text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800 flex items-center gap-2 disabled:opacity-50 disabled:hover:bg-transparent"
-                            >
-                              <Layers size={16} />
-                              <span>{t('bookshelf.createSeries')}</span>
-                            </button>
-                            <button
-                              onClick={() => {
-                                setIsOperationsOpen(false);
-                                handleDeleteClick();
-                              }}
-                              className="w-full text-left px-4 py-2.5 text-sm font-semibold rounded-xl transition-colors text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 flex items-center gap-2"
-                            >
-                              <Trash2 size={16} />
-                              <span>{t('common.delete')}</span>
-                            </button>
-                          </div>
+                      <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                        <div className="p-1.5 space-y-1">
+                          <button
+                            onClick={() => {
+                              setIsOperationsOpen(false);
+                              setIsSeriesModalOpen(true);
+                            }}
+                            disabled={selectedBookIds.length === 0 || selectedSeriesIds.length > 0}
+                            className="w-full text-left px-4 py-2.5 text-sm font-semibold rounded-xl transition-colors text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800 flex items-center gap-2 disabled:opacity-50 disabled:hover:bg-transparent"
+                          >
+                            <Layers size={16} />
+                            <span>{t('bookshelf.createSeries')}</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setIsOperationsOpen(false);
+                              handleDeleteClick();
+                            }}
+                            className="w-full text-left px-4 py-2.5 text-sm font-semibold rounded-xl transition-colors text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 flex items-center gap-2"
+                          >
+                            <Trash2 size={16} />
+                            <span>{t('common.delete')}</span>
+                          </button>
                         </div>
-                      </>
+                      </div>
                     )}
                   </div>
                 )}
