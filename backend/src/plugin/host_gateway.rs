@@ -231,7 +231,10 @@ impl PluginHostGateway {
                     | (PluginHostPermission::ProgressRead, Permission::DatabaseRead)
                     | (PluginHostPermission::MediaReadUrl, Permission::MediaReadUrl)
                     | (PluginHostPermission::MediaReadUrl, Permission::MediaRead)
-                    | (PluginHostPermission::PluginRouteSign, Permission::PluginRouteSign)
+                    | (
+                        PluginHostPermission::PluginRouteSign,
+                        Permission::PluginRouteSign
+                    )
                     | (
                         PluginHostPermission::MetadataWrite,
                         Permission::MetadataWrite

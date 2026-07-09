@@ -59,7 +59,7 @@ impl LibraryWatcher {
                                 );
                                 continue;
                             }
-                    };
+                        };
                     if let Err(e) = self
                         .watch_library(&library.id, &path_to_display_string(&full_path))
                         .await

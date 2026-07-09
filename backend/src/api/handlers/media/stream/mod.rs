@@ -8,9 +8,7 @@ mod strm;
 use crate::api::handlers::AppState;
 use crate::auth::middleware::AuthUser;
 use crate::core::error::{Result, TingError};
-use crate::core::signing::{
-    constant_time_eq, sign_media_stream_request, signature_has_expired,
-};
+use crate::core::signing::{constant_time_eq, sign_media_stream_request, signature_has_expired};
 use crate::db::models::{Chapter, Library};
 use crate::db::repository::Repository;
 use crate::plugin::manager::{FormatMethod, PluginInfo};

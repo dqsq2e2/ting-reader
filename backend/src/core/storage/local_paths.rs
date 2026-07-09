@@ -27,9 +27,8 @@ pub fn discover_authorized_roots(config: &Config) -> Vec<AuthorizedRoot> {
     }
 
     // Fallback to environment variable if file is missing or empty
-    let paths_val = accessible_paths.unwrap_or_else(|| {
-        std::env::var("TRIM_DATA_ACCESSIBLE_PATHS").unwrap_or_default()
-    });
+    let paths_val = accessible_paths
+        .unwrap_or_else(|| std::env::var("TRIM_DATA_ACCESSIBLE_PATHS").unwrap_or_default());
 
     if !paths_val.trim().is_empty() {
         for path in split_trim_accessible_paths(&paths_val) {

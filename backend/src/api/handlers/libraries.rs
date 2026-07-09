@@ -6,8 +6,8 @@ use crate::api::models::{
 use crate::api::require_admin;
 use crate::core::error::{Result, TingError};
 use crate::core::local_paths::{
-    discover_authorized_roots, ensure_path_inside_root, resolve_existing_local_library_root,
-    path_to_display_string, resolve_local_library_path, resolve_storage_folder_target,
+    discover_authorized_roots, ensure_path_inside_root, path_to_display_string,
+    resolve_existing_local_library_root, resolve_local_library_path, resolve_storage_folder_target,
 };
 use axum::{
     extract::{Path, Query, State},

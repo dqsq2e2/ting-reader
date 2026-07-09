@@ -228,9 +228,10 @@ impl PluginHostGateway {
             .ok_or_else(|| {
                 TingError::NotFound(format!("Library with id {} not found", library_id))
             })?;
-        let book = self.book_repo.find_by_id(&book_id).await?.ok_or_else(|| {
-            TingError::NotFound(format!("Book with id {} not found", book_id))
-        })?;
+        let book =
+            self.book_repo.find_by_id(&book_id).await?.ok_or_else(|| {
+                TingError::NotFound(format!("Book with id {} not found", book_id))
+            })?;
         if book.library_id != library.id {
             return Err(TingError::InvalidRequest(format!(
                 "Book {} does not belong to library {}",
