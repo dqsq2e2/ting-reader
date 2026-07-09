@@ -17,8 +17,22 @@ pub fn discover_authorized_roots(config: &Config) -> Vec<AuthorizedRoot> {
     let mut roots = Vec::new();
     let mut seen = HashSet::new();
 
-    if let Ok(value) = std::env::var("TRIM_DATA_ACCESSIBLE_PATHS") {
-        for path in split_trim_accessible_paths(&value) {
+    // Try reading from the .accessible_paths file generated dynamically by config_callback
+    let mut accessible_paths = None;
+    let paths_file = config.storage.data_dir.join(".accessible_paths");
+    if paths_file.is_file() {
+        if let Ok(content) = std::fs::read_to_string(&paths_file) {
+            accessible_paths = Some(content);
+        }
+    }
+
+    // Fallback to environment variable if file is missing or empty
+    let paths_val = accessible_paths.unwrap_or_else(|| {
+        std::env::var("TRIM_DATA_ACCESSIBLE_PATHS").unwrap_or_default()
+    });
+
+    if !paths_val.trim().is_empty() {
+        for path in split_trim_accessible_paths(&paths_val) {
             push_authorized_root(&mut roots, &mut seen, path, "fnos");
         }
     }

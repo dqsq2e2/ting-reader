@@ -1,7 +1,11 @@
 #!/bin/bash
 
-# Restart the application when configuration/authorization changes
-"$(dirname "$0")/main" stop
-"$(dirname "$0")/main" start
+# Write the updated accessible paths to a file for runtime reload without restart
+IFS=':' read -r -a SHARES <<< "$TRIM_DATA_SHARE_PATHS"
+DATA_DIR="${SHARES[0]}"
+
+if [ -n "$DATA_DIR" ] && [ -d "$DATA_DIR" ]; then
+    echo "$TRIM_DATA_ACCESSIBLE_PATHS" > "$DATA_DIR/.accessible_paths"
+fi
 
 exit 0
