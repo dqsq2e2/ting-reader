@@ -12,6 +12,7 @@ const enUS = {
     retry: "Retry connection",
     save: "Save",
     edit: "Edit",
+    delete: "Delete",
     loading: "Loading...",
     saveFailed: "Save failed",
     saved: "Saved",
