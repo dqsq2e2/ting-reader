@@ -33,7 +33,9 @@ const DeleteBookModal: React.FC<Props> = ({
 
         <h3 className="text-xl font-bold text-center dark:text-white mb-2">{t('bookshelf.deleteBookTitle')}</h3>
         <p className="text-slate-500 dark:text-slate-400 text-center mb-8">
-          {t('bookshelf.deleteBookMessage', { title: book.title })}
+          {book.id === 'bulk'
+            ? t('bookshelf.deleteBooksMessageBulk', { count: book.title })
+            : t('bookshelf.deleteBookMessage', { title: book.title })}
         </p>
 
         {book.library_type === 'local' && (

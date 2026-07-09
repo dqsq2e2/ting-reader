@@ -37,7 +37,16 @@ pub async fn list_books(
         .find_with_filters(&user.id, is_admin, search, tag, library_id)
         .await?;
 
-    let book_responses: Vec<BookResponse> = books.into_iter().map(BookResponse::from).collect();
+    let libraries = state.library_repo.find_all().await?;
+    let library_types: std::collections::HashMap<String, String> = libraries
+        .into_iter()
+        .map(|l| (l.id, l.library_type))
+        .collect();
+
+    let mut book_responses: Vec<BookResponse> = books.into_iter().map(BookResponse::from).collect();
+    for r in &mut book_responses {
+        r.library_type = library_types.get(&r.library_id).cloned();
+    }
 
     Ok(Json(book_responses))
 }

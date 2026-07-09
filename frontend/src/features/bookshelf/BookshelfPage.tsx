@@ -435,10 +435,10 @@ const BookshelfPage: React.FC = () => {
     const firstBook = books.find(b => b.id === selectedBookIds[0]);
     return {
       id: 'bulk',
-      title: t('bookshelf.selectedCount', { count: selectedBookIds.length }),
+      title: selectedBookIds.length.toString(),
       library_type: firstBook?.library_type || 'local',
     } as Book;
-  }, [selectedBookIds, books, t]);
+  }, [selectedBookIds, books]);
 
   const mockSeriesForDeletion = React.useMemo(() => {
     if (selectedSeriesIds.length === 0) return null;
@@ -447,9 +447,9 @@ const BookshelfPage: React.FC = () => {
     }
     return {
       id: 'bulk',
-      title: t('bookshelf.selectedCount', { count: selectedSeriesIds.length }),
+      title: selectedSeriesIds.length.toString(),
     } as Series;
-  }, [selectedSeriesIds, series, t]);
+  }, [selectedSeriesIds, series]);
 
   if (loading) {
     return (

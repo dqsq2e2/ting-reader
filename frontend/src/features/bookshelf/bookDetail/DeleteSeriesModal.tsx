@@ -30,7 +30,7 @@ const DeleteSeriesModal: React.FC<Props> = ({
           <h3 className="text-xl font-bold text-center dark:text-white mb-2">{t('bookshelf.deleteSeries')}</h3>
           <p className="text-slate-500 dark:text-slate-400 text-center mb-8">
             {series.id === 'bulk'
-              ? t('bookshelf.deleteSeriesConfirm')
+              ? t('bookshelf.deleteSeriesConfirmBulk', { count: series.title })
               : `${t('bookshelf.deleteSeriesConfirm')} (${series.title})`
             }
           </p>

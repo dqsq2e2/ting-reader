@@ -247,6 +247,8 @@ const enUS = {
     deleteBookTitle: "Delete book?",
     deleteBookMessage:
       'Remove "{{title}}" from the bookshelf and clear playback progress.',
+    deleteBooksMessageBulk:
+      'Remove the selected {{count}} books from the bookshelf and clear playback progress.',
     deleteSourceFiles: "Delete local files too",
     irreversibleWarning: "This cannot be undone",
     confirmDelete: "Delete",
@@ -321,6 +323,8 @@ const enUS = {
     deleteSeriesFailed: "Failed to delete series",
     deleteSeriesConfirm:
       "Delete this series? Books in the series will not be deleted.",
+    deleteSeriesConfirmBulk:
+      "Delete the selected {{count}} series? Books in the series will not be deleted.",
     seriesNotFound: "Series not found",
     titlePlaceholder: "Title",
     narratorPlaceholder: "Narrator",

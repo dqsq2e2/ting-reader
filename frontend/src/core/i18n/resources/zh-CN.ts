@@ -234,6 +234,8 @@ const zhCN = {
     deleteBookTitle: "确认删除书籍？",
     deleteBookMessage:
       "此操作将从书架中移除《{{title}}》，并清除所有相关的播放进度。",
+    deleteBooksMessageBulk:
+      "此操作将从书架中移除选中的 {{count}} 本书籍，并清除所有相关的播放进度。",
     deleteSourceFiles: "同时删除本地源文件",
     irreversibleWarning: "警告：此操作不可撤销",
     confirmDelete: "确认删除",
@@ -306,6 +308,7 @@ const zhCN = {
     updateSeriesFailed: "更新系列失败",
     deleteSeriesFailed: "删除系列失败",
     deleteSeriesConfirm: "确定要删除此系列吗？系列中的书籍不会被删除。",
+    deleteSeriesConfirmBulk: "确定要删除选中的 {{count}} 个系列吗？系列中的书籍不会被删除。",
     seriesNotFound: "系列未找到",
     titlePlaceholder: "标题",
     narratorPlaceholder: "演播",
