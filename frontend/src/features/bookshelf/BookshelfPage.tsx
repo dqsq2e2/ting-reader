@@ -250,6 +250,7 @@ const BookshelfPage: React.FC = () => {
   };
 
   const handleDeleteClick = () => {
+    setDeleteSourceFiles(false);
     if (selectedSeriesIds.length > 0) {
       setIsDeleteSeriesOpen(true);
     } else if (selectedBookIds.length > 0) {
@@ -286,6 +287,7 @@ const BookshelfPage: React.FC = () => {
       );
       setIsDeleteSeriesOpen(false);
       if (selectedBookIds.length > 0) {
+        setDeleteSourceFiles(false);
         setIsDeleteBookOpen(true);
       } else {
         exitSelectionMode();
@@ -429,14 +431,18 @@ const BookshelfPage: React.FC = () => {
 
   const mockBookForDeletion = React.useMemo(() => {
     if (selectedBookIds.length === 0) return null;
+    const selectedBooks = selectedBookIds
+      .map(id => books.find(b => b.id === id))
+      .filter((book): book is Book => Boolean(book));
     if (selectedBookIds.length === 1) {
-      return books.find(b => b.id === selectedBookIds[0]) || null;
+      return selectedBooks[0] || null;
     }
-    const firstBook = books.find(b => b.id === selectedBookIds[0]);
+    const firstBook = selectedBooks[0];
+    const hasLocalBook = selectedBooks.some(book => book.library_type === 'local');
     return {
       id: 'bulk',
       title: selectedBookIds.length.toString(),
-      library_type: firstBook?.library_type || 'local',
+      library_type: hasLocalBook ? 'local' : firstBook?.library_type,
     } as Book;
   }, [selectedBookIds, books]);
 

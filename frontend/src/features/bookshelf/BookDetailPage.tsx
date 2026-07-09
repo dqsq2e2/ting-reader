@@ -902,6 +902,7 @@ const BookDetailPage: React.FC = () => {
           onClose={() => setIsEditModalOpen(false)}
           onDelete={() => {
             setIsEditModalOpen(false);
+            setDeleteSourceFiles(false);
             setIsDeleteModalOpen(true);
           }}
           onSave={handleEditSave}
