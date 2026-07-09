@@ -7,7 +7,6 @@ import {
   Database,
   RefreshCw,
   Trash2,
-  Home,
   Folder,
   Loader2,
   CheckCircle2,
@@ -16,7 +15,8 @@ import {
   Wifi,
   ChevronDown,
   RotateCcw,
-  Rss
+  Rss,
+  Globe
 } from 'lucide-react';
 import HelpHint from '../../shared/ui/HelpHint';
 import ScraperConfigurator from './ScraperConfigurator';
@@ -683,9 +683,13 @@ const AdminLibraries: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => setCurrentBrowsePath('')}
-                                className={`p-1.5 rounded-lg transition-colors ${currentBrowsePath === '' ? 'bg-primary-100 text-primary-600' : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+                                className={`px-2 py-1 text-xs font-bold rounded-lg transition-colors shrink-0 ${
+                                  currentBrowsePath === ''
+                                    ? 'bg-primary-50 text-primary-600 dark:bg-primary-950/30'
+                                    : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+                                }`}
                               >
-                                <Home size={16} />
+                                {t('adminLibraries.rootDirectory')}
                               </button>
                               {currentBrowsePath.split('/').filter(Boolean).map((part, i, arr) => (
                                 <React.Fragment key={i}>
