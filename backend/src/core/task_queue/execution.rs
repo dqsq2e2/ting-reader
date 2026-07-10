@@ -3,6 +3,9 @@ use crate::core::error::Result;
 use crate::db::repository::Repository;
 use id3::frame::{Picture, PictureType as Id3PictureType};
 use id3::{Tag, TagLike, Version};
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::Path;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -428,21 +431,33 @@ impl TaskQueue {
                 continue;
             }
 
-            // Find plugin that supports this format
+            // Detect the actual container instead of trusting the extension. Files downloaded
+            // from some sources may be M4A/MP4 data incorrectly named with a .mp3 suffix.
             let ext = path
                 .extension()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_lowercase();
+            let detected_format = detect_audio_format(path).unwrap_or_else(|| ext.to_string());
+            if detected_format != ext {
+                warn!(
+                    "Audio extension mismatch for {:?}: extension={}, detected={}",
+                    path, ext, detected_format
+                );
+            }
             let plugins = plugin_manager
                 .find_plugins_by_capability_kind("format_handler")
                 .await;
 
-            // Prioritize native-audio-support if available for this extension
+            // Route by the detected container so mislabeled files use the correct tag writer.
             let plugin_info = plugins.into_iter().find(|p| {
                 p.supported_extensions
                     .as_ref()
-                    .map(|e| e.contains(&ext))
+                    .map(|extensions| {
+                        extensions
+                            .iter()
+                            .any(|supported| supported.eq_ignore_ascii_case(&detected_format))
+                    })
                     .unwrap_or(false)
             });
 
@@ -465,6 +480,7 @@ impl TaskQueue {
                     "genre": book.genre.as_deref().unwrap_or(""),
                     "description": book.description.as_deref().unwrap_or(""),
                     "cover_path": cover_path_str,
+                    "detected_format": detected_format,
                 });
 
                 match plugin_manager
@@ -483,7 +499,7 @@ impl TaskQueue {
                 }
             } else {
                 // No plugin found, try native/builtin support
-                if ext == "mp3" {
+                if detected_format == "mp3" {
                     let path_clone = path.to_path_buf();
                     let title_clone = chapter.title.clone().unwrap_or_default();
                     let artist_clone = if let Some(narrator) = &book.narrator {
@@ -606,5 +622,126 @@ impl TaskQueue {
         );
 
         Ok(())
+    }
+}
+
+fn detect_audio_format(path: &Path) -> Option<String> {
+    const ASF_HEADER_GUID: [u8; 12] = [
+        0x30, 0x26, 0xb2, 0x75, 0x8e, 0x66, 0xcf, 0x11, 0xa6, 0xd9, 0x00, 0xaa,
+    ];
+
+    let mut file = File::open(path).ok()?;
+    let mut header = [0_u8; 12];
+    let read = file.read(&mut header).ok()?;
+    if read < 4 {
+        return None;
+    }
+
+    let mut media_offset = 0_u64;
+    if read >= 10 && &header[..3] == b"ID3" {
+        media_offset = 10
+            + ((u64::from(header[6]) & 0x7f) << 21)
+            + ((u64::from(header[7]) & 0x7f) << 14)
+            + ((u64::from(header[8]) & 0x7f) << 7)
+            + (u64::from(header[9]) & 0x7f);
+        file.seek(SeekFrom::Start(media_offset)).ok()?;
+        header.fill(0);
+        if file.read(&mut header).ok()? < 4 {
+            return None;
+        }
+    }
+
+    if &header[4..8] == b"ftyp" {
+        return Some("m4a".to_string());
+    }
+    if media_offset > 0 && &header[1..5] == b"ftyp" {
+        return Some("m4a".to_string());
+    }
+    if header.starts_with(b"fLaC") {
+        return Some("flac".to_string());
+    }
+    if header.starts_with(b"OggS") {
+        return Some("ogg".to_string());
+    }
+    if header.starts_with(b"RIFF") && &header[8..12] == b"WAVE" {
+        return Some("wav".to_string());
+    }
+    if header == ASF_HEADER_GUID {
+        return Some("wma".to_string());
+    }
+    if header[0] == 0xff && header[1] & 0xe0 == 0xe0 {
+        return Some("mp3".to_string());
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod metadata_format_tests {
+    use super::detect_audio_format;
+    use std::fs;
+
+    fn id3_header(payload_size: u32) -> [u8; 10] {
+        [
+            b'I',
+            b'D',
+            b'3',
+            3,
+            0,
+            0,
+            ((payload_size >> 21) & 0x7f) as u8,
+            ((payload_size >> 14) & 0x7f) as u8,
+            ((payload_size >> 7) & 0x7f) as u8,
+            (payload_size & 0x7f) as u8,
+        ]
+    }
+
+    #[test]
+    fn detects_mp4_hidden_behind_mp3_extension_and_id3() {
+        let path = std::env::temp_dir().join(format!("ting-format-{}.mp3", uuid::Uuid::new_v4()));
+        let mut bytes = id3_header(4).to_vec();
+        bytes.extend_from_slice(&[0; 4]);
+        bytes.extend_from_slice(&[0, 0, 0, 28, b'f', b't', b'y', b'p', b'M', b'4', b'A', b' ']);
+        fs::write(&path, bytes).unwrap();
+
+        assert_eq!(detect_audio_format(&path).as_deref(), Some("m4a"));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn detects_mp4_with_box_size_damaged_by_id3_rewrite() {
+        let path = std::env::temp_dir().join(format!("ting-format-{}.mp3", uuid::Uuid::new_v4()));
+        let mut bytes = id3_header(0).to_vec();
+        bytes.extend_from_slice(&[28, b'f', b't', b'y', b'p', b'M', b'4', b'A', b' ']);
+        fs::write(&path, bytes).unwrap();
+
+        assert_eq!(detect_audio_format(&path).as_deref(), Some("m4a"));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn detects_standard_mp3_after_id3() {
+        let path = std::env::temp_dir().join(format!("ting-format-{}.mp3", uuid::Uuid::new_v4()));
+        let mut bytes = id3_header(0).to_vec();
+        bytes.extend_from_slice(&[0xff, 0xfb, 0x50, 0x00]);
+        fs::write(&path, bytes).unwrap();
+
+        assert_eq!(detect_audio_format(&path).as_deref(), Some("mp3"));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn detects_wma_asf_header() {
+        let path = std::env::temp_dir().join(format!("ting-format-{}.bin", uuid::Uuid::new_v4()));
+        fs::write(
+            &path,
+            [
+                0x30, 0x26, 0xb2, 0x75, 0x8e, 0x66, 0xcf, 0x11, 0xa6, 0xd9, 0x00, 0xaa,
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(detect_audio_format(&path).as_deref(), Some("wma"));
+        fs::remove_file(path).unwrap();
     }
 }

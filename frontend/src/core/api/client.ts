@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { type AxiosAdapter, type AxiosRequestConfig, type AxiosResponse } from 'axios';
 import { useAuthStore } from '../stores/authStore';
 import i18n from '../i18n';
 import { safeStorage } from '../utils/storage';
@@ -8,10 +8,65 @@ const API_BASE_URL = safeStorage.getItem('active_url') || safeStorage.getItem('s
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
+  timeout: 45000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+const mutationMethods = new Set(['post', 'put', 'patch', 'delete']);
+const inFlightMutations = new Map<string, Promise<AxiosResponse>>();
+const defaultAdapter = axios.getAdapter(apiClient.defaults.adapter) as AxiosAdapter;
+
+const stableSerialize = (value: unknown): string => {
+  if (value === null || value === undefined) return '';
+  if (typeof FormData !== 'undefined' && value instanceof FormData) {
+    return JSON.stringify(
+      Array.from(value.entries()).map(([key, entry]) => [
+        key,
+        typeof entry === 'string' ? entry : `${entry.name}:${entry.size}:${entry.type}`,
+      ]),
+    );
+  }
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(',')}]`;
+  if (typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableSerialize(entry)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+};
+
+const mutationFingerprint = (config: AxiosRequestConfig) => [
+  config.method?.toLowerCase(),
+  config.baseURL,
+  config.url,
+  stableSerialize(config.params),
+  stableSerialize(config.data),
+].join('|');
+
+const createIdempotencyKey = () => {
+  const now = Date.now();
+  return typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${now}-${Math.random().toString(36).slice(2)}`;
+};
+
+const singleFlightAdapter: AxiosAdapter = (config) => {
+  const fingerprint = mutationFingerprint(config);
+  const existing = inFlightMutations.get(fingerprint);
+  if (existing) return existing;
+
+  if (!config.headers.has('Idempotency-Key')) {
+    config.headers.set('Idempotency-Key', createIdempotencyKey());
+  }
+  const request = defaultAdapter(config).finally(() => {
+    inFlightMutations.delete(fingerprint);
+  });
+  inFlightMutations.set(fingerprint, request);
+  return request;
+};
 
 apiClient.interceptors.request.use((config) => {
   const { token, activeUrl } = useAuthStore.getState();
@@ -25,6 +80,10 @@ apiClient.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`;
   }
   config.headers['Accept-Language'] = i18n.resolvedLanguage || i18n.language || 'zh-CN';
+
+  if (mutationMethods.has(config.method?.toLowerCase() || '')) {
+    config.adapter = singleFlightAdapter;
+  }
 
   return config;
 });

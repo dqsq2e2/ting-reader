@@ -427,7 +427,8 @@ export const useNextChapterPreloader = (options: {
 };
 
 // ─── useProgressSync ────────────────────────────────────────────────────────
-// 进度同步：播放中走 WS（2s 一次）+ HTTP（15s 一次），第一拍打 playbackStart 标记；
+// 进度同步：WS 可用时每 2 秒同步，断线时降级为 HTTP 每 15 秒同步；
+// 第一拍打 playbackStart 标记；
 // 同时暂停瞬间立即 flush 一次，避免丢最后几秒进度。
 // currentTime 用 ref 间接读，效避免每次时间变化都重建定时器。
 export const useProgressSync = (options: {
@@ -435,6 +436,7 @@ export const useProgressSync = (options: {
   bookId: string | undefined;
   chapterId: string | undefined;
   currentTime: number;
+  isWsConnected: boolean;
   wsSendProgress: (
     bookId: string,
     chapterId: string,
@@ -442,14 +444,15 @@ export const useProgressSync = (options: {
     playbackStart?: number,
   ) => void;
 }) => {
-  const { isPlaying, bookId, chapterId, currentTime, wsSendProgress } = options;
+  const { isPlaying, bookId, chapterId, currentTime, isWsConnected, wsSendProgress } = options;
 
   const currentTimeRef = useRef(0);
   useEffect(() => {
     currentTimeRef.current = currentTime;
   }, [currentTime]);
 
-  const timersRef = useRef<{ ws: ReturnType<typeof setInterval>; http: ReturnType<typeof setInterval> } | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const playbackStartSentRef = useRef(false);
 
   useEffect(() => {
     if (isPlaying && bookId && chapterId) {
@@ -466,39 +469,45 @@ export const useProgressSync = (options: {
       };
 
       const start = Math.floor(currentTimeRef.current);
-      saveWs(start);
-      saveHttp(start);
-
-      timersRef.current = {
-        ws: setInterval(saveWs, 2000),
-        http: setInterval(saveHttp, 15000),
-      };
-    } else if (timersRef.current) {
-      clearInterval(timersRef.current.ws);
-      clearInterval(timersRef.current.http);
-      timersRef.current = null;
+      const playbackStart = playbackStartSentRef.current ? undefined : start;
+      playbackStartSentRef.current = true;
+      if (isWsConnected) {
+        saveWs(playbackStart);
+        timerRef.current = setInterval(saveWs, 2000);
+      } else {
+        saveHttp(playbackStart);
+        timerRef.current = setInterval(saveHttp, 15000);
+      }
+    } else {
+      playbackStartSentRef.current = false;
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
     }
 
     return () => {
-      if (timersRef.current) {
-        clearInterval(timersRef.current.ws);
-        clearInterval(timersRef.current.http);
-        timersRef.current = null;
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlaying, bookId, chapterId]);
+  }, [isPlaying, bookId, chapterId, isWsConnected]);
 
   // 暂停瞬间 flush
   const prevIsPlayingRef = useRef(isPlaying);
   useEffect(() => {
     if (prevIsPlayingRef.current && !isPlaying && bookId && chapterId) {
       const pos = Math.floor(currentTimeRef.current);
-      wsSendProgress(bookId, chapterId, pos);
-      apiClient.post('/api/progress', { book_id: bookId, chapter_id: chapterId, position: pos })
-        .catch(err => console.error('暂停时保存进度失败', err));
+      if (isWsConnected) {
+        wsSendProgress(bookId, chapterId, pos);
+      } else {
+        apiClient.post('/api/progress', { book_id: bookId, chapter_id: chapterId, position: pos })
+          .catch(err => console.error('暂停时保存进度失败', err));
+      }
     }
     prevIsPlayingRef.current = isPlaying;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlaying]);
+  }, [isPlaying, isWsConnected]);
 };

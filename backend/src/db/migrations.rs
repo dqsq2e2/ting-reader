@@ -353,6 +353,122 @@ CREATE INDEX IF NOT EXISTS idx_listening_events_created_at ON listening_events(c
 CREATE INDEX IF NOT EXISTS idx_listening_events_user_created_at ON listening_events(user_id, created_at);
 "#;
 
+/// Twenty-fourth schema migration (version 24)
+const MIGRATION_V24: &str = r#"
+-- Support efficient lookup while progress events are still stored individually.
+CREATE INDEX IF NOT EXISTS idx_listening_events_progress_bucket
+ON listening_events(user_id, book_id, chapter_id, created_at DESC);
+"#;
+
+/// Twenty-fifth schema migration (version 25)
+const MIGRATION_V25: &str = r#"
+-- Compact raw progress heartbeats into one daily row per user/book/chapter.
+CREATE TABLE listening_events_daily (
+    id TEXT PRIMARY KEY,
+    aggregate_key TEXT NOT NULL UNIQUE,
+    user_id TEXT NOT NULL,
+    book_id TEXT NOT NULL,
+    chapter_id TEXT,
+    activity_date TEXT NOT NULL,
+    position REAL DEFAULT 0,
+    duration REAL,
+    listen_seconds REAL DEFAULT 0,
+    progress_updates INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL,
+    last_active_at DATETIME NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
+    FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE SET NULL
+);
+
+CREATE TABLE listening_totals (
+    aggregate_key TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    book_id TEXT NOT NULL,
+    chapter_id TEXT,
+    listen_seconds REAL DEFAULT 0,
+    progress_updates INTEGER NOT NULL DEFAULT 0,
+    first_active_at DATETIME NOT NULL,
+    last_active_at DATETIME NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
+    FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE SET NULL
+);
+
+INSERT INTO listening_totals (
+    aggregate_key,
+    user_id,
+    book_id,
+    chapter_id,
+    listen_seconds,
+    progress_updates,
+    first_active_at,
+    last_active_at
+)
+SELECT
+    user_id || CHAR(31) || book_id || CHAR(31) || COALESCE(chapter_id, ''),
+    user_id,
+    book_id,
+    chapter_id,
+    COALESCE(SUM(listen_seconds), 0),
+    COUNT(*),
+    MIN(created_at),
+    MAX(created_at)
+FROM listening_events
+WHERE created_at IS NOT NULL
+GROUP BY user_id, book_id, chapter_id;
+
+INSERT INTO listening_events_daily (
+    id,
+    aggregate_key,
+    user_id,
+    book_id,
+    chapter_id,
+    activity_date,
+    position,
+    duration,
+    listen_seconds,
+    progress_updates,
+    created_at,
+    last_active_at
+)
+SELECT
+    MIN(id),
+    user_id || CHAR(31) || book_id || CHAR(31) || COALESCE(chapter_id, '') || CHAR(31) || SUBSTR(created_at, 1, 10),
+    user_id,
+    book_id,
+    chapter_id,
+    SUBSTR(created_at, 1, 10),
+    MAX(position),
+    MAX(duration),
+    COALESCE(SUM(listen_seconds), 0),
+    COUNT(*),
+    MIN(created_at),
+    MAX(created_at)
+FROM listening_events
+WHERE created_at IS NOT NULL
+  AND SUBSTR(created_at, 1, 10) >= DATE('now', '-90 days')
+GROUP BY user_id, book_id, chapter_id, SUBSTR(created_at, 1, 10);
+
+DROP TABLE listening_events;
+ALTER TABLE listening_events_daily RENAME TO listening_events;
+
+CREATE INDEX idx_listening_events_user_id ON listening_events(user_id);
+CREATE INDEX idx_listening_events_book_id ON listening_events(book_id);
+CREATE INDEX idx_listening_events_activity_date ON listening_events(activity_date);
+CREATE INDEX idx_listening_events_user_last_active ON listening_events(user_id, last_active_at);
+CREATE INDEX idx_listening_totals_user_id ON listening_totals(user_id);
+CREATE INDEX idx_listening_totals_book_id ON listening_totals(book_id);
+CREATE INDEX idx_listening_totals_last_active ON listening_totals(last_active_at);
+
+CREATE TRIGGER prune_listening_events_after_insert
+AFTER INSERT ON listening_events
+BEGIN
+    DELETE FROM listening_events
+    WHERE activity_date < DATE('now', '-90 days');
+END;
+"#;
+
 /// Seventeenth schema migration (version 17)
 const MIGRATION_V17: &str = r#"
 -- Admin-configured webhook notification listeners.
@@ -601,6 +717,16 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         apply_migration(conn, 23, MIGRATION_V23)?;
     }
 
+    if current_version < 24 {
+        info!("Applying migration v24: Progress event aggregation index");
+        apply_migration(conn, 24, MIGRATION_V24)?;
+    }
+
+    if current_version < 25 {
+        info!("Applying migration v25: Daily listening statistics aggregation");
+        apply_migration(conn, 25, MIGRATION_V25)?;
+    }
+
     info!("Database migrations completed successfully");
     Ok(())
 }
@@ -769,4 +895,76 @@ CREATE INDEX IF NOT EXISTS idx_playlists_user_id ON playlists(user_id);
 
     info!("Migration v19 applied successfully");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migration_v25_compacts_raw_events_without_losing_totals() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(MIGRATION_TABLE).unwrap();
+        conn.execute_batch(
+            r#"
+CREATE TABLE users (id TEXT PRIMARY KEY);
+CREATE TABLE books (id TEXT PRIMARY KEY);
+CREATE TABLE chapters (id TEXT PRIMARY KEY);
+INSERT INTO users (id) VALUES ('user-1');
+INSERT INTO books (id) VALUES ('book-1');
+INSERT INTO chapters (id) VALUES ('chapter-1');
+CREATE TABLE listening_events (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    book_id TEXT NOT NULL,
+    chapter_id TEXT,
+    position REAL DEFAULT 0,
+    duration REAL,
+    listen_seconds REAL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+"#,
+        )
+        .unwrap();
+
+        let tx = conn.transaction().unwrap();
+        {
+            for index in 0..10_000 {
+                let day = if index < 5_000 {
+                    "STRFTIME('%Y-%m-%dT10:00:00.000Z', 'now', '-1 day')"
+                } else {
+                    "STRFTIME('%Y-%m-%dT10:00:00.000Z', 'now')"
+                };
+                tx.execute(
+                    &format!(
+                        "INSERT INTO listening_events (id, user_id, book_id, chapter_id, position, listen_seconds, created_at) \
+                         VALUES (?, 'user-1', 'book-1', 'chapter-1', ?, 2, {day})"
+                    ),
+                    rusqlite::params![format!("event-{index}"), index],
+                )
+                .unwrap();
+            }
+        }
+        tx.commit().unwrap();
+
+        apply_migration(&mut conn, 25, MIGRATION_V25).unwrap();
+
+        let daily_rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM listening_events", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let (total_rows, updates, seconds): (i64, i64, f64) = conn
+            .query_row(
+                "SELECT COUNT(*), SUM(progress_updates), SUM(listen_seconds) FROM listening_totals",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+
+        assert_eq!(daily_rows, 2);
+        assert_eq!(total_rows, 1);
+        assert_eq!(updates, 10_000);
+        assert_eq!(seconds, 20_000.0);
+    }
 }

@@ -293,7 +293,7 @@ pub async fn get_admin_statistics(
 
             let (active_users, total_progress_records, total_listen_seconds): (i64, i64, f64) =
                 conn.query_row(
-                    "SELECT COUNT(DISTINCT user_id), COUNT(*), COALESCE(SUM(listen_seconds), 0.0) FROM listening_events",
+                    "SELECT COUNT(DISTINCT user_id), COALESCE(SUM(progress_updates), 0), COALESCE(SUM(listen_seconds), 0.0) FROM listening_totals",
                     [],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
@@ -335,13 +335,13 @@ pub async fn get_admin_statistics(
                     "SELECT \
                         u.id, u.username, u.role, \
                         COUNT(DISTINCT e.book_id) AS listened_books, \
-                        COUNT(e.id) AS progress_records, \
+                        COALESCE(SUM(e.progress_updates), 0) AS progress_records, \
                         COALESCE(SUM(e.listen_seconds), 0.0) AS listen_seconds, \
-                        MAX(e.created_at) AS last_active_at \
+                        MAX(e.last_active_at) AS last_active_at \
                      FROM users u \
-                     LEFT JOIN listening_events e ON e.user_id = u.id \
+                     LEFT JOIN listening_totals e ON e.user_id = u.id \
                      GROUP BY u.id, u.username, u.role \
-                     ORDER BY MAX(e.created_at) IS NULL, MAX(e.created_at) DESC, listen_seconds DESC",
+                     ORDER BY MAX(e.last_active_at) IS NULL, MAX(e.last_active_at) DESC, listen_seconds DESC",
                 )
                 .map_err(TingError::DatabaseError)?;
             let user_activity = user_stmt
@@ -365,12 +365,12 @@ pub async fn get_admin_statistics(
                     "SELECT activity_date, active_users, progress_updates, listen_seconds \
                      FROM ( \
                         SELECT \
-                            substr(created_at, 1, 10) AS activity_date, \
+                            activity_date, \
                             COUNT(DISTINCT user_id) AS active_users, \
-                            COUNT(*) AS progress_updates, \
+                            COALESCE(SUM(progress_updates), 0) AS progress_updates, \
                             COALESCE(SUM(listen_seconds), 0.0) AS listen_seconds \
                         FROM listening_events \
-                        WHERE created_at IS NOT NULL \
+                        WHERE activity_date IS NOT NULL \
                         GROUP BY activity_date \
                         ORDER BY activity_date DESC \
                         LIMIT 14 \
@@ -396,9 +396,9 @@ pub async fn get_admin_statistics(
                     "SELECT \
                         b.id, b.title, b.author, b.library_id, l.name, \
                         COUNT(DISTINCT e.user_id) AS listeners, \
-                        COUNT(e.id) AS progress_updates, \
+                        COALESCE(SUM(e.progress_updates), 0) AS progress_updates, \
                         COALESCE(SUM(e.listen_seconds), 0.0) AS listen_seconds \
-                     FROM listening_events e \
+                     FROM listening_totals e \
                      JOIN books b ON b.id = e.book_id \
                      LEFT JOIN libraries l ON l.id = b.library_id \
                      GROUP BY b.id, b.title, b.author, b.library_id, l.name \

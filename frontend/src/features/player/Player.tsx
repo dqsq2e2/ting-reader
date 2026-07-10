@@ -135,7 +135,7 @@ const Player: React.FC = () => {
     };
   }
 
-  const { sendProgress: wsSendProgress } = useWebSocket();
+  const { isConnected: isWsConnected, sendProgress: wsSendProgress } = useWebSocket();
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const location = useLocation();
@@ -590,6 +590,7 @@ const Player: React.FC = () => {
     bookId: currentBook?.id,
     chapterId: currentChapter?.id,
     currentTime,
+    isWsConnected,
     wsSendProgress,
   });
 

@@ -30,6 +30,7 @@ const SeriesDetailPage: React.FC = () => {
   const [showBookSelector, setShowBookSelector] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [saving, setSaving] = useState(false);
   const { setIsSeriesEditing } = usePlayerStore();
   
   // Filter & Sort state
@@ -126,6 +127,8 @@ const SeriesDetailPage: React.FC = () => {
   };
 
   const handleUpdate = async () => {
+    if (saving) return;
+    setSaving(true);
     try {
       await apiClient.put(`/api/v1/series/${id}`, {
         title,
@@ -140,6 +143,8 @@ const SeriesDetailPage: React.FC = () => {
     } catch (err) {
       console.error('Failed to update series', err);
       alert(t('bookshelf.updateSeriesFailed'));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -269,10 +274,10 @@ const SeriesDetailPage: React.FC = () => {
                 placeholder={t('bookshelf.descriptionField')}
               />
               <div className="flex gap-2">
-                <button onClick={handleUpdate} className="flex-1 bg-primary-600 text-white py-2 rounded flex items-center justify-center gap-2">
+                <button disabled={saving} onClick={handleUpdate} className="flex-1 bg-primary-600 text-white py-2 rounded flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                   <Save size={18} /> {t('common.save')}
                 </button>
-                <button onClick={() => setIsEditing(false)} className="flex-1 bg-slate-200 dark:bg-slate-700 py-2 rounded">
+                <button disabled={saving} onClick={() => setIsEditing(false)} className="flex-1 bg-slate-200 dark:bg-slate-700 py-2 rounded disabled:opacity-50">
                   {t('common.cancel')}
                 </button>
               </div>

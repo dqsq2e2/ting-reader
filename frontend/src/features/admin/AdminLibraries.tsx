@@ -101,6 +101,8 @@ const AdminLibraries: React.FC = () => {
   const [scraperSources, setScraperSources] = useState<Pick<ScraperSource, 'id' | 'name' | 'auto_scrape'>[]>([]);
   const [showJsonEditor, setShowJsonEditor] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
+  const [savingLibrary, setSavingLibrary] = useState(false);
+  const [deletingLibraryId, setDeletingLibraryId] = useState<string | null>(null);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -251,6 +253,8 @@ const AdminLibraries: React.FC = () => {
 
   const handleSaveLibrary = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (savingLibrary) return;
+    setSavingLibrary(true);
     try {
       const payload: Record<string, unknown> = {
         name: formData.name,
@@ -303,6 +307,8 @@ const AdminLibraries: React.FC = () => {
     } catch (err) {
       console.error(err);
       alert(editingId ? t('adminLibraries.updateFailed') : t('adminLibraries.addFailed'));
+    } finally {
+      setSavingLibrary(false);
     }
   };
 
@@ -324,12 +330,16 @@ const AdminLibraries: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
+    if (deletingLibraryId) return;
+    setDeletingLibraryId(id);
     try {
       await apiClient.delete(`/api/libraries/${id}`);
       setDeleteConfirmId(null);
       fetchLibraries();
     } catch {
       alert(t('adminLibraries.deleteFailed'));
+    } finally {
+      setDeletingLibraryId(null);
     }
   };
 
@@ -459,7 +469,7 @@ const AdminLibraries: React.FC = () => {
       {/* Delete Confirmation Modal */}
       {deleteConfirmId && (
         <div className="fixed inset-0 z-[250] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setDeleteConfirmId(null)}></div>
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => !deletingLibraryId && setDeleteConfirmId(null)}></div>
           <div className="relative w-full max-w-sm bg-white dark:bg-slate-900 rounded-3xl shadow-2xl p-8 animate-in zoom-in-95 duration-200 text-center">
             <div className="w-16 h-16 bg-red-50 dark:bg-red-900/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
               <AlertCircle size={32} />
@@ -469,14 +479,17 @@ const AdminLibraries: React.FC = () => {
             <div className="flex gap-3">
               <button
                 onClick={() => setDeleteConfirmId(null)}
+                disabled={Boolean(deletingLibraryId)}
                 className="flex-1 py-3 font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all"
               >
                 {t('common.cancel')}
               </button>
               <button
                 onClick={() => handleDelete(deleteConfirmId)}
-                className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl shadow-lg shadow-red-500/30 transition-all"
+                disabled={Boolean(deletingLibraryId)}
+                className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl shadow-lg shadow-red-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
+                {deletingLibraryId ? <Loader2 size={18} className="animate-spin" /> : null}
                 {t('adminLibraries.confirmDelete')}
               </button>
             </div>
@@ -487,7 +500,7 @@ const AdminLibraries: React.FC = () => {
       {/* Add/Edit Library Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsModalOpen(false)}></div>
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => !savingLibrary && setIsModalOpen(false)}></div>
           <div className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
             <div className="p-8 overflow-y-auto">
               <h2 className="text-2xl font-bold dark:text-white mb-6">
@@ -803,8 +816,10 @@ const AdminLibraries: React.FC = () => {
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 transition-all"
+                    disabled={savingLibrary}
+                    className="flex-1 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl shadow-lg shadow-primary-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
+                    {savingLibrary ? <Loader2 size={18} className="animate-spin" /> : null}
                     {t('adminLibraries.saveConfig')}
                   </button>
                 </div>
