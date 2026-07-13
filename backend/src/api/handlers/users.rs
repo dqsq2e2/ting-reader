@@ -533,7 +533,6 @@ pub async fn update_progress(
         .await?
         .ok_or_else(|| TingError::NotFound(format!("Book {} not found", req.book_id)))?;
 
-    let mut chapter_title = None;
     if let Some(ref chapter_id) = req.chapter_id {
         let chapter = state
             .chapter_repo
@@ -546,13 +545,7 @@ pub async fn update_progress(
                 "Chapter does not belong to the specified book".to_string(),
             ));
         }
-        chapter_title = chapter.title.clone();
     }
-
-    let is_first_progress = !state
-        .progress_repo
-        .exists_for_chapter(&user.id, &req.book_id, req.chapter_id.as_deref())
-        .await?;
 
     let progress = crate::db::models::Progress {
         id: Uuid::new_v4().to_string(),
@@ -575,29 +568,6 @@ pub async fn update_progress(
             playback_start,
         )
         .await;
-    }
-
-    let book_title = book.title.clone().unwrap_or_else(|| "Unknown".to_string());
-    if is_first_progress {
-        crate::core::notifications::dispatch_application_event(
-            state.notification_repo.clone(),
-            state.plugin_manager.clone(),
-            crate::core::notifications::NotificationEventPayload::new(
-                "playback.play",
-                "播放开始",
-                format!("用户 {} 开始播放 {}", user.username, book_title),
-                serde_json::json!({
-                    "user_id": user.id,
-                    "username": user.username,
-                    "book_id": book.id,
-                    "book_title": book_title,
-                    "chapter_id": req.chapter_id,
-                    "chapter_title": chapter_title,
-                    "position": progress.position,
-                    "duration": progress.duration,
-                }),
-            ),
-        );
     }
 
     Ok((StatusCode::OK, Json(ProgressResponse::from(progress))))

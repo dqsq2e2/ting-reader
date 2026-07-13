@@ -59,13 +59,34 @@ impl LibraryScanner {
             None
         };
 
-        // Pre-fetch existing chapters to support efficient incremental scanning
-        // Map Path -> Chapter
+        // Pre-fetch existing chapters to support efficient incremental scanning.
+        // Before 1.5.2 local files could be stored as relative paths. Resolve
+        // existing files so the old relative path matches the new absolute path.
         let existing_chapters = self.chapter_repo.find_by_book(book_id).await?;
         let mut chapter_map: HashMap<PathBuf, Chapter> = HashMap::new();
+        let mut duplicate_chapter_ids = Vec::new();
         for ch in existing_chapters {
-            let p = PathBuf::from(&ch.path);
-            chapter_map.insert(p, ch);
+            let path = canonical_existing_path(Path::new(&ch.path));
+            if let Some(existing) = chapter_map.get(&path) {
+                let chapter_is_relative = Path::new(&ch.path).is_relative();
+                let existing_is_relative = Path::new(&existing.path).is_relative();
+                if chapter_is_relative != existing_is_relative {
+                    if chapter_is_relative {
+                        duplicate_chapter_ids.push(existing.id.clone());
+                        chapter_map.insert(path, ch);
+                    } else {
+                        duplicate_chapter_ids.push(ch.id);
+                    }
+                } else {
+                    chapter_map.insert(PathBuf::from(&ch.path), ch);
+                }
+            } else {
+                chapter_map.insert(path, ch);
+            }
+        }
+        for chapter_id in duplicate_chapter_ids {
+            self.chapter_repo.delete(&chapter_id).await?;
+            has_changes = true;
         }
 
         let mut main_counter = 0;
@@ -91,7 +112,8 @@ impl LibraryScanner {
 
             // Incremental Scan Logic
             // Check if file exists in DB
-            let mut existing_chapter = chapter_map.get(file_path).cloned();
+            let canonical_file_path = canonical_existing_path(file_path);
+            let mut existing_chapter = chapter_map.get(&canonical_file_path).cloned();
 
             // Check if file has changed
             let is_modified = if let Some(last_scan) = last_scanned {
@@ -234,11 +256,15 @@ impl LibraryScanner {
                         }
                     }
 
-                    if should_update && ch.manual_corrected == 0 {
+                    let scanned_path = file_path.to_string_lossy().to_string();
+                    if ch.path != scanned_path || (should_update && ch.manual_corrected == 0) {
                         let mut updated_ch = ch.clone();
-                        updated_ch.chapter_index = new_idx;
-                        updated_ch.title = new_title;
-                        updated_ch.is_extra = new_is_extra;
+                        updated_ch.path = scanned_path;
+                        if ch.manual_corrected == 0 {
+                            updated_ch.chapter_index = new_idx;
+                            updated_ch.title = new_title;
+                            updated_ch.is_extra = new_is_extra;
+                        }
                         self.chapter_repo.update(&updated_ch).await?;
                         has_changes = true;
                     }
@@ -441,5 +467,32 @@ impl LibraryScanner {
         }
 
         Ok(format!("{:x}", hasher.finalize()))
+    }
+}
+fn canonical_existing_path(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonicalizes_legacy_relative_path_to_absolute_path() {
+        let current_dir = std::env::current_dir().unwrap();
+        let temp_dir = current_dir
+            .join("target")
+            .join(format!("chapter-path-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let absolute_path = temp_dir.join("chapter.mp3");
+        std::fs::write(&absolute_path, b"audio").unwrap();
+        let relative_path = absolute_path.strip_prefix(&current_dir).unwrap();
+
+        assert_eq!(
+            canonical_existing_path(relative_path),
+            canonical_existing_path(&absolute_path)
+        );
+
+        std::fs::remove_dir_all(temp_dir).unwrap();
     }
 }

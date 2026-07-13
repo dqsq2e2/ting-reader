@@ -136,4 +136,32 @@ pub async fn record_playback_start(
         source = "progress_sync",
         "Playback started"
     );
+
+    crate::core::notifications::dispatch_application_event(
+        state.notification_repo.clone(),
+        state.plugin_manager.clone(),
+        crate::core::notifications::NotificationEventPayload::new(
+            "playback.play",
+            "播放开始",
+            format!("用户 {} 开始播放 {}", user.username, book_title),
+            serde_json::json!({
+                "user_id": user.id,
+                "username": user.username,
+                "book_id": book.id,
+                "book_title": book_title,
+                "book_author": book_author,
+                "book_narrator": book_narrator,
+                "chapter_id": chapter.as_ref().map(|chapter| chapter.id.as_str()),
+                "chapter_title": chapter_title,
+                "chapter_index": chapter_index,
+                "chapter_duration_seconds": duration_seconds,
+                "chapter_duration_text": duration_text,
+                "position": position,
+                "position_text": position_text,
+                "library_id": library_id,
+                "library_name": library_name,
+                "library_type": library_type,
+            }),
+        ),
+    );
 }

@@ -157,5 +157,5 @@
 事件：
 
 - 携带 `playback_start` 时会记录 `audit::playback` 日志；同一次 WS/HTTP 起播上报会自动去重。
-- 当前用户首次写入某本书/章节进度时，如果配置了 Webhook 监听，会触发 `playback.play` 事件。
+- 当请求携带 `playback_start` 时，如果配置了 Webhook 监听，会触发 `playback.play` 事件；同一用户和章节在 10 秒窗口内自动去重。
 - 不是每次定时进度上报都会触发 Webhook，避免通知刷屏。
