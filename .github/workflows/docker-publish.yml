@@ -142,14 +142,109 @@ jobs:
             docker buildx imagetools inspect dqsq2e2/ting-reader:${{ needs.prepare.outputs.version }}
           fi
 
+  frontend-package:
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend package
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          npm ci --prefix frontend
+          npm run build --prefix frontend
+
+          mkdir -p package/static
+          cp -r frontend/dist/. package/static/
+          tar -C package -czf "ting-reader-frontend-${VERSION}.tar.gz" static
+          (cd package && zip -qr "../ting-reader-frontend-${VERSION}.zip" static)
+
+      - name: Upload frontend packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-package
+          path: |
+            ting-reader-frontend-*.tar.gz
+            ting-reader-frontend-*.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  backend-package:
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    container: rust:bookworm
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y cmake clang curl
+
+      - name: Build backend package
+        working-directory: backend
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          cargo build --release --locked
+
+          mkdir -p package
+          mkdir -p package/preinstalled-plugins
+          cp target/release/ting_reader package/ting-reader
+          cp config.toml package/config.toml
+          curl -fL "https://github.com/dqsq2e2/ting-reader-plugin-store/releases/download/v1.0.0/ting-reader-plugin-store-1.0.0.tr" \
+            -o package/preinstalled-plugins/ting-reader-plugin-store.tr
+          chmod +x package/ting-reader
+          tar -C package -czf "../ting-reader-backend-linux-${{ matrix.arch }}-${VERSION}.tar.gz" \
+            ting-reader config.toml preinstalled-plugins
+
+      - name: Upload backend package
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-package-${{ matrix.arch }}
+          path: backend/ting-reader-backend-linux-${{ matrix.arch }}-*.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
   release:
-    needs: [prepare, merge]
+    needs: [prepare, merge, frontend-package, backend-package]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Download application packages
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: '*-package*'
+          merge-multiple: true
+
+      - name: Add interactive deployment script
+        run: |
+          cp scripts/deploy.sh release-assets/deploy.sh
+          chmod +x release-assets/deploy.sh
 
       - name: Setup fnpack
         uses: ./.github/actions/setup-fnpack
@@ -222,6 +317,7 @@ jobs:
           files: |
             ting-reader-beta.fpk
             ting-reader-fygo-beta.fpk
+            release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -250,5 +346,6 @@ jobs:
           files: |
             ting-reader-${{ needs.prepare.outputs.version }}.fpk
             ting-reader-fygo-${{ needs.prepare.outputs.version }}.fpk
+            release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
