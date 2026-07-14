@@ -192,7 +192,6 @@ EOF
 install_systemd_service() {
   local mode="$1"
   local install_dir="$2"
-  local data_dir="$3"
   local run_user
   local run_group
   local unit_file
@@ -212,10 +211,7 @@ Wants=network-online.target
 Type=simple
 User=$run_user
 Group=$run_group
-WorkingDirectory="$(systemd_escape "$install_dir")"
-ExecStart="$(systemd_escape "$install_dir/ting-reader")" --config "$(systemd_escape "$install_dir/config.toml")"
-Environment="STATIC_DIR=$(systemd_escape "$install_dir/static")"
-Environment="DATA_DIR=$(systemd_escape "$data_dir")"
+ExecStart=/bin/bash "$(systemd_escape "$install_dir/run.sh")"
 Restart=on-failure
 RestartSec=5
 
@@ -398,7 +394,7 @@ service_choice="$(prompt "请输入选项" "Enter choice" "1")"
 case "$service_choice" in
   2)
     require_command systemctl
-    install_systemd_service "user" "$INSTALL_DIR" "$DATA_DIR"
+    install_systemd_service "user" "$INSTALL_DIR"
     START_MODE="user"
     ;;
   3)
@@ -406,7 +402,7 @@ case "$service_choice" in
     ;;
   *)
     require_command systemctl
-    install_systemd_service "system" "$INSTALL_DIR" "$DATA_DIR"
+    install_systemd_service "system" "$INSTALL_DIR"
     START_MODE="system"
     ;;
 esac
