@@ -167,15 +167,12 @@ jobs:
           mkdir -p package/static
           cp -r frontend/dist/. package/static/
           tar -C package -czf "ting-reader-frontend-${VERSION}.tar.gz" static
-          (cd package && zip -qr "../ting-reader-frontend-${VERSION}.zip" static)
 
       - name: Upload frontend packages
         uses: actions/upload-artifact@v4
         with:
           name: frontend-package
-          path: |
-            ting-reader-frontend-*.tar.gz
-            ting-reader-frontend-*.zip
+          path: ting-reader-frontend-*.tar.gz
           if-no-files-found: error
           retention-days: 1
 
