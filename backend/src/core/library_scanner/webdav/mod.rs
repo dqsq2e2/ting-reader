@@ -380,9 +380,10 @@ impl LibraryScanner {
                     return false;
                 };
 
-                let (_, is_extra) = self
+                let (_, detected_as_extra) = self
                     .text_cleaner
                     .clean_chapter_title(title, book.title.as_deref());
+                let is_extra = scraper_config.extract_extra_chapters && detected_as_extra;
                 chapter.is_extra != if is_extra { 1 } else { 0 }
             });
         }
@@ -447,10 +448,15 @@ impl LibraryScanner {
                 None
             };
 
-            let counter_is_extra = title_override
-                .as_ref()
-                .map(|(_, is_extra)| *is_extra)
-                .unwrap_or(chapter.is_extra == 1);
+            let counter_is_extra = if chapter.manual_corrected != 0 {
+                chapter.is_extra == 1
+            } else {
+                scraper_config.extract_extra_chapters
+                    && title_override
+                        .as_ref()
+                        .map(|(_, is_extra)| *is_extra)
+                        .unwrap_or(chapter.is_extra == 1)
+            };
             let counter_idx = if counter_is_extra {
                 extra_counter += 1;
                 extra_counter
@@ -464,6 +470,10 @@ impl LibraryScanner {
                 continue;
             }
 
+            if !scraper_config.extract_extra_chapters && chapter.is_extra != 0 {
+                return true;
+            }
+
             if chapter.chapter_index != Some(target_idx) {
                 return true;
             }
@@ -473,7 +483,11 @@ impl LibraryScanner {
                     return true;
                 }
 
-                let target_is_extra = if target_is_extra { 1 } else { 0 };
+                let target_is_extra = if scraper_config.extract_extra_chapters && target_is_extra {
+                    1
+                } else {
+                    0
+                };
                 if chapter.is_extra != target_is_extra {
                     return true;
                 }

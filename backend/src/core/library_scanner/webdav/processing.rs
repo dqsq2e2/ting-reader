@@ -699,7 +699,7 @@ impl LibraryScanner {
                 (filename, true)
             };
 
-            let (final_title, is_extra) = if let Some(ai_title) = ai_chapter_title {
+            let (final_title, detected_as_extra) = if let Some(ai_title) = ai_chapter_title {
                 let (_, is_extra) = self
                     .text_cleaner
                     .clean_chapter_title(ai_title, book.title.as_deref());
@@ -717,6 +717,7 @@ impl LibraryScanner {
                     .clean_chapter_title(&raw_title, book.title.as_deref());
                 (raw_title, is_extra)
             };
+            let is_extra = scraper_config.extract_extra_chapters && detected_as_extra;
 
             let counter_idx = if is_extra {
                 extra_counter += 1;

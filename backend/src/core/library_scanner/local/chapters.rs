@@ -21,6 +21,7 @@ impl LibraryScanner {
         last_scanned: Option<chrono::DateTime<chrono::Utc>>,
         task_id: Option<&str>,
         use_filename_as_title: bool,
+        extract_extra_chapters: bool,
         cloud_mode: bool,
         json_chapters: Option<Vec<crate::core::metadata_writer::AudiobookshelfChapter>>,
         chapter_title_template: Option<&str>,
@@ -201,10 +202,15 @@ impl LibraryScanner {
                         None
                     };
 
-                    let counter_is_extra = title_override
-                        .as_ref()
-                        .map(|(_, is_extra)| *is_extra)
-                        .unwrap_or(ch.is_extra == 1);
+                    let counter_is_extra = if ch.manual_corrected != 0 {
+                        ch.is_extra == 1
+                    } else {
+                        extract_extra_chapters
+                            && title_override
+                                .as_ref()
+                                .map(|(_, is_extra)| *is_extra)
+                                .unwrap_or(ch.is_extra == 1)
+                    };
                     let idx_from_counter = if counter_is_extra {
                         extra_counter += 1;
                         extra_counter
@@ -225,7 +231,14 @@ impl LibraryScanner {
                     let mut should_update = false;
                     let mut new_title = ch.title.clone();
                     let mut new_idx = ch.chapter_index;
-                    let mut new_is_extra = ch.is_extra;
+                    let mut new_is_extra = if extract_extra_chapters {
+                        ch.is_extra
+                    } else {
+                        0
+                    };
+                    if new_is_extra != ch.is_extra {
+                        should_update = true;
+                    }
 
                     // Check Index
                     if new_idx != Some(target_idx) {
@@ -249,7 +262,11 @@ impl LibraryScanner {
                             should_update = true;
                         }
 
-                        let target_is_extra = if target_is_extra { 1 } else { 0 };
+                        let target_is_extra = if extract_extra_chapters && target_is_extra {
+                            1
+                        } else {
+                            0
+                        };
                         if new_is_extra != target_is_extra {
                             new_is_extra = target_is_extra;
                             should_update = true;
@@ -352,7 +369,7 @@ impl LibraryScanner {
                 (filename_str.clone(), true)
             };
 
-            let (final_title, is_extra) = if let Some(ai_title) = ai_chapter_title {
+            let (final_title, detected_as_extra) = if let Some(ai_title) = ai_chapter_title {
                 let (_, is_extra) = self
                     .text_cleaner
                     .clean_chapter_title(ai_title, book.title.as_deref());
@@ -370,6 +387,7 @@ impl LibraryScanner {
                     .clean_chapter_title(&raw_title, book.title.as_deref());
                 (raw_title, is_extra)
             };
+            let is_extra = extract_extra_chapters && detected_as_extra;
 
             // Calculate Index using counters
             let counter_idx = if is_extra {

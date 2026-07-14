@@ -800,6 +800,9 @@ const zhCN = {
       "开启后，忽略优先级配置，强制使用文件夹名作为书名、文件名作为章节名",
     extractAudioCover: "提取音频封面",
     extractAudioCoverHelp: "开启后，系统/插件将尝试从音频文件中提取并保存封面",
+    extractExtraChapters: "提取番外章节",
+    extractExtraChaptersHelp:
+      "开启后，根据章节标题自动识别番外并与正文分组；关闭后，自动识别到的番外按正文处理。",
     autoDetectChanges: "自动检测媒体库变化",
     autoDetectChangesHelp:
       "开启后，将监控该媒体库目录的文件变化并自动触发扫描（修改后即时生效）",

@@ -174,6 +174,9 @@ pub struct ScraperConfig {
     /// Whether to extract cover image from audio files
     #[serde(default = "default_extract_audio_cover")]
     pub extract_audio_cover: bool,
+    /// Whether to detect and group extra chapters separately
+    #[serde(default = "default_extract_extra_chapters")]
+    pub extract_extra_chapters: bool,
     /// Whether to disable the directory watcher for this library
     #[serde(default)]
     pub disable_watcher: bool,
@@ -196,6 +199,7 @@ impl Default for ScraperConfig {
             use_filename_as_title: default_use_filename_as_title(),
             metadata_priority: default_metadata_priority(),
             extract_audio_cover: default_extract_audio_cover(),
+            extract_extra_chapters: default_extract_extra_chapters(),
             disable_watcher: false,
             cloud_mode: false,
         }
@@ -210,12 +214,31 @@ fn default_extract_audio_cover() -> bool {
     true
 }
 
+fn default_extract_extra_chapters() -> bool {
+    true
+}
+
 fn default_metadata_priority() -> Vec<String> {
     vec![
         "local_metadata".to_string(),
         "audio_metadata".to_string(),
         "scraper".to_string(),
     ]
+}
+
+#[cfg(test)]
+mod scraper_config_tests {
+    use super::ScraperConfig;
+
+    #[test]
+    fn extract_extra_chapters_defaults_to_true_and_accepts_false() {
+        let legacy: ScraperConfig = serde_json::from_str("{}").unwrap();
+        let disabled: ScraperConfig =
+            serde_json::from_str(r#"{"extract_extra_chapters":false}"#).unwrap();
+
+        assert!(legacy.extract_extra_chapters);
+        assert!(!disabled.extract_extra_chapters);
+    }
 }
 
 /// Series record in the database

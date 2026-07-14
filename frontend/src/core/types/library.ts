@@ -10,6 +10,9 @@ export interface ScraperConfig {
   use_filename_as_title?: boolean;
   metadata_priority?: string[];
   extract_audio_cover?: boolean;
+  extract_extra_chapters?: boolean;
+  disable_watcher?: boolean;
+  cloud_mode?: boolean;
 }
 
 export interface Library {

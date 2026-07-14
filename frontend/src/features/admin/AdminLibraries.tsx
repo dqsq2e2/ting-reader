@@ -23,6 +23,7 @@ import ScraperConfigurator from './ScraperConfigurator';
 
 const DEFAULT_SCRAPER_CONFIG = JSON.stringify({
   extract_audio_cover: true,
+  extract_extra_chapters: true,
   use_filename_as_title: true,
   nfo_writing_enabled: false,
   metadata_writing_enabled: false,

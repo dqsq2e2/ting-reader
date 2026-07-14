@@ -841,6 +841,9 @@ const enUS = {
     extractAudioCover: "Extract audio covers",
     extractAudioCoverHelp:
       "The system/plugins will try to extract and save covers from audio files.",
+    extractExtraChapters: "Extract extra chapters",
+    extractExtraChaptersHelp:
+      "Detect extra chapters from their titles and group them separately. When disabled, automatically detected extras are treated as main chapters.",
     autoDetectChanges: "Auto-detect library changes",
     autoDetectChangesHelp:
       "Monitor this local library directory and trigger scans automatically. Changes apply immediately.",

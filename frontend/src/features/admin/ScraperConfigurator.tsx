@@ -58,6 +58,7 @@ const ScraperConfigurator: React.FC<Props> = ({ configStr, sources, onChange, li
   const metadataWritingEnabled = config.metadata_writing_enabled ?? false;
   const useFilenameAsTitle = config.use_filename_as_title ?? true;
   const extractAudioCover = config.extract_audio_cover ?? true;
+  const extractExtraChapters = config.extract_extra_chapters ?? true;
   const disableWatcher = config.disable_watcher ?? false;
   const cloudMode = config.cloud_mode ?? false;
 
@@ -78,6 +79,11 @@ const ScraperConfigurator: React.FC<Props> = ({ configStr, sources, onChange, li
 
   const handleExtractAudioCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newConfig: Record<string, unknown> = { ...config, extract_audio_cover: e.target.checked };
+      onChange(JSON.stringify(newConfig, null, 2));
+  };
+
+  const handleExtractExtraChaptersChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const newConfig: Record<string, unknown> = { ...config, extract_extra_chapters: e.target.checked };
       onChange(JSON.stringify(newConfig, null, 2));
   };
 
@@ -193,6 +199,22 @@ const ScraperConfigurator: React.FC<Props> = ({ configStr, sources, onChange, li
               {t('scraperConfig.extractAudioCover')}
             </label>
             <HelpHint text={t('scraperConfig.extractAudioCoverHelp')} />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+          <input
+            type="checkbox"
+            id="extract-extra-chapters"
+            checked={extractExtraChapters}
+            onChange={handleExtractExtraChaptersChange}
+            className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500 cursor-pointer"
+          />
+          <div className="flex min-w-0 items-center gap-1.5">
+            <label htmlFor="extract-extra-chapters" className="text-sm font-bold text-slate-700 dark:text-slate-300 cursor-pointer">
+              {t('scraperConfig.extractExtraChapters')}
+            </label>
+            <HelpHint text={t('scraperConfig.extractExtraChaptersHelp')} />
           </div>
         </div>
 
