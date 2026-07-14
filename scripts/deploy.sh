@@ -259,14 +259,17 @@ install_management_commands() {
     fi
     if [[ "$EUID" -eq 0 ]]; then
       ln -sfn "$install_dir/uninstall.sh" /usr/local/bin/ting-reader-uninstall
+      ln -sfn "$install_dir/update.sh" /usr/local/bin/ting-reader-update
     else
       sudo ln -sfn "$install_dir/uninstall.sh" /usr/local/bin/ting-reader-uninstall
+      sudo ln -sfn "$install_dir/update.sh" /usr/local/bin/ting-reader-update
     fi
   else
     command_path="$HOME/.local/bin/ting-reader-library"
     mkdir -p "$(dirname "$command_path")"
     ln -sfn "$install_dir/manage-libraries.sh" "$command_path"
     ln -sfn "$install_dir/uninstall.sh" "$HOME/.local/bin/ting-reader-uninstall"
+    ln -sfn "$install_dir/update.sh" "$HOME/.local/bin/ting-reader-update"
   fi
 }
 
@@ -386,12 +389,15 @@ MANAGER_FILE="manage-libraries.sh"
 MANAGER_URL="${DOWNLOAD_PREFIX}https://github.com/$REPOSITORY/releases/latest/download/$MANAGER_FILE"
 UNINSTALL_FILE="uninstall.sh"
 UNINSTALL_URL="${DOWNLOAD_PREFIX}https://github.com/$REPOSITORY/releases/latest/download/$UNINSTALL_FILE"
+UPDATE_FILE="update.sh"
+UPDATE_URL="${DOWNLOAD_PREFIX}https://github.com/$REPOSITORY/releases/latest/download/$UPDATE_FILE"
 
 say "正在下载 $RELEASE_TAG 的前后端包……" "Downloading frontend and backend packages for $RELEASE_TAG..."
 curl -fL --retry 3 "$BASE_URL/$BACKEND_FILE" -o "$WORK_DIR/$BACKEND_FILE"
 curl -fL --retry 3 "$BASE_URL/$FRONTEND_FILE" -o "$WORK_DIR/$FRONTEND_FILE"
 curl -fL --retry 3 "$MANAGER_URL" -o "$WORK_DIR/$MANAGER_FILE"
 curl -fL --retry 3 "$UNINSTALL_URL" -o "$WORK_DIR/$UNINSTALL_FILE"
+curl -fL --retry 3 "$UPDATE_URL" -o "$WORK_DIR/$UPDATE_FILE"
 mkdir -p "$WORK_DIR/backend" "$WORK_DIR/frontend"
 tar -xzf "$WORK_DIR/$BACKEND_FILE" -C "$WORK_DIR/backend"
 tar -xzf "$WORK_DIR/$FRONTEND_FILE" -C "$WORK_DIR/frontend"
@@ -400,6 +406,7 @@ tar -xzf "$WORK_DIR/$FRONTEND_FILE" -C "$WORK_DIR/frontend"
 [[ -f "$WORK_DIR/frontend/static/index.html" ]] || { say "前端包缺少 static/index.html。" "Frontend package does not contain static/index.html."; exit 1; }
 [[ -s "$WORK_DIR/$MANAGER_FILE" ]] || { say "存储库管理脚本下载失败。" "The library management script is missing."; exit 1; }
 [[ -s "$WORK_DIR/$UNINSTALL_FILE" ]] || { say "卸载脚本下载失败。" "The uninstall script is missing."; exit 1; }
+[[ -s "$WORK_DIR/$UPDATE_FILE" ]] || { say "更新脚本下载失败。" "The update script is missing."; exit 1; }
 
 timestamp="$(date +%Y%m%d%H%M%S)"
 mkdir -p "$INSTALL_DIR/backups"
@@ -416,6 +423,7 @@ fi
 install -m 755 "$WORK_DIR/backend/ting-reader" "$INSTALL_DIR/ting-reader"
 install -m 755 "$WORK_DIR/$MANAGER_FILE" "$INSTALL_DIR/manage-libraries.sh"
 install -m 755 "$WORK_DIR/$UNINSTALL_FILE" "$INSTALL_DIR/uninstall.sh"
+install -m 755 "$WORK_DIR/$UPDATE_FILE" "$INSTALL_DIR/update.sh"
 mv "$WORK_DIR/frontend/static" "$INSTALL_DIR/static"
 if [[ -d "$WORK_DIR/backend/preinstalled-plugins" ]]; then
   cp -a "$WORK_DIR/backend/preinstalled-plugins/." "$INSTALL_DIR/preinstalled-plugins/"
@@ -456,6 +464,7 @@ say "部署完成。" "Deployment completed."
 say "安装目录：$INSTALL_DIR" "Installation directory: $INSTALL_DIR"
 say "访问地址：http://localhost:$PORT" "Open: http://localhost:$PORT"
 say "以后添加本地存储库：ting-reader-library" "Add local libraries later with: ting-reader-library"
+say "交互更新：ting-reader-update" "Interactive update: ting-reader-update"
 say "安全卸载：ting-reader-uninstall" "Safe uninstall: ting-reader-uninstall"
 if [[ "$START_MODE" == "manual" ]]; then
   say "手动启动：$INSTALL_DIR/run.sh" "Start manually: $INSTALL_DIR/run.sh"

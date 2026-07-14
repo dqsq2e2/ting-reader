@@ -242,8 +242,9 @@ jobs:
         run: |
           cp scripts/deploy.sh release-assets/deploy.sh
           cp scripts/manage-libraries.sh release-assets/manage-libraries.sh
+          cp scripts/update.sh release-assets/update.sh
           cp scripts/uninstall.sh release-assets/uninstall.sh
-          chmod +x release-assets/deploy.sh release-assets/manage-libraries.sh release-assets/uninstall.sh
+          chmod +x release-assets/deploy.sh release-assets/manage-libraries.sh release-assets/update.sh release-assets/uninstall.sh
 
       - name: Setup fnpack
         uses: ./.github/actions/setup-fnpack

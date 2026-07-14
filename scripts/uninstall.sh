@@ -138,7 +138,13 @@ discover_install_dir() {
     return
   fi
 
-  for target in /usr/local/bin/ting-reader-uninstall "$HOME/.local/bin/ting-reader-uninstall"; do
+  for target in \
+    /usr/local/bin/ting-reader-uninstall \
+    /usr/local/bin/ting-reader-update \
+    /usr/local/bin/ting-reader-library \
+    "$HOME/.local/bin/ting-reader-uninstall" \
+    "$HOME/.local/bin/ting-reader-update" \
+    "$HOME/.local/bin/ting-reader-library"; do
     if [[ -L "$target" ]]; then
       script_path="$(readlink -f -- "$target" 2>/dev/null || true)"
       if [[ -n "$script_path" && -f "$(dirname -- "$script_path")/config.toml" ]]; then
@@ -154,6 +160,10 @@ discover_install_dir() {
       printf '%s' "$unit_line"
       return
     fi
+  fi
+
+  if [[ -f "$HOME/.local/share/ting-reader/config.toml" ]]; then
+    printf '%s' "$HOME/.local/share/ting-reader"
   fi
 }
 
@@ -213,11 +223,21 @@ language_choice="$(prompt "请输入选项" "Enter choice" "1")"
 [[ "$language_choice" == "2" ]] && LANGUAGE="en"
 
 detected_dir="$(discover_install_dir)"
-install_input="$(prompt "Ting Reader 安装目录" "Ting Reader installation directory" "${detected_dir:-$HOME/.local/share/ting-reader}")"
-INSTALL_DIR="$(validate_install_dir "$install_input")" || {
+if [[ -z "$detected_dir" ]]; then
+  say "未能自动识别 Ting Reader 安装目录。为避免误删，卸载已取消。" "Unable to detect the Ting Reader installation directory automatically. Uninstallation was cancelled to prevent accidental deletion."
+  exit 1
+fi
+
+INSTALL_DIR="$(validate_install_dir "$detected_dir")" || {
   say "无法确认这是有效且安全的 Ting Reader 安装目录，已取消卸载。" "The directory could not be verified as a safe Ting Reader installation. Uninstallation cancelled."
   exit 1
 }
+
+say "已识别安装目录：$INSTALL_DIR" "Detected installation directory: $INSTALL_DIR"
+if ! confirm "是否确认卸载此目录中的 Ting Reader？(y/n)" "Uninstall Ting Reader from this directory? (y/n)" "n"; then
+  say "已取消。" "Cancelled."
+  exit 0
+fi
 
 DATA_DIR="$(read_toml_string data_dir)"
 TEMP_DIR="$(read_toml_string temp_dir)"
@@ -249,8 +269,10 @@ fi
 
 stop_services
 remove_matching_symlink /usr/local/bin/ting-reader-library
+remove_matching_symlink /usr/local/bin/ting-reader-update
 remove_matching_symlink /usr/local/bin/ting-reader-uninstall
 remove_matching_symlink "$HOME/.local/bin/ting-reader-library"
+remove_matching_symlink "$HOME/.local/bin/ting-reader-update"
 remove_matching_symlink "$HOME/.local/bin/ting-reader-uninstall"
 
 safe_remove_tree "$INSTALL_DIR/static" install
@@ -271,6 +293,7 @@ safe_remove_file "$INSTALL_DIR/.service-mode"
 safe_remove_file "$INSTALL_DIR/.service-user"
 safe_remove_file "$INSTALL_DIR/.ting-reader-install"
 safe_remove_file "$INSTALL_DIR/manage-libraries.sh"
+safe_remove_file "$INSTALL_DIR/update.sh"
 safe_remove_file "$INSTALL_DIR/uninstall.sh"
 
 rmdir -- "$INSTALL_DIR" 2>/dev/null || true
