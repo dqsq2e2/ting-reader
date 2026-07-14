@@ -3,7 +3,8 @@ set -Eeuo pipefail
 
 LANGUAGE="zh"
 INPUT_FD=0
-INSTALL_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+SCRIPT_PATH="$(readlink -f -- "${BASH_SOURCE[0]}")"
+INSTALL_DIR="$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)"
 CONFIG_PATH="$INSTALL_DIR/config.toml"
 ROOTS_FILE="$INSTALL_DIR/library-roots.txt"
 SERVICE_MODE_FILE="$INSTALL_DIR/.service-mode"
