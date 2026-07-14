@@ -238,10 +238,11 @@ jobs:
           pattern: '*-package*'
           merge-multiple: true
 
-      - name: Add interactive deployment script
+      - name: Add deployment scripts
         run: |
           cp scripts/deploy.sh release-assets/deploy.sh
-          chmod +x release-assets/deploy.sh
+          cp scripts/manage-libraries.sh release-assets/manage-libraries.sh
+          chmod +x release-assets/deploy.sh release-assets/manage-libraries.sh
 
       - name: Setup fnpack
         uses: ./.github/actions/setup-fnpack

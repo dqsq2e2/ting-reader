@@ -151,7 +151,7 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
-部署时可选择系统级 `systemd`、用户级 `systemd` 或仅生成文件后手动运行。当前本地发布包支持 Linux `amd64` 与 `arm64`。
+部署时可选择系统级 `systemd`、用户级 `systemd` 或仅生成文件后手动运行。当前本地发布包支持 Linux `amd64` 与 `arm64`。部署完成后可运行 `ting-reader-library`，交互式添加新的本地存储库、授予服务用户只读或读写 ACL 权限，并自动重启服务生效。
 
 ### 使用 Docker Compose (推荐)
 

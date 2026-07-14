@@ -242,6 +242,28 @@ EOF
   fi
 }
 
+install_library_manager_command() {
+  local mode="$1"
+  local install_dir="$2"
+  local command_path
+
+  printf '%s\n' "$mode" >"$install_dir/.service-mode"
+  id -un >"$install_dir/.service-user"
+
+  if [[ "$mode" == "system" ]]; then
+    command_path="/usr/local/bin/ting-reader-library"
+    if [[ "$EUID" -eq 0 ]]; then
+      ln -sfn "$install_dir/manage-libraries.sh" "$command_path"
+    else
+      sudo ln -sfn "$install_dir/manage-libraries.sh" "$command_path"
+    fi
+  else
+    command_path="$HOME/.local/bin/ting-reader-library"
+    mkdir -p "$(dirname "$command_path")"
+    ln -sfn "$install_dir/manage-libraries.sh" "$command_path"
+  fi
+}
+
 printf 'Select language / 选择语言:\n'
 printf '  1) 简体中文\n'
 printf '  2) English\n'
@@ -354,16 +376,20 @@ WORK_DIR="$(mktemp -d)"
 BASE_URL="${DOWNLOAD_PREFIX}https://github.com/$REPOSITORY/releases/download/$RELEASE_TAG"
 BACKEND_FILE="ting-reader-backend-linux-$ARCH-$VERSION.tar.gz"
 FRONTEND_FILE="ting-reader-frontend-$VERSION.tar.gz"
+MANAGER_FILE="manage-libraries.sh"
+MANAGER_URL="${DOWNLOAD_PREFIX}https://github.com/$REPOSITORY/releases/latest/download/$MANAGER_FILE"
 
 say "正在下载 $RELEASE_TAG 的前后端包……" "Downloading frontend and backend packages for $RELEASE_TAG..."
 curl -fL --retry 3 "$BASE_URL/$BACKEND_FILE" -o "$WORK_DIR/$BACKEND_FILE"
 curl -fL --retry 3 "$BASE_URL/$FRONTEND_FILE" -o "$WORK_DIR/$FRONTEND_FILE"
+curl -fL --retry 3 "$MANAGER_URL" -o "$WORK_DIR/$MANAGER_FILE"
 mkdir -p "$WORK_DIR/backend" "$WORK_DIR/frontend"
 tar -xzf "$WORK_DIR/$BACKEND_FILE" -C "$WORK_DIR/backend"
 tar -xzf "$WORK_DIR/$FRONTEND_FILE" -C "$WORK_DIR/frontend"
 
 [[ -x "$WORK_DIR/backend/ting-reader" ]] || { say "后端包缺少可执行文件。" "Backend package does not contain the executable."; exit 1; }
 [[ -f "$WORK_DIR/frontend/static/index.html" ]] || { say "前端包缺少 static/index.html。" "Frontend package does not contain static/index.html."; exit 1; }
+[[ -s "$WORK_DIR/$MANAGER_FILE" ]] || { say "存储库管理脚本下载失败。" "The library management script is missing."; exit 1; }
 
 timestamp="$(date +%Y%m%d%H%M%S)"
 mkdir -p "$INSTALL_DIR/backups"
@@ -378,12 +404,17 @@ if [[ -f "$INSTALL_DIR/config.toml" ]]; then
 fi
 
 install -m 755 "$WORK_DIR/backend/ting-reader" "$INSTALL_DIR/ting-reader"
+install -m 755 "$WORK_DIR/$MANAGER_FILE" "$INSTALL_DIR/manage-libraries.sh"
 mv "$WORK_DIR/frontend/static" "$INSTALL_DIR/static"
 if [[ -d "$WORK_DIR/backend/preinstalled-plugins" ]]; then
   cp -a "$WORK_DIR/backend/preinstalled-plugins/." "$INSTALL_DIR/preinstalled-plugins/"
 fi
 write_config "$INSTALL_DIR/config.toml" "$INSTALL_DIR" "$LISTEN_HOST" "$PORT" "$DATA_DIR" "$TEMP_DIR" "$STORAGE_DIR" "$JWT_SECRET" "${ADDITIONAL_ROOTS[@]}"
 write_run_script "$INSTALL_DIR" "$DATA_DIR"
+: >"$INSTALL_DIR/library-roots.txt"
+for root in "${ADDITIONAL_ROOTS[@]}"; do
+  printf '%s\n' "$root" >>"$INSTALL_DIR/library-roots.txt"
+done
 
 printf '%s\n' "$(text "选择启动方式：" "Select startup mode:")"
 printf '  1) %s\n' "$(text "系统 systemd 服务（推荐，需要 sudo）" "System systemd service (recommended, requires sudo)")"
@@ -407,9 +438,12 @@ case "$service_choice" in
     ;;
 esac
 
+install_library_manager_command "$START_MODE" "$INSTALL_DIR"
+
 say "部署完成。" "Deployment completed."
 say "安装目录：$INSTALL_DIR" "Installation directory: $INSTALL_DIR"
 say "访问地址：http://localhost:$PORT" "Open: http://localhost:$PORT"
+say "以后添加本地存储库：ting-reader-library" "Add local libraries later with: ting-reader-library"
 if [[ "$START_MODE" == "manual" ]]; then
   say "手动启动：$INSTALL_DIR/run.sh" "Start manually: $INSTALL_DIR/run.sh"
 elif [[ "$START_MODE" == "user" ]]; then
