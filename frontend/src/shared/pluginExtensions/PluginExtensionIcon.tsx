@@ -1,22 +1,12 @@
-import { icons, PlugZap } from "lucide-react";
+import { PlugZap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   ClientExtensionDescriptor,
   ClientExtensionIcon,
 } from "../../core/pluginExtensions";
 import { useAuthStore } from "../../core/stores/authStore";
 import { getRuntimeUrl } from "../../core/utils/runtimeUrl";
-
-const iconComponents = icons as Record<string, LucideIcon | undefined>;
-
-const toPascalCase = (value: string) =>
-  value
-    .trim()
-    .replace(/(^|[-_\s]+)([a-zA-Z0-9])/g, (_, __, letter: string) =>
-      letter.toUpperCase(),
-    )
-    .replace(/[^a-zA-Z0-9]/g, "");
 
 const iconText = (icon: ClientExtensionIcon | undefined) => {
   if (typeof icon === "string") return icon.trim();
@@ -67,6 +57,24 @@ const PluginImageIcon = ({
   );
 };
 
+const PluginLucideIcon = ({ value, size }: { value: string; size: number }) => {
+  const [loaded, setLoaded] = useState<{ value: string; Icon?: LucideIcon }>();
+  useEffect(() => {
+    let active = true;
+    void import("./pluginIconRegistry").then(({ getPluginLucideIcon }) => {
+      if (active) setLoaded({ value, Icon: getPluginLucideIcon(value) });
+    }).catch(() => {
+      // Keep the fallback icon if an offline or outdated client cannot fetch it.
+    });
+    return () => { active = false; };
+  }, [value]);
+
+  if (loaded?.value !== value) return <PlugZap size={size} strokeWidth={2.2} />;
+  const Icon = loaded.Icon;
+  if (Icon) return <Icon size={size} strokeWidth={2.2} />;
+  return <span className="text-center text-[18px] leading-none" aria-hidden="true">{value}</span>;
+};
+
 const PluginExtensionIcon = ({
   extension,
   size = 18,
@@ -93,13 +101,7 @@ const PluginExtensionIcon = ({
   }
 
   if (value && explicitType !== "emoji") {
-    const Icon =
-      iconComponents[value] ||
-      iconComponents[toPascalCase(value)] ||
-      iconComponents[toPascalCase(value.replace(/^lucide:/i, ""))];
-    if (Icon) {
-      return <Icon size={size} strokeWidth={2.2} />;
-    }
+    return <PluginLucideIcon value={value} size={size} />;
   }
 
   if (value) {

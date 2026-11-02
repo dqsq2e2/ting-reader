@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { Suspense, useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { 
@@ -37,6 +37,7 @@ import DefaultAdminCredentialsDialog from '../../features/auth/DefaultAdminCrede
 import { isMiniPlayerHiddenPath } from '../../features/player/platform';
 import PluginExtensionHost from '../pluginExtensions/PluginExtensionHost';
 import PluginExtensionIcon from '../pluginExtensions/PluginExtensionIcon';
+import LoadingSpinner from '../ui/LoadingSpinner';
 
 type NavItem = {
   icon: React.ReactNode;
@@ -392,7 +393,9 @@ const Layout: React.FC = () => {
               : {}),
           } as React.CSSProperties}
         >
-          <Outlet />
+          <Suspense fallback={<LoadingSpinner className="min-h-48" />}>
+            <Outlet />
+          </Suspense>
         </main>
 
         {/* Mobile Bottom Nav */}

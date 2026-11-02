@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { getPluginLucideIcon } from '../src/shared/pluginExtensions/pluginIconRegistry.ts';
 import {
   externalUrlRequest,
   isBridgeMessageWithinLimit,
@@ -18,6 +19,22 @@ const request = {
   method: 'host.invoke',
   params: { title: 'book' },
 };
+
+test('deferred plugin icon registry preserves names, prefixes and separators', () => {
+  const headphones = getPluginLucideIcon('Headphones');
+  assert.ok(headphones);
+  for (const name of ['headphones', ' Headphones ', 'lucide:headphones']) {
+    assert.equal(getPluginLucideIcon(name), headphones);
+  }
+  const book = getPluginLucideIcon('BookOpen');
+  assert.ok(book);
+  for (const name of ['book-open', 'book_open', 'book open', 'lucide:book-open']) {
+    assert.equal(getPluginLucideIcon(name), book);
+  }
+  assert.ok(getPluginLucideIcon('CircleAlert'));
+  assert.equal(getPluginLucideIcon('no-such-icon'), undefined);
+  assert.equal(getPluginLucideIcon(''), undefined);
+});
 
 test('bridge accepts only the current document token and declared operations', () => {
   assert.equal(isBridgeRequest(request, 'document-token'), true);

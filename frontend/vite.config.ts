@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
-import legacy from '@vitejs/plugin-legacy'
+import legacy from 'vite-plugin-legacy-swc'
 import { readFileSync } from 'node:fs'
 import { cspSafeLegacyPlugin } from './build/cspSafeLegacyPlugin.ts'
 
@@ -156,8 +156,9 @@ export default defineConfig(({ command }) => ({
   base: appBase,
   build: {
     outDir: 'dist',
-    minify: 'terser',
+    minify: 'oxc',
     sourcemap: false,
+    // SWC reads these options for legacy chunks and their polyfills.
     terserOptions: {
       compress: {
         drop_console: true,
@@ -165,19 +166,18 @@ export default defineConfig(({ command }) => ({
       },
     },
     chunkSizeWarningLimit: 1000,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks(id: string) {
-          if (
-            id.includes('node_modules/react') ||
-            id.includes('node_modules/react-router') ||
-            id.includes('node_modules/zustand')
-          ) {
-            return 'vendor';
-          }
-          if (id.includes('node_modules/lucide-react')) {
-            return 'ui';
-          }
+        minify: {
+          compress: { dropConsole: true, dropDebugger: true },
+        },
+        codeSplitting: {
+          groups: [
+            {
+              name: 'vendor-react',
+              test: /node_modules[\\/](?:react|react-dom|react-router|scheduler|zustand)[\\/]/,
+            },
+          ],
         },
       }
     }
