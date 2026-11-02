@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import legacy from '@vitejs/plugin-legacy'
 import { readFileSync } from 'node:fs'
-import { cspSafeLegacyPlugin } from './build/cspSafeLegacyPlugin'
+import { cspSafeLegacyPlugin } from './build/cspSafeLegacyPlugin.ts'
 
 const packageJson = JSON.parse(
   readFileSync(new URL('./package.json', import.meta.url), 'utf-8'),
