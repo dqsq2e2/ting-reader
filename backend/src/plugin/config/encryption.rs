@@ -111,7 +111,9 @@ pub fn decrypt_sensitive_fields(
 
 /// Validate a configuration against a JSON Schema
 pub fn validate_config(schema: &Value, config: &Value) -> Result<()> {
-    let compiled_schema = jsonschema::JSONSchema::compile(schema).map_err(|e| {
+    let mut validation_schema = schema.clone();
+    normalize_schema_annotations(&mut validation_schema);
+    let compiled_schema = jsonschema::JSONSchema::compile(&validation_schema).map_err(|e| {
         TingError::configuration(
             ConfigurationErrorKind::InvalidValue,
             "validate_config",
@@ -132,4 +134,81 @@ pub fn validate_config(schema: &Value, config: &Value) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn normalize_schema_annotations(schema: &mut Value) {
+    let Some(object) = schema.as_object_mut() else {
+        return;
+    };
+
+    // Only the validation copy needs standard string annotations. Keep the original
+    // localized schema for forms, persistence and exports, and leave invalid types
+    // untouched so JSON Schema meta-validation still rejects them.
+    for keyword in ["title", "description"] {
+        if let Some(annotation) = object.get_mut(keyword)
+            && let Some(translations) = annotation.as_object()
+            && !translations.is_empty()
+            && translations.values().all(Value::is_string)
+        {
+            let text = translations
+                .get("en")
+                .or_else(|| translations.get("zh"))
+                .or_else(|| translations.values().next())
+                .cloned();
+            if let Some(text) = text {
+                *annotation = text;
+            }
+        }
+    }
+
+    // Follow schema positions only, never instance data in default/enum/const or
+    // property-name maps themselves (a user field may be named "title").
+    for keyword in [
+        "properties",
+        "patternProperties",
+        "definitions",
+        "$defs",
+        "dependencies",
+        "dependentSchemas",
+    ] {
+        if let Some(children) = object.get_mut(keyword).and_then(Value::as_object_mut) {
+            for child in children.values_mut() {
+                normalize_schema_annotations(child);
+            }
+        }
+    }
+    for keyword in [
+        "additionalProperties",
+        "additionalItems",
+        "unevaluatedProperties",
+        "unevaluatedItems",
+        "propertyNames",
+        "contains",
+        "not",
+        "if",
+        "then",
+        "else",
+        "contentSchema",
+    ] {
+        if let Some(child) = object.get_mut(keyword) {
+            normalize_schema_annotations(child);
+        }
+    }
+    for keyword in ["allOf", "anyOf", "oneOf", "prefixItems"] {
+        if let Some(children) = object.get_mut(keyword).and_then(Value::as_array_mut) {
+            for child in children {
+                normalize_schema_annotations(child);
+            }
+        }
+    }
+    if let Some(items) = object.get_mut("items") {
+        match items {
+            Value::Array(children) => {
+                for child in children {
+                    normalize_schema_annotations(child);
+                }
+            }
+            _ => normalize_schema_annotations(items),
+        }
+    }
 }

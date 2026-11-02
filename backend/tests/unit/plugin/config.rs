@@ -142,6 +142,220 @@ fn test_config_validation() {
 }
 
 #[test]
+fn localized_config_schema_survives_initialize_update_import_and_reload() {
+    let (manager, directory) = test_config_manager();
+    let plugin_id = "localized@1.0.0".to_string();
+    let schema = serde_json::json!({
+        "type": "object",
+        "title": {"zh": "AI", "en": "AI"},
+        "description": {"zh": "配置", "en": "Configuration"},
+        "properties": {
+            "api_key": {
+                "type": "string", "format": "secret", "minLength": 1,
+                "title": {"zh": "密钥", "en": "API key"},
+                "description": {"zh": "服务密钥", "en": "Service key"},
+                "placeholder": {"zh": "输入密钥", "en": "Enter key"}
+            },
+            "mode": {
+                "type": "string", "enum": ["fast", "accurate"],
+                "default": "fast",
+                "enum_labels": {"fast": {"zh": "快速", "en": "Fast"}}
+            }
+        },
+        "required": ["api_key", "mode"],
+        "additionalProperties": false
+    });
+    let initial = serde_json::json!({"api_key": "initial-secret", "mode": "fast"});
+    manager
+        .initialize_config(
+            plugin_id.clone(),
+            "AI".into(),
+            Some(schema.clone()),
+            initial,
+        )
+        .unwrap();
+    let updated = serde_json::json!({"api_key": "updated-secret", "mode": "accurate"});
+    manager.update_config(&plugin_id, updated.clone()).unwrap();
+    assert!(
+        manager
+            .update_config(&plugin_id, serde_json::json!({"mode": "fast"}))
+            .is_err()
+    );
+    assert!(
+        manager
+            .update_config(
+                &plugin_id,
+                serde_json::json!({"api_key": "", "mode": "fast"})
+            )
+            .is_err()
+    );
+    assert!(
+        manager
+            .import_config(
+                &plugin_id,
+                serde_json::json!({"config": {"api_key": "key", "mode": "invalid"}})
+            )
+            .is_err()
+    );
+    let exported = manager.export_config(&plugin_id).unwrap();
+    assert_eq!(exported["schema"], schema);
+    manager.import_config(&plugin_id, exported).unwrap();
+    drop(manager);
+
+    let manager =
+        PluginConfigManager::new(directory.path().to_path_buf(), test_encryption_key()).unwrap();
+    manager
+        .ensure_config(
+            plugin_id.clone(),
+            "AI".into(),
+            Some(schema.clone()),
+            serde_json::json!({}),
+        )
+        .unwrap();
+    assert_eq!(manager.get_config(&plugin_id).unwrap(), updated);
+    assert_eq!(manager.export_config(&plugin_id).unwrap()["schema"], schema);
+    assert!(
+        !std::fs::read_to_string(directory.path().join("localized@1.0.0.json"))
+            .unwrap()
+            .contains("updated-secret")
+    );
+}
+
+#[test]
+fn localized_config_schema_supports_nested_arrays_combinators_and_references() {
+    let schema = serde_json::json!({
+        "type": "object",
+        "definitions": {
+            "endpoint": {
+                "title": {"en": "Endpoint"},
+                "type": "string", "minLength": 1
+            }
+        },
+        "properties": {
+            "endpoints": {
+                "title": {"zh": "地址"},
+                "type": "array",
+                "items": {
+                    "description": {"en": "Endpoint settings"},
+                    "allOf": [{"$ref": "#/definitions/endpoint"}]
+                }
+            },
+            "options": {
+                "type": "object",
+                "patternProperties": {"^x-": {"title": {"en": "Option"}, "type": "boolean"}},
+                "additionalProperties": {"description": {"en": "Extra"}, "type": "integer"}
+            }
+        }
+    });
+    let original = schema.clone();
+    assert!(encryption::validate_config(&schema, &serde_json::json!({"endpoints": ["https://example.com"], "options": {"x-on": true, "count": 2}})).is_ok());
+    assert!(encryption::validate_config(&schema, &serde_json::json!({"endpoints": [""]})).is_err());
+    assert!(
+        encryption::validate_config(&schema, &serde_json::json!({"options": {"x-on": 1}})).is_err()
+    );
+    assert_eq!(schema, original);
+}
+
+#[test]
+fn localized_config_schema_handles_subschema_keyword_shapes() {
+    for keyword in [
+        "not",
+        "if",
+        "then",
+        "else",
+        "contains",
+        "propertyNames",
+        "additionalProperties",
+        "additionalItems",
+    ] {
+        let schema = serde_json::json!({(keyword): {"title": {"en": "Label"}}});
+        let result = encryption::validate_config(&schema, &serde_json::json!({}));
+        if keyword == "not" {
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("Configuration validation failed")
+            );
+        } else {
+            result.unwrap();
+        }
+    }
+    for keyword in ["allOf", "anyOf", "oneOf", "items"] {
+        let schema = serde_json::json!({(keyword): [{"description": {"en": "Label"}}]});
+        encryption::validate_config(&schema, &serde_json::json!([])).unwrap();
+    }
+    let schema = serde_json::json!({
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "dependencies": {"enabled": {"title": {"en": "Dependency"}, "required": ["endpoint"]}}
+    });
+    encryption::validate_config(
+        &schema,
+        &serde_json::json!({"enabled": true, "endpoint": "url"}),
+    )
+    .unwrap();
+    assert!(encryption::validate_config(&schema, &serde_json::json!({"enabled": true})).is_err());
+    let schema = serde_json::json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$defs": {"value": {"title": {"en": "Value"}, "type": "integer"}},
+        "prefixItems": [{"$ref": "#/$defs/value"}],
+        "items": {"description": {"en": "Other values"}, "type": "string"},
+        "unevaluatedItems": {"title": {"en": "Remaining items"}},
+        "unevaluatedProperties": {"title": {"en": "Remaining properties"}},
+        "dependentSchemas": {"enabled": {"title": {"en": "Dependency"}}},
+        "contentSchema": {"title": {"en": "Content"}}
+    });
+    encryption::validate_config(&schema, &serde_json::json!([1, "two"])).unwrap();
+    assert!(encryption::validate_config(&schema, &serde_json::json!(["wrong"])).is_err());
+}
+
+#[test]
+fn localized_config_schema_does_not_rewrite_instance_data_or_property_names() {
+    let literal = serde_json::json!({"title": {"en": "Literal"}, "properties": {"title": {"title": {"en": "Nested literal"}}}});
+    let schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "title": {"en": "Title"}},
+            "description": {"type": "string"},
+            "literal": {"const": literal, "default": literal, "enum": [literal], "examples": [literal]}
+        },
+        "required": ["title", "literal"]
+    });
+    let original = schema.clone();
+    encryption::validate_config(
+        &schema,
+        &serde_json::json!({"title": "Book", "literal": literal}),
+    )
+    .unwrap();
+    assert!(
+        encryption::validate_config(
+            &schema,
+            &serde_json::json!({"title": 1, "literal": literal})
+        )
+        .is_err()
+    );
+    assert_eq!(schema, original);
+}
+
+#[test]
+fn localized_config_schema_still_rejects_invalid_schemas() {
+    for invalid in [
+        serde_json::json!({"title": 1}),
+        serde_json::json!({"title": {"en": 1}}),
+        serde_json::json!({"description": {}}),
+        serde_json::json!({"title": {"en": "Title"}, "type": "invalid"}),
+        serde_json::json!({"properties": {"field": {"title": {"en": "Field"}, "minimum": "invalid"}}}),
+        serde_json::json!({"additionalProperties": [{"title": {"en": "Field"}}]}),
+    ] {
+        let error = encryption::validate_config(&invalid, &serde_json::json!({})).unwrap_err();
+        assert!(
+            error.to_string().contains("Invalid configuration schema"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
 fn test_sensitive_field_encryption() {
     let (manager, _temp_dir) = test_config_manager();
     let schema = serde_json::json!({
