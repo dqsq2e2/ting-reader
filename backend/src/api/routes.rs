@@ -8,6 +8,7 @@ use crate::api::handlers::{
     COVER_BODY_LIMIT,
     add_bookmark,
     add_favorite,
+    add_source_book,
     apply_scrape_result,
     batch_delete_tasks,
     batch_update_chapters,
@@ -311,6 +312,7 @@ pub fn build_api_routes(state: AppState) -> Router {
         .route("/api/v1/search", get(search_books))
         .route("/api/v1/scraper/sources", get(get_scraper_sources))
         .route("/api/v1/scraper/search", post(scraper_search))
+        .route("/api/v1/scraper/books", post(add_source_book))
         // Plugin management endpoints
         .route("/api/v1/plugins", get(list_plugins))
         .route(

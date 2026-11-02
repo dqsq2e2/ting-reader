@@ -228,6 +228,8 @@ impl LibraryScanner {
                 chapter_index: Some(chapter_idx),
                 is_extra: if is_extra { 1 } else { 0 },
                 hash: Some(ch_hash.clone()),
+                start_time: None,
+                end_time: None,
                 created_at: chrono::Utc::now().to_rfc3339(),
                 manual_corrected: 0,
             };

@@ -426,3 +426,251 @@ fn changed_range_child_wakes_only_its_coalesced_book() {
         &changed_ancestors
     ));
 }
+
+fn mp4_atom(kind: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(8 + payload.len());
+    bytes.extend_from_slice(&((payload.len() + 8) as u32).to_be_bytes());
+    bytes.extend_from_slice(kind);
+    bytes.extend_from_slice(payload);
+    bytes
+}
+
+fn mp4_container(kind: &[u8; 4], children: &[Vec<u8>]) -> Vec<u8> {
+    mp4_atom(kind, &children.concat())
+}
+
+fn mp4_text_tag(name: &[u8; 4], value: &str) -> Vec<u8> {
+    let mut payload = 1_u32.to_be_bytes().to_vec();
+    payload.extend_from_slice(&[0, 0, 0, 0]);
+    payload.extend_from_slice(value.as_bytes());
+    mp4_atom(name, &mp4_atom(b"data", &payload))
+}
+
+fn m4b_fixture(chapters: Option<&[(u64, &str)]>) -> Vec<u8> {
+    let ilst_items = vec![
+        mp4_text_tag(b"\xa9nam", "Embedded Book"),
+        mp4_text_tag(b"\xa9alb", "Embedded Book"),
+        mp4_text_tag(b"\xa9ART", "Narrator Name"),
+        mp4_text_tag(b"aART", "Author Name"),
+        mp4_text_tag(b"\xa9wrt", "Narrator Name"),
+    ];
+    let mut hdlr_payload = vec![0_u8; 8];
+    hdlr_payload.extend_from_slice(b"mdir");
+    hdlr_payload.extend_from_slice(&[0; 13]);
+    let meta = mp4_container(
+        b"meta",
+        &[
+            mp4_atom(b"hdlr", &hdlr_payload),
+            mp4_container(b"ilst", &ilst_items),
+        ],
+    );
+
+    let mut udta = Vec::new();
+    if let Some(chapters) = chapters {
+        let mut payload = vec![1, 0, 0, 0, 0, 0, 0, 0, chapters.len() as u8];
+        for (start_ms, title) in chapters {
+            payload.extend_from_slice(&(start_ms * 10_000).to_be_bytes());
+            payload.push(title.len() as u8);
+            payload.extend_from_slice(title.as_bytes());
+        }
+        udta.push(mp4_atom(b"chpl", &payload));
+    }
+    udta.push(meta);
+
+    let mut mvhd_payload = vec![0_u8; 4];
+    mvhd_payload.extend_from_slice(&0_u32.to_be_bytes());
+    mvhd_payload.extend_from_slice(&0_u32.to_be_bytes());
+    mvhd_payload.extend_from_slice(&1000_u32.to_be_bytes());
+    mvhd_payload.extend_from_slice(&180_000_u32.to_be_bytes());
+    mvhd_payload.resize(100, 0);
+
+    let mut file = mp4_atom(b"ftyp", b"M4B \0\0\0\0M4B mp42");
+    file.extend(mp4_atom(b"mdat", &[0_u8; 32]));
+    file.extend(mp4_container(
+        b"moov",
+        &[
+            mp4_atom(b"mvhd", &mvhd_payload),
+            mp4_container(b"udta", &udta),
+        ],
+    ));
+    file
+}
+
+async fn scan_local(
+    scanner: &crate::core::library_scanner::LibraryScanner,
+    library_id: &str,
+    root: &Path,
+    config: &crate::db::models::ScraperConfig,
+    mode: crate::core::library_scanner::ScanMode,
+    last_scanned: Option<chrono::DateTime<chrono::Utc>>,
+) -> crate::core::library_scanner::ScanResult {
+    scanner
+        .scan_local_library(crate::core::library_scanner::LocalLibraryScanContext {
+            library_id,
+            path: root,
+            task_id: None,
+            last_scanned,
+            scraper_config: config,
+            mode,
+            scan_paths: None,
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn single_file_m4b_chapters_are_created_and_kept_incremental() {
+    use crate::core::library_scanner::{ScanMode, test_support};
+    use crate::db::repository::Repository;
+
+    let directory = tempfile::tempdir().unwrap();
+    let scanner = test_support::scanner(directory.path());
+    let root = directory.path().join("library");
+    let book_dir = root.join("Embedded Book");
+    std::fs::create_dir_all(&book_dir).unwrap();
+    let audio = book_dir.join("Embedded Book.m4b");
+    std::fs::write(
+        &audio,
+        m4b_fixture(Some(&[
+            (0, "Opening Credits"),
+            (60_000, "Chapter 1"),
+            (120_000, "Chapter 2"),
+        ])),
+    )
+    .unwrap();
+
+    let library = test_support::library(&scanner, &root).await;
+    let config = crate::db::models::ScraperConfig::default();
+
+    let result = scan_local(&scanner, &library.id, &root, &config, ScanMode::Full, None).await;
+    assert_eq!(result.failed_count, 0, "{:?}", result.errors);
+    let books = scanner
+        .book_repo
+        .find_by_library(&library.id)
+        .await
+        .unwrap();
+    assert_eq!(books.len(), 1);
+    let book = &books[0];
+    assert_eq!(book.title.as_deref(), Some("Embedded Book"));
+    assert_eq!(book.author.as_deref(), Some("Author Name"));
+    assert_eq!(book.narrator.as_deref(), Some("Narrator Name"));
+
+    let chapters = scanner.chapter_repo.find_by_book(&book.id).await.unwrap();
+    let summary: Vec<(String, i32, Option<i64>, Option<i64>)> = chapters
+        .iter()
+        .map(|chapter| {
+            (
+                chapter.title.clone().unwrap_or_default(),
+                chapter.duration.unwrap_or_default(),
+                chapter.start_time,
+                chapter.end_time,
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            ("Opening Credits".into(), 60, Some(0), Some(60_000)),
+            ("Chapter 1".into(), 60, Some(60_000), Some(120_000)),
+            ("Chapter 2".into(), 60, Some(120_000), Some(180_000)),
+        ]
+    );
+    assert!(
+        chapters
+            .iter()
+            .all(|chapter| chapter.path == audio.to_string_lossy())
+    );
+
+    // An unchanged incremental scan keeps the split without re-probing.
+    let scanned_at = chrono::Utc::now() + chrono::Duration::seconds(5);
+    let result = scan_local(
+        &scanner,
+        &library.id,
+        &root,
+        &config,
+        ScanMode::Incremental,
+        Some(scanned_at),
+    )
+    .await;
+    assert_eq!(result.failed_count, 0, "{:?}", result.errors);
+    assert_eq!(
+        scanner
+            .chapter_repo
+            .find_by_book(&book.id)
+            .await
+            .unwrap()
+            .len(),
+        3
+    );
+
+    // A whole-file chapter from an older version is replaced on the next scan.
+    scanner.chapter_repo.delete_by_book(&book.id).await.unwrap();
+    scanner
+        .chapter_repo
+        .create(&crate::db::models::Chapter {
+            id: "legacy-chapter".into(),
+            book_id: book.id.clone(),
+            title: Some("Embedded Book".into()),
+            path: audio.to_string_lossy().to_string(),
+            duration: Some(180),
+            chapter_index: Some(1),
+            is_extra: 0,
+            hash: Some("legacy-hash".into()),
+            manual_corrected: 0,
+            start_time: None,
+            end_time: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })
+        .await
+        .unwrap();
+
+    let result = scan_local(
+        &scanner,
+        &library.id,
+        &root,
+        &config,
+        ScanMode::Incremental,
+        Some(scanned_at),
+    )
+    .await;
+    assert_eq!(result.failed_count, 0, "{:?}", result.errors);
+    let chapters = scanner.chapter_repo.find_by_book(&book.id).await.unwrap();
+    assert_eq!(chapters.len(), 3);
+    assert!(chapters.iter().all(|chapter| chapter.start_time.is_some()));
+    assert!(
+        chapters
+            .iter()
+            .all(|chapter| chapter.id != "legacy-chapter")
+    );
+}
+
+#[tokio::test]
+async fn single_file_m4b_without_chapters_keeps_one_whole_file_chapter() {
+    use crate::core::library_scanner::{ScanMode, test_support};
+
+    let directory = tempfile::tempdir().unwrap();
+    let scanner = test_support::scanner(directory.path());
+    let root = directory.path().join("library");
+    let book_dir = root.join("Plain Book");
+    std::fs::create_dir_all(&book_dir).unwrap();
+    std::fs::write(book_dir.join("Plain Book.m4b"), m4b_fixture(None)).unwrap();
+
+    let library = test_support::library(&scanner, &root).await;
+    let config = crate::db::models::ScraperConfig::default();
+    scan_local(&scanner, &library.id, &root, &config, ScanMode::Full, None).await;
+
+    let books = scanner
+        .book_repo
+        .find_by_library(&library.id)
+        .await
+        .unwrap();
+    assert_eq!(books.len(), 1);
+    let chapters = scanner
+        .chapter_repo
+        .find_by_book(&books[0].id)
+        .await
+        .unwrap();
+    assert_eq!(chapters.len(), 1);
+    assert_eq!(chapters[0].start_time, Some(0));
+    assert_eq!(chapters[0].end_time, Some(180_000));
+}

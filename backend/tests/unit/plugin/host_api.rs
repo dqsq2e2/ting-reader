@@ -4,6 +4,11 @@ use serde_json::json;
 #[test]
 fn plugin_host_permission_requires_matching_manifest_permission() {
     assert_eq!(
+        PluginHostGateway::required_permission("runtime.sleep"),
+        Some(PluginHostPermission::Runtime)
+    );
+    assert!(PluginHostGateway::authorize("demo", &[], "runtime.sleep").is_ok());
+    assert_eq!(
         PluginHostGateway::required_permission("books.list"),
         Some(PluginHostPermission::BooksRead)
     );
@@ -310,6 +315,171 @@ impl BookmarkFixture {
             )
             .await
     }
+}
+
+#[tokio::test]
+async fn background_html_parsing_needs_permission_but_not_a_user_principal() {
+    let fixture = BookmarkFixture::new().await;
+    let gateway = &fixture.gateway;
+    assert!(
+        gateway
+            .invoke_with_permissions(
+                "source",
+                &[],
+                None,
+                "html.parse",
+                json!({"html":"<h1>Sample</h1>"}),
+                None
+            )
+            .await
+            .is_err()
+    );
+    let parsed = gateway
+        .invoke_with_permissions(
+            "source",
+            &[Permission::HtmlParse],
+            None,
+            "html.parse",
+            json!({"html":"<h1>Sample</h1>"}),
+            None,
+        )
+        .await
+        .unwrap();
+    let id = parsed["document_id"].as_str().unwrap();
+    let selection = gateway
+        .invoke_with_permissions(
+            "source",
+            &[Permission::HtmlParse],
+            None,
+            "html.select",
+            json!({"document_id":id,"selector":"h1"}),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(selection["matches"][0]["text"], "Sample");
+    assert!(
+        gateway
+            .invoke_with_permissions(
+                "another",
+                &[Permission::HtmlParse],
+                None,
+                "html.select",
+                json!({"document_id":id,"selector":"h1"}),
+                None
+            )
+            .await
+            .is_err()
+    );
+    gateway
+        .invoke_with_permissions(
+            "source",
+            &[Permission::HtmlParse],
+            None,
+            "html.close",
+            json!({"document_id":id}),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(gateway.html_documents.read().unwrap().is_empty());
+    assert!(
+        gateway
+            .invoke_with_permissions(
+                "source",
+                &[Permission::BooksRead],
+                None,
+                "books.list",
+                json!({}),
+                None
+            )
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires TING_TEST_BOOK_SOURCE and a reachable public source website"]
+async fn live_book_source_uses_real_sandbox_import_and_ranged_media_proxy() {
+    use crate::core::books::ScraperService;
+    use crate::db::repository::Repository;
+    use ting_plugin_contract::scraper::SourceRef;
+    use tokio::io::AsyncReadExt;
+    let plugin_dir = std::env::var_os("TING_TEST_BOOK_SOURCE")
+        .map(std::path::PathBuf::from)
+        .expect("Set TING_TEST_BOOK_SOURCE to the source plugin directory");
+    let query = std::env::var("TING_TEST_BOOK_SOURCE_QUERY")
+        .expect("Set TING_TEST_BOOK_SOURCE_QUERY to a public test query");
+    let fixture = BookmarkFixture::new().await;
+    let gateway = Arc::new(fixture.gateway);
+    let manager = gateway.plugin_manager.clone();
+    manager.set_host_gateway(&gateway);
+    let id = manager.load_plugin(&plugin_dir).await.unwrap();
+    let service = ScraperService::new(manager.clone());
+    let sources = service.get_sources().await;
+    assert!(
+        sources
+            .iter()
+            .any(|source| source.id == id && source.enabled && source.book_source)
+    );
+    let page = service
+        .search(&query, None, None, Some(&id), 1, 20)
+        .await
+        .unwrap();
+    let item = page
+        .items
+        .first()
+        .expect("Source must return a public test book");
+    let added = service
+        .add_source_book(
+            &gateway.book_repo,
+            "u1",
+            false,
+            &id,
+            SourceRef {
+                id: item.id.clone(),
+                url: item.source_url.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    let book = gateway
+        .book_repo
+        .find_by_id(&added.book_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let library = gateway
+        .library_repo
+        .find_by_id(&book.library_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let chapters = gateway.chapter_repo.find_by_book(&book.id).await.unwrap();
+    assert!(!chapters.is_empty());
+    let audio = service
+        .resolve_source_audio(&library, &chapters[0].path)
+        .await
+        .unwrap();
+    let (reader, _) = audio
+        .reader(&crate::core::StorageService::new(), Some((0, 4096)))
+        .await
+        .unwrap();
+    let mut bytes = Vec::new();
+    reader.take(4096).read_to_end(&mut bytes).await.unwrap();
+    assert!(!bytes.is_empty());
+    assert!(bytes.len() <= 4096);
+    assert!(
+        gateway.html_documents.read().unwrap().is_empty(),
+        "All source HTML handles must be closed"
+    );
+    println!(
+        "Live sandbox source: {} search results, {} imported chapters, {} media bytes",
+        page.items.len(),
+        chapters.len(),
+        bytes.len()
+    );
+    manager.unload_plugin(&id).await.unwrap();
 }
 
 fn bookmark_create_params() -> Value {

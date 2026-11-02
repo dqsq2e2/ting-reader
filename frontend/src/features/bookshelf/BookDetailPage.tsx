@@ -632,31 +632,33 @@ const BookDetailPage: React.FC = () => {
         />
 
         {/* Chapters List */}
-        <ChapterListSection
-          isAdmin={user?.role === 'admin'}
-          chapters={chapters}
-          visibleChapters={visibleChapters}
-          chapterTotals={chapterTotals}
-          groups={groups}
-          currentGroupIndex={currentGroupIndex}
-          activeTab={activeTab}
-          chapterAscending={chapterAscending}
-          chapterGroupsDescending={chapterGroupsDescending}
-          chapterPageLoading={chapterPageLoading}
-          scrollRef={scrollRef}
-          currentChapterId={currentChapter?.id}
-          highlightedChapterId={highlightedChapterId}
-          isPlaying={isPlaying}
-          effectiveThemeColor={effectiveThemeColor}
-          onScrollGroups={scrollGroups}
-          onSetActiveTab={handleSetActiveTab}
-          onSetCurrentGroupIndex={setCurrentGroupIndex}
-          onToggleAscending={() => setChapterAscending(prev => !prev)}
-          onPlayChapter={playChapterWithFullQueue}
-          onOpenChapterManager={openChapterManager}
-          formatDuration={formatDuration}
-          getChapterProgressText={getChapterProgressText}
-        />
+        <div className="-mx-4 sm:-mx-6 md:-mx-8">
+          <ChapterListSection
+            isAdmin={user?.role === 'admin'}
+            chapters={chapters}
+            visibleChapters={visibleChapters}
+            chapterTotals={chapterTotals}
+            groups={groups}
+            currentGroupIndex={currentGroupIndex}
+            activeTab={activeTab}
+            chapterAscending={chapterAscending}
+            chapterGroupsDescending={chapterGroupsDescending}
+            chapterPageLoading={chapterPageLoading}
+            scrollRef={scrollRef}
+            currentChapterId={currentChapter?.id}
+            highlightedChapterId={highlightedChapterId}
+            isPlaying={isPlaying}
+            effectiveThemeColor={effectiveThemeColor}
+            onScrollGroups={scrollGroups}
+            onSetActiveTab={handleSetActiveTab}
+            onSetCurrentGroupIndex={setCurrentGroupIndex}
+            onToggleAscending={() => setChapterAscending(prev => !prev)}
+            onPlayChapter={playChapterWithFullQueue}
+            onOpenChapterManager={openChapterManager}
+            formatDuration={formatDuration}
+            getChapterProgressText={getChapterProgressText}
+          />
+        </div>
 
       {/* Chapter Manager Modal */}
       {isChapterManagerOpen && book && chapterManagerLoading && (

@@ -39,7 +39,7 @@ async fn remote_reader(
     {
         state
             .storage_service
-            .get_http_reader(path, Some(range))
+            .get_http_reader(path, Some(range), None, None)
             .await
     } else {
         Err(TingError::validation(

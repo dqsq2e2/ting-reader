@@ -21,13 +21,13 @@ pub async fn get_book_chapters(
     Query(query): Query<ChaptersQuery>,
     user: crate::auth::middleware::AuthUser,
 ) -> Result<impl IntoResponse> {
-    if state.book_repo.find_by_id(&book_id).await?.is_none() {
-        return Err(TingError::not_found(
+    let book = state.book_repo.find_by_id(&book_id).await?.ok_or_else(|| {
+        TingError::not_found(
             LookupErrorKind::Book,
             "get_book_chapters::not_found",
             format!("Book with id {} not found", book_id),
-        ));
-    }
+        )
+    })?;
 
     let chapter_repo = ChapterRepository::new(state.book_repo.db().clone());
 
@@ -58,6 +58,15 @@ pub async fn get_book_chapters(
         let descending = order == "desc";
 
         let mut offset = query.offset.unwrap_or(0);
+        let mut source_total = None;
+        if let Some(library) = state.library_repo.find_by_id(&book.library_id).await?
+            && let Some(page) = state
+                .scraper_service
+                .load_source_chapter_page(&state.book_repo, &book, &library, offset, limit)
+                .await?
+        {
+            source_total = page.total;
+        }
         if let Some(target_chapter_id) = query.target_chapter_id.as_deref() {
             let lookup_is_extra = if query.chapter_type.is_some() && requested_type != "all" {
                 is_extra
@@ -87,10 +96,12 @@ pub async fn get_book_chapters(
         }
 
         let counts = chapter_repo.count_by_book(&book_id).await?;
+        let total = source_total.unwrap_or(counts.total);
+        let main_total = source_total.unwrap_or(counts.main);
         let filtered_total = match is_extra {
-            Some(0) => counts.main,
+            Some(0) => main_total,
             Some(_) => counts.extra,
-            None => counts.total,
+            None => total,
         };
         if offset >= filtered_total && filtered_total > 0 {
             offset = ((filtered_total - 1) / limit) * limit;
@@ -114,8 +125,8 @@ pub async fn get_book_chapters(
 
         return Ok(Json(ChaptersPageResponse {
             chapters: chapter_responses,
-            total: counts.total,
-            main_total: counts.main,
+            total,
+            main_total,
             extra_total: counts.extra,
             offset,
             limit,
@@ -169,6 +180,8 @@ pub async fn update_chapter(
         hash: existing_chapter.hash,
         created_at: existing_chapter.created_at,
         manual_corrected: existing_chapter.manual_corrected,
+        start_time: existing_chapter.start_time,
+        end_time: existing_chapter.end_time,
     };
 
     chapter_repo.update(&updated_chapter).await?;

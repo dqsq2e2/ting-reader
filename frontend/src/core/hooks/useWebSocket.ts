@@ -3,6 +3,8 @@ import { useAuthStore } from '../stores/authStore';
 import { usePlayerStore } from '../stores/playerStore';
 import { getRuntimeBaseUrl } from '../utils/runtimeUrl';
 import type { ApiErrorBody } from '../api/errors';
+import { ProgressSocket } from '../api/progressSocket';
+import apiClient from '../api/client';
 
 interface ProgressUpdate {
   type: 'progress_updated';
@@ -22,14 +24,8 @@ type ServerMessage = ProgressUpdate | { type: 'pong' } | ServerError;
 /** Manages a persistent WebSocket connection for real-time progress sync */
 export function useWebSocket() {
   const { token, activeUrl } = useAuthStore();
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const reconnectAttemptsRef = useRef(0);
+  const connectionRef = useRef<ProgressSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const pingTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
-
-  const connectRef = useRef<() => void>(() => {});
-  const maxReconnectAttempts = 20;
 
   const getWsUrl = useCallback(() => {
     if (typeof window === 'undefined') return '';
@@ -47,107 +43,73 @@ export function useWebSocket() {
     return url.toString();
   }, [activeUrl]);
 
-  const connect = useCallback(() => {
+  useEffect(() => {
     if (!token) return;
 
     const wsUrl = getWsUrl();
     if (!wsUrl) return;
 
-    // Don't reconnect if already connected
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
-    // Don't reconnect if connecting
-    if (wsRef.current?.readyState === WebSocket.CONNECTING) return;
+    const controller = new AbortController();
+    let checking = false;
+    let lastCheck = 0;
+    const checkSession = () => {
+      if (checking || controller.signal.aborted || Date.now() - lastCheck < 30000) return;
+      checking = true;
+      lastCheck = Date.now();
+      void apiClient.get('/api/me', { signal: controller.signal, timeout: 5000 })
+        .catch(() => {})
+        .finally(() => { checking = false; });
+    };
 
-    try {
-      const urlWithToken = `${wsUrl}?token=${encodeURIComponent(token)}`;
-      const ws = new WebSocket(urlWithToken);
-
-      ws.onopen = () => {
-        setIsConnected(true);
-        reconnectAttemptsRef.current = 0;
-
-        // Start keep-alive ping every 30 seconds
-        pingTimerRef.current = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'ping' }));
-          }
-        }, 30000);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const msg: ServerMessage = JSON.parse(event.data);
-          handleServerMessage(msg);
-        } catch {
-          // Ignore malformed messages
+    const connection = new ProgressSocket({
+      createSocket: () => new WebSocket(`${wsUrl}?token=${encodeURIComponent(token)}`),
+      connected: value => {
+        setIsConnected(value);
+        if (!value) checkSession();
+      },
+      message: (data) => {
+        if (data && typeof data === 'object' && 'type' in data) {
+          handleServerMessage(data as ServerMessage);
         }
-      };
-
-      ws.onclose = () => {
-        setIsConnected(false);
-        if (pingTimerRef.current) {
-          clearInterval(pingTimerRef.current);
-        }
-
-        // Attempt reconnection with exponential backoff
-        if (reconnectAttemptsRef.current < maxReconnectAttempts) {
-          const delay = Math.min(
-            1000 * Math.pow(2, reconnectAttemptsRef.current),
-            30000
-          );
-          reconnectAttemptsRef.current += 1;
-          reconnectTimerRef.current = setTimeout(() => connectRef.current(), delay);
-        }
-      };
-
-      ws.onerror = () => {
-        // onclose will fire after onerror, reconnect logic is in onclose
-      };
-
-      wsRef.current = ws;
-    } catch {
-      // Connection failed, retry later
-      reconnectTimerRef.current = setTimeout(() => connectRef.current(), 5000);
-    }
+      },
+    });
+    connectionRef.current = connection;
+    connection.connect();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkSession();
+        connection.resume();
+      }
+    };
+    const onOnline = () => { checkSession(); connection.resume(); };
+    const sessionTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') checkSession();
+    }, 60000);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('online', onOnline);
+    return () => {
+      controller.abort();
+      clearInterval(sessionTimer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('online', onOnline);
+      connection.dispose();
+      if (connectionRef.current === connection) connectionRef.current = null;
+      setIsConnected(false);
+    };
   }, [token, getWsUrl]);
-
-  useEffect(() => { connectRef.current = connect; }, [connect]);
-
-  const disconnect = useCallback(() => {
-    if (reconnectTimerRef.current) {
-      clearTimeout(reconnectTimerRef.current);
-    }
-    if (pingTimerRef.current) {
-      clearInterval(pingTimerRef.current);
-    }
-    reconnectAttemptsRef.current = maxReconnectAttempts; // Prevent reconnection
-    wsRef.current?.close();
-    wsRef.current = null;
-    setIsConnected(false);
-  }, []);
-
-  // Connect on mount, disconnect on unmount
-  useEffect(() => {
-    connect();
-    return () => disconnect();
-  }, [connect, disconnect]);
 
   /** Send a progress update via WebSocket */
   const sendProgress = useCallback(
     (bookId: string, chapterId: string, position: number, playbackStart?: number) => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'progress_update',
-            book_id: bookId,
-            chapter_id: chapterId,
-            position: Math.floor(position),
-            ...(playbackStart !== undefined
-              ? { playback_start: Math.floor(playbackStart) }
-              : {}),
-          })
-        );
-      }
+      connectionRef.current?.send({
+        type: 'progress_update',
+        book_id: bookId,
+        chapter_id: chapterId,
+        position: Math.floor(position),
+        ...(playbackStart !== undefined
+          ? { playback_start: Math.floor(playbackStart) }
+          : {}),
+      });
     },
     []
   );

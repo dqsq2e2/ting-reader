@@ -1,4 +1,4 @@
-import axios, { type AxiosAdapter } from 'axios';
+import axios, { type AxiosAdapter, type InternalAxiosRequestConfig } from 'axios';
 import { createSingleFlightAdapter } from './mutations';
 import { useAuthStore } from '../stores/authStore';
 import i18n from '../i18n';
@@ -25,18 +25,37 @@ const singleFlightAdapter = createSingleFlightAdapter(
   () => useAuthStore.getState().token || '',
 );
 
+type SessionRequest = InternalAxiosRequestConfig & {
+  _sessionRevision?: number;
+  _sessionToken?: string | null;
+  _appRequest?: boolean;
+  _authRetried?: boolean;
+  _retry?: boolean;
+};
+
 apiClient.interceptors.request.use((config) => {
-  const { token, activeUrl } = useAuthStore.getState();
+  const { token, activeUrl, sessionRevision } = useAuthStore.getState();
+  const request = config as SessionRequest;
+  request._sessionRevision = sessionRevision;
+  request._sessionToken = token;
   
   // Update baseURL dynamically from store
   if (activeUrl && !config.url?.startsWith('http')) {
     config.baseURL = getRuntimeBaseUrl(activeUrl);
   }
+  try {
+    const base = new URL(getRuntimeBaseUrl(activeUrl) || window.location.origin);
+    const target = new URL(axios.getUri(config), base);
+    request._appRequest = target.origin === base.origin
+      && target.pathname.startsWith(`${base.pathname.replace(/\/$/, '')}/api/`);
+  } catch {
+    request._appRequest = false;
+  }
 
   // fnOS reserves Authorization for unified-gateway authentication. Sending
   // Ting Reader's JWT there makes nginx reject the request before it reaches
   // the application. Gateway requests use the same-origin token cookie.
-  if (token && !getGatewayBasePath()) {
+  if (token && request._appRequest && !getGatewayBasePath()) {
     config.headers.set('Authorization', `Bearer ${token}`);
   } else {
     config.headers.delete('Authorization');
@@ -60,10 +79,28 @@ apiClient.interceptors.response.use(
     return response;
   },
   async (error) => {
-    const originalRequest = error.config;
+    const originalRequest = error.config as SessionRequest | undefined;
+    const requestUrl = String(originalRequest?.url || '');
+    const isAuthRequest = /\/api\/auth\/(?:login|register|logout)(?:[/?#]|$)/.test(requestUrl);
     
     // Handle 401 Unauthorized
-    if (error.response?.status === 401 && !originalRequest?._retry) {
+    if (error.response?.status === 401 && originalRequest?._appRequest && !isAuthRequest) {
+      const current = useAuthStore.getState();
+      // An old account's failed request must not sign out a newer login.
+      if (current.sessionRevision !== originalRequest._sessionRevision || !current.token) {
+        return Promise.reject(error);
+      }
+      if (!originalRequest._authRetried) {
+        originalRequest._authRetried = true;
+        const result = current.token !== originalRequest._sessionToken
+          ? 'restored' : await current.restoreSavedSession();
+        const latest = useAuthStore.getState();
+        if (latest.sessionRevision !== originalRequest._sessionRevision) return Promise.reject(error);
+        if (result === 'restored' && !originalRequest.signal?.aborted) {
+          return apiClient(originalRequest);
+        }
+        if (result === 'transient' || result === 'obsolete') return Promise.reject(error);
+      }
       useAuthStore.getState().logout();
       const gatewayBasePath = getGatewayBasePath();
       window.location.href = `${gatewayBasePath}/login`;

@@ -643,7 +643,7 @@ fn validate_capability_output(
     request: &Value,
     output: &Value,
 ) -> Result<()> {
-    if let PluginCapability::MetadataProvider(_) = capability {
+    if let PluginCapability::MetadataProvider(cap) = capability {
         match operation {
             "search" => {
                 let page: SearchPage = serde_json::from_value(output.clone()).map_err(|error| {
@@ -691,6 +691,34 @@ fn validate_capability_output(
                         PluginErrorKind::Runtime,
                         "validate_capability_output::plugin_execution",
                         "Cleaned chapter titles must match the supplied candidates".into(),
+                    ));
+                }
+            }
+            "detail" if cap.book_source => {
+                let detail: ting_plugin_contract::scraper::SourceBookDetail =
+                    serde_json::from_value(output.clone()).map_err(|error| {
+                        TingError::plugin_execution(
+                            PluginErrorKind::InvalidOutput,
+                            "metadata.detail",
+                            format!("Invalid book source detail: {error}"),
+                        )
+                    })?;
+                detail.validate().map_err(|error| {
+                    TingError::plugin_execution(
+                        PluginErrorKind::InvalidOutput,
+                        "metadata.detail",
+                        error.into(),
+                    )
+                })?;
+                if !detail.chapters_complete
+                    && !cap.operations.contains(
+                        &ting_plugin_contract::capability::MetadataOperation::ListChapters,
+                    )
+                {
+                    return Err(TingError::plugin_execution(
+                        PluginErrorKind::AbiMismatch,
+                        "metadata.detail",
+                        "Incomplete book source details require the list_chapters operation".into(),
                     ));
                 }
             }

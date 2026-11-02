@@ -5,6 +5,59 @@ export interface HlsPlaybackInfo {
   playback_time?: number;
 }
 
+export const chapterIntroPosition = (intro: number, outro: number, duration: number) => {
+  const safeIntro = Number.isFinite(intro) ? Math.max(0, intro) : 0;
+  const safeOutro = Number.isFinite(outro) ? Math.max(0, outro) : 0;
+  return duration > 0 && duration <= safeIntro + safeOutro ? 0 : safeIntro;
+};
+
+export const isChapterOutro = (position: number, duration: number, intro: number, outro: number) =>
+  Number.isFinite(position) && Number.isFinite(duration) && outro > 0
+  && duration > Math.max(0, intro) + outro && position >= duration - outro;
+
+export const chapterResumePosition = (position: number, duration: number, intro: number, outro: number) => {
+  const start = chapterIntroPosition(intro, outro, duration);
+  const resume = Number.isFinite(position) ? Math.max(start, position) : start;
+  return duration > 0 && (duration - resume < 2 || resume / duration > 0.99) ? start : resume;
+};
+
+/** A native seek may be ignored until decoding is ready. Keep the requested
+ * position until a later media event confirms it, never restoring an old source. */
+export class PendingMediaSeek {
+  private target: { source: string; time: number } | null = null;
+
+  request(source: string, time: number) {
+    this.target = Number.isFinite(time) && time >= 0 ? { source, time } : null;
+  }
+
+  cancel() { this.target = null; }
+
+  apply(source: string, media: Pick<HTMLMediaElement, 'currentTime' | 'readyState' | 'seeking'>) {
+    const target = this.target;
+    if (!target) return true;
+    if (target.source !== source) { this.cancel(); return true; }
+    if (media.readyState < 1 || media.seeking) return false;
+    if (Math.abs(media.currentTime - target.time) <= 0.5) {
+      if (media.readyState < 3) return false;
+      this.cancel();
+      return true;
+    }
+    try { media.currentTime = target.time; } catch { /* Retry on readiness. */ }
+    return false;
+  }
+}
+
+/** The same chapter can emit both a segment boundary and a native ended event. */
+export class ChapterAdvance {
+  private claimedRevision = -1;
+
+  claim(expectedRevision: number, currentRevision: number, playing: boolean) {
+    if (!playing || expectedRevision !== currentRevision || this.claimedRevision === currentRevision) return false;
+    this.claimedRevision = currentRevision;
+    return true;
+  }
+}
+
 /** Minute and episode limits are mutually exclusive. Absolute deadlines
  * survive throttled browser timers, while paused time never consumes minutes. */
 export class PlaybackSleep {

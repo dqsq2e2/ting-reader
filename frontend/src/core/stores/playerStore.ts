@@ -17,6 +17,7 @@ interface PlayerState {
   isExpanded: boolean;
   isCollapsed: boolean;
   isSeriesEditing: boolean;
+  playbackRevision: number;
 
   // Actions
   playBook: (book: Book, chapters: Chapter[], startChapterId?: string) => void;
@@ -55,6 +56,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       isExpanded: false,
       isCollapsed: false,
       isSeriesEditing: false,
+      playbackRevision: 0,
 
       setIsPlaying: (isPlaying) => set({ isPlaying }),
       updateBook: (book) => set(state => state.currentBook?.id === book.id
@@ -82,6 +84,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           }
         }
 
+        if (!chapter) return;
+
         // If chapter is finished, restart from beginning
         const startPos = isChapterFinished(chapter) ? 0 : (chapter.progress_position || 0);
 
@@ -89,6 +93,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           currentBook: book,
           chapters: orderedChapters,
           currentChapter: chapter,
+          playbackRevision: get().playbackRevision + 1,
           isPlaying: true,
           currentTime: startPos
         };
@@ -102,7 +107,15 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         set(newState);
       },
 
-      togglePlay: () => set((state) => ({ isPlaying: !state.isPlaying })),
+      togglePlay: () => {
+        const state = get();
+        if (!state.isPlaying && state.currentBook && state.currentChapter
+          && state.duration > 0 && state.currentTime >= state.duration - 0.2) {
+          state.playChapter(state.currentBook, state.chapters, state.currentChapter, 0);
+        } else {
+          set({ isPlaying: !state.isPlaying });
+        }
+      },
 
       setCurrentTime: (time) => set({ currentTime: time }),
 
@@ -169,6 +182,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           currentBook: book,
           chapters: orderedChapters,
           currentChapter: orderedChapter,
+          playbackRevision: get().playbackRevision + 1,
           isPlaying: true,
           currentTime: startPos
         };

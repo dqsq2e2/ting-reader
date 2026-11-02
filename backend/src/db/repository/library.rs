@@ -77,6 +77,65 @@ impl LibraryRepository {
         }).await
     }
 
+    /// Get source-backed libraries represented by books the user can access.
+    ///
+    /// Source libraries do not receive rows in `user_library_access`; access
+    /// is granted per imported book instead.
+    pub async fn find_source_by_user_book_access(&self, user_id: &str) -> Result<Vec<Library>> {
+        let user_id = user_id.to_string();
+        self.db
+            .execute(move |conn| {
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT DISTINCT l.id, l.name, l.type, l.url, l.username, l.password,
+                        l.root_path, l.last_scanned_at, l.created_at, l.scraper_config
+                 FROM libraries l
+                 WHERE l.type = 'source'
+                   AND EXISTS (
+                     SELECT 1
+                     FROM books b
+                     WHERE b.library_id = l.id
+                       AND (
+                         EXISTS (
+                           SELECT 1
+                           FROM user_book_access uba
+                           WHERE uba.book_id = b.id AND uba.user_id = ?
+                         )
+                         OR EXISTS (
+                           SELECT 1
+                           FROM user_library_access ula
+                           WHERE ula.library_id = l.id AND ula.user_id = ?
+                         )
+                       )
+                   )
+                 ORDER BY l.name",
+                    )
+                    .map_err(TingError::DatabaseError)?;
+
+                let libraries = stmt
+                    .query_map(rusqlite::params![&user_id, &user_id], |row| {
+                        Ok(Library {
+                            id: row.get(0)?,
+                            name: row.get(1)?,
+                            library_type: row.get(2)?,
+                            url: row.get(3)?,
+                            username: row.get(4)?,
+                            password: row.get(5)?,
+                            root_path: row.get(6)?,
+                            last_scanned_at: row.get(7)?,
+                            created_at: row.get(8)?,
+                            scraper_config: row.get(9)?,
+                        })
+                    })
+                    .map_err(TingError::DatabaseError)?
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(TingError::DatabaseError)?;
+
+                Ok(libraries)
+            })
+            .await
+    }
+
     /// Find library by ID
     pub async fn find_by_id(&self, id: &str) -> Result<Option<Library>> {
         let id = id.to_string();

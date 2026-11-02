@@ -210,13 +210,14 @@ pub(super) async fn transcode_stream(
     };
 
     let cache_path = state.cache_manager.get_cache_path(chapter_id);
-    let plugin_handles_format = state
-        .plugin_manager
-        .has_format_operation(
-            std::path::Path::new(&chapter.path),
-            FormatOperation::OpenDecrypt,
-        )
-        .await?;
+    let plugin_handles_format = library.library_type != "source"
+        && state
+            .plugin_manager
+            .has_format_operation(
+                std::path::Path::new(&chapter.path),
+                FormatOperation::OpenDecrypt,
+            )
+            .await?;
 
     // Check if we can use direct URL transcoding (for WebDAV or cached files).
     // Plugin-backed formats must be decoded/decrypted before FFmpeg sees them.

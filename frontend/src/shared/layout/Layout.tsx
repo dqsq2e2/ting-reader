@@ -59,7 +59,7 @@ const Layout: React.FC = () => {
   
   // Use selectors to prevent unnecessary re-renders when currentTime updates
   const user = useAuthStore(state => state.user);
-  const token = useAuthStore(state => state.token);
+  const sessionRevision = useAuthStore(state => state.sessionRevision);
   const setUser = useAuthStore(state => state.setUser);
   const logout = useAuthStore(state => state.logout);
   const serverUrl = useAuthStore(state => state.serverUrl);
@@ -75,25 +75,32 @@ const Layout: React.FC = () => {
 
   // Validate Token on Mount
   React.useEffect(() => {
+    const token = useAuthStore.getState().token;
+    const controller = new AbortController();
+    const active = () => !controller.signal.aborted
+      && useAuthStore.getState().sessionRevision === sessionRevision;
     const validateConnection = async () => {
       setIsConnecting(true);
       setConnectionError(null);
       try {
         if (hasSessionRestoreLogged(token)) {
-          const response = await apiClient.get('/api/me');
+          const response = await apiClient.get('/api/me', { signal: controller.signal });
+          if (!active()) return;
           setUser(response.data);
         } else {
           const sessionId = getBrowserSessionId();
           const response = await apiClient.post(
             '/api/auth/session-restore',
             { session_id: sessionId },
-            { headers: { 'X-Ting-Session-Id': sessionId } },
+            { headers: { 'X-Ting-Session-Id': sessionId }, signal: controller.signal },
           );
+          if (!active()) return;
           setUser(response.data.user);
-          markSessionRestoreLogged(token);
+          markSessionRestoreLogged(useAuthStore.getState().token);
         }
         setIsConnecting(false);
       } catch (err: unknown) {
+        if (!active()) return;
         console.error('Connection validation failed', err);
         // Don't auto-logout immediately, give user a chance to see error or retry
         setConnectionError('connection.failedMessage');
@@ -102,12 +109,16 @@ const Layout: React.FC = () => {
     };
 
     if (token) {
-      validateConnection();
+      void validateConnection();
+      return () => controller.abort();
     } else {
       const timer = window.setTimeout(() => setIsConnecting(false), 0);
-      return () => window.clearTimeout(timer);
+      return () => {
+        controller.abort();
+        window.clearTimeout(timer);
+      };
     }
-  }, [token, setUser]);
+  }, [sessionRevision, setUser]);
 
   // Fetch and apply user settings
   React.useEffect(() => {

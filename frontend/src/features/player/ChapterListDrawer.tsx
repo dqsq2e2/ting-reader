@@ -1,6 +1,7 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { ChevronLeft, ChevronUp, Clock, ListMusic } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronUp, Clock, ListMusic } from 'lucide-react';
 import type { Book, Chapter } from '../../core/types';
 import { setAlpha, toSolidColor, isLight } from '../../core/utils/color';
 
@@ -21,9 +22,11 @@ interface Props {
   activeTab: 'main' | 'extra';
   extraChapters: Chapter[];
   isPlaying: boolean;
+  chapterAscending: boolean;
   effectiveThemeColor?: string;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   onClose: () => void;
+  onToggleOrder: () => void;
   onSetActiveTab: (tab: 'main' | 'extra') => void;
   onSetCurrentGroupIndex: (index: number) => void;
   onScrollGroups: (direction: 'left' | 'right') => void;
@@ -43,9 +46,11 @@ const ChapterListDrawer: React.FC<Props> = ({
   activeTab,
   extraChapters,
   isPlaying,
+  chapterAscending,
   effectiveThemeColor,
   scrollRef,
   onClose,
+  onToggleOrder,
   onSetActiveTab,
   onSetCurrentGroupIndex,
   onScrollGroups,
@@ -57,8 +62,9 @@ const ChapterListDrawer: React.FC<Props> = ({
 
   if (!show) return null;
 
-  return (
-    <div className="fixed inset-0 z-[250] flex items-end sm:items-center justify-center">
+  return createPortal(
+    <div role="dialog" aria-modal="true" aria-label={t('player.chapterList')}
+      className="fixed inset-0 z-[250] flex items-end sm:items-center justify-center pointer-events-auto">
       <div
         className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-in fade-in duration-300"
         onClick={onClose}
@@ -95,12 +101,24 @@ const ChapterListDrawer: React.FC<Props> = ({
               </div>
             )}
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
-          >
-            <ChevronUp className="rotate-180" size={24} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onToggleOrder}
+              title={t(chapterAscending ? 'bookshelf.ascending' : 'bookshelf.descending')}
+              className="flex items-center gap-1 px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-600 dark:text-slate-300 hover:border-primary-500 hover:text-primary-600 transition-all"
+            >
+              {chapterAscending ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+              <span className="hidden sm:inline">
+                {t(chapterAscending ? 'bookshelf.ascending' : 'bookshelf.descending')}
+              </span>
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
+            >
+              <ChevronUp className="rotate-180" size={24} />
+            </button>
+          </div>
         </div>
 
         {groups.length > 1 && (
@@ -145,8 +163,12 @@ const ChapterListDrawer: React.FC<Props> = ({
         )}
 
         <div className="flex-1 overflow-y-auto p-1.5 min-[361px]:p-2 min-[431px]:p-2.5 sm:p-4 space-y-1 min-[361px]:space-y-1.5 min-[431px]:space-y-2 sm:space-y-3">
-          {(groups[currentGroupIndex]?.chapters || currentChapters).map((chapter, index) => {
-            const actualIndex = currentGroupIndex * chaptersPerGroup + index;
+          {(() => {
+            const groupChapters = groups[currentGroupIndex]?.chapters || currentChapters;
+            const visibleChapters = chapterAscending ? groupChapters : [...groupChapters].reverse();
+            return visibleChapters.map((chapter, index) => {
+              const sourceIndex = chapterAscending ? index : groupChapters.length - index - 1;
+              const actualIndex = currentGroupIndex * chaptersPerGroup + sourceIndex;
             const isCurrent = currentChapter?.id === chapter.id;
             const progressText = getChapterProgressText(chapter);
             const isCompleted = !!chapter.progress_position
@@ -220,10 +242,12 @@ const ChapterListDrawer: React.FC<Props> = ({
                 )}
               </div>
             );
-          })}
+            });
+          })()}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

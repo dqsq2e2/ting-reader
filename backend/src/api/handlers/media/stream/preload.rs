@@ -60,7 +60,12 @@ pub(super) async fn maybe_spawn_auto_preload(
                     .position(|chapter| chapter.id == chapter_id)
                     .and_then(|index| chapters.get(index + 1).cloned())
             })
-            .filter(|chapter| !chapter.path.to_ascii_lowercase().ends_with(".strm"))
+            .filter(|chapter| {
+                // Embedded chapters start deep inside a shared file: caching its
+                // prefix would not cover the chapter's own opening bytes.
+                chapter.start_time.is_none()
+                    && !chapter.path.to_ascii_lowercase().ends_with(".strm")
+            })
     } else {
         None
     };
@@ -277,16 +282,8 @@ async fn chapter_reader(
             .get_local_reader(std::path::Path::new(&chapter.path), None)
             .await?;
         Ok((Box::new(file), size))
-    } else if library.library_type.eq_ignore_ascii_case("webdav") {
-        state
-            .storage_service
-            .get_webdav_reader(library, &chapter.path, None, state.encryption_key.as_ref())
-            .await
     } else {
-        state
-            .storage_service
-            .get_http_reader(&chapter.path, None)
-            .await
+        super::get_remote_media_reader(state, library, &chapter.path, None).await
     }
 }
 

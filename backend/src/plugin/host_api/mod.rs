@@ -104,6 +104,9 @@ impl PluginHostUser {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginHostPermission {
+    /// Built-in runtime scheduling primitives do not expose host data and
+    /// therefore never require a manifest permission.
+    Runtime,
     NetworkAccess,
     BooksRead,
     BooksWrite,
@@ -315,6 +318,7 @@ impl PluginHostGateway {
 
     pub fn required_permission(method: &str) -> Option<PluginHostPermission> {
         match method {
+            "runtime.sleep" => Some(PluginHostPermission::Runtime),
             "http.request" => Some(PluginHostPermission::NetworkAccess),
             "books.list" | "books.get" => Some(PluginHostPermission::BooksRead),
             "libraries.list" | "libraries.get" => Some(PluginHostPermission::LibrariesRead),
@@ -372,6 +376,9 @@ impl PluginHostGateway {
         permissions: &[Permission],
         required_permission: PluginHostPermission,
     ) -> bool {
+        if required_permission == PluginHostPermission::Runtime {
+            return true;
+        }
         permissions.iter().any(|permission| {
             matches!(
                 (required_permission, permission),
@@ -507,9 +514,38 @@ impl PluginHostGateway {
         resources: Option<&Arc<crate::plugin::host_api::resources::ResourceScope>>,
     ) -> Result<Value> {
         match method {
+            "runtime.sleep" => {
+                let milliseconds = params
+                    .get("milliseconds")
+                    .and_then(Value::as_u64)
+                    .ok_or_else(|| {
+                        TingError::invalid_request(
+                            InputErrorKind::InvalidValue,
+                            "runtime.sleep",
+                            "milliseconds must be an integer".into(),
+                        )
+                    })?;
+                if milliseconds > 15_000 {
+                    return Err(TingError::invalid_request(
+                        InputErrorKind::InvalidValue,
+                        "runtime.sleep",
+                        "milliseconds must not exceed 15000".into(),
+                    ));
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(milliseconds)).await;
+                Ok(Value::Object(serde_json::Map::new()))
+            }
             "http.request" => {
                 crate::plugin::host_api::http_request(permissions, &params, resources).await
             }
+            // HTML documents are plugin-owned parsing resources, including in
+            // background scraping jobs that have no user principal.
+            "html.parse" => self.html_parse(plugin_id, &params).await,
+            "html.select" => self.html_select(plugin_id, &params).await,
+            "html.text" => self.html_text(plugin_id, &params).await,
+            "html.attr" => self.html_attr(plugin_id, &params).await,
+            "html.extract" => self.html_extract(plugin_id, &params).await,
+            "html.close" => self.html_close(plugin_id, &params).await,
             _ => {
                 let user = user.ok_or_else(|| {
                     TingError::permission(
@@ -575,12 +611,6 @@ impl PluginHostGateway {
                     .await
             }
             "events.publish" => self.events_publish(plugin_id, user, &params).await,
-            "html.parse" => self.html_parse(plugin_id, &params).await,
-            "html.select" => self.html_select(plugin_id, &params).await,
-            "html.text" => self.html_text(plugin_id, &params).await,
-            "html.attr" => self.html_attr(plugin_id, &params).await,
-            "html.extract" => self.html_extract(plugin_id, &params).await,
-            "html.close" => self.html_close(plugin_id, &params).await,
             "playlists.list" => self.playlists_list(user, &params).await,
             "playlists.get" => self.playlists_get(user, &params).await,
             "playlists.create" => self.playlists_create(user, &params).await,

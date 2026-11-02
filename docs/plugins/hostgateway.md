@@ -6,6 +6,7 @@
 
 | 方法 | 清单权限 | 额外约束 |
 | --- | --- | --- |
+| `runtime.sleep` | 无 | 仅用于可取消的异步等待，单次最多 15 秒；不访问宿主数据 |
 | `http.request` | `network_access.domain` | 每跳检查授权域名与实际出站地址，正文返回限定长度的资源 ID |
 | `books.list/get` | `books_read` 或 `books_write` | 只读当前用户可访问的书籍 |
 | `libraries.list/get` | `libraries_read` | 只读当前用户可访问的库 |

@@ -175,9 +175,11 @@ const LoginPage: React.FC = () => {
       if (rememberPassword) {
         safeStorage.setItem('login_username', username);
         safeStorage.setItem('login_password', password);
+        safeStorage.setItem('login_server_url', useAuthStore.getState().serverUrl);
       } else {
         safeStorage.removeItem('login_username');
         safeStorage.removeItem('login_password');
+        safeStorage.removeItem('login_server_url');
       }
       setAuth(user, token);
       markSessionRestoreLogged(token);

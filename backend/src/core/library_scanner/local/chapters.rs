@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 pub(super) struct ChapterProcessingOptions<'a> {
@@ -22,6 +22,10 @@ pub(super) struct ChapterProcessingOptions<'a> {
     pub(super) json_chapters: Option<Vec<crate::core::books::metadata::AudiobookshelfChapter>>,
     pub(super) chapter_title_template: Option<&'a str>,
     pub(super) chapter_title_overrides: Option<&'a [String]>,
+    /// Whether a single-file MP4 may replace its chapter list with the
+    /// chapters embedded in the file. Disabled when the caller merges an extra
+    /// directory into an existing book.
+    pub(super) probe_embedded_chapters: bool,
 }
 
 impl LibraryScanner {
@@ -39,6 +43,7 @@ impl LibraryScanner {
             json_chapters,
             chapter_title_template,
             chapter_title_overrides,
+            probe_embedded_chapters,
         } = options;
         let extract_extra_chapters = scraper_config.extract_extra_chapters;
         let cloud_mode = scraper_config.cloud_mode;
@@ -114,6 +119,38 @@ impl LibraryScanner {
         // Before 1.5.2 local files could be stored as relative paths. Resolve
         // existing files so the old relative path matches the new absolute path.
         let existing_chapters = self.chapter_repo.find_by_book(book_id).await?;
+
+        // Single-file audiobooks (M4B) carry their own chapter table. Probe it
+        // when the book has no embedded chapters yet or when the file changed.
+        let single_file_mp4 =
+            files.len() == 1 && crate::core::audio::mp4::is_mp4_family_extension(&files[0]);
+        let embedded_probe_pending = probe_embedded_chapters && single_file_mp4 && {
+            let segmented = existing_chapters
+                .iter()
+                .filter(|chapter| chapter.start_time.is_some())
+                .count();
+            segmented < existing_chapters.len()
+                || changed_file_paths.is_some_and(|paths| paths.contains(&files[0]))
+                || last_scanned.is_none()
+                || changed_file_paths.is_none()
+        };
+        if embedded_probe_pending
+            && let Some(embedded) = self.extract_embedded_chapters(files).await
+        {
+            return self
+                .process_embedded_chapters(
+                    book_id,
+                    &files[0],
+                    &embedded,
+                    ChapterTitleOptions {
+                        task_id,
+                        template: chapter_title_template,
+                        overrides: chapter_title_overrides,
+                    },
+                )
+                .await;
+        }
+
         let mut chapter_map: HashMap<PathBuf, Chapter> = HashMap::new();
         let mut duplicate_chapter_ids = Vec::new();
         for ch in existing_chapters {
@@ -352,14 +389,25 @@ impl LibraryScanner {
                 }
 
                 let scanned_path = file_path.to_string_lossy().to_string();
+                // A single-file MP4 keeps a whole-file time range so later
+                // scans know the embedded chapter table has already been read.
+                let marker_duration = recovered_duration.or(ch.duration).unwrap_or(0);
+                let (marker_start, marker_end) = segment_bounds(single_file_mp4, marker_duration);
+                let marker_changed =
+                    single_file_mp4 && (ch.start_time != marker_start || ch.end_time != marker_end);
                 if ch.path != scanned_path
                     || duration_changed
+                    || marker_changed
                     || (should_update && ch.manual_corrected == 0)
                 {
                     let mut updated_ch = ch.clone();
                     updated_ch.path = scanned_path;
                     if let Some(duration) = recovered_duration {
                         updated_ch.duration = Some(duration);
+                    }
+                    if single_file_mp4 {
+                        updated_ch.start_time = marker_start;
+                        updated_ch.end_time = marker_end;
                     }
                     if ch.manual_corrected == 0 {
                         updated_ch.chapter_index = new_idx;
@@ -480,6 +528,11 @@ impl LibraryScanner {
                 ch.duration = Some(duration);
                 ch.hash = Some(file_hash);
                 ch.book_id = book_id.to_string();
+                if single_file_mp4 {
+                    let (start, end) = segment_bounds(single_file_mp4, duration);
+                    ch.start_time = start;
+                    ch.end_time = end;
+                }
 
                 self.chapter_repo.update(&ch).await?;
                 has_changes = true;
@@ -487,6 +540,7 @@ impl LibraryScanner {
             } else {
                 // Create New
                 let chapter_id = Uuid::new_v4().to_string();
+                let (start_time, end_time) = segment_bounds(single_file_mp4, duration);
                 let chapter = Chapter {
                     id: chapter_id.clone(),
                     book_id: book_id.to_string(),
@@ -498,6 +552,8 @@ impl LibraryScanner {
                     hash: Some(file_hash),
                     created_at: chrono::Utc::now().to_rfc3339(),
                     manual_corrected: 0,
+                    start_time,
+                    end_time,
                 };
 
                 match self.chapter_repo.create(&chapter).await {
@@ -525,6 +581,174 @@ impl LibraryScanner {
             }
         }
 
+        // A single-file book that lost its embedded chapter table keeps only
+        // the whole-file chapter; drop the stale segmented rows.
+        if single_file_mp4 {
+            let file_path = files[0].to_string_lossy().to_string();
+            if let Ok(rows) = self.chapter_repo.find_by_book(book_id).await {
+                for row in rows {
+                    if row.path == file_path
+                        && !processed_chapter_ids.contains(&row.id)
+                        && row.manual_corrected == 0
+                    {
+                        self.chapter_repo.delete(&row.id).await?;
+                        has_changes = true;
+                    }
+                }
+            }
+        }
+
+        Ok(has_changes)
+    }
+
+    /// Read the authored chapter table of a single-file audiobook.
+    async fn extract_embedded_chapters(
+        &self,
+        files: &[PathBuf],
+    ) -> Option<Vec<crate::core::audio::metadata::AudioChapter>> {
+        let file = files.first()?;
+        if !crate::core::audio::mp4::is_mp4_family_extension(file) {
+            return None;
+        }
+        match crate::core::audio::AudioService::read_embedded_chapters(file).await {
+            Ok(chapters) if chapters.len() > 1 => Some(chapters),
+            Ok(_) => None,
+            Err(error) => {
+                debug!(
+                    path = %file.display(),
+                    error = %error,
+                    "Could not read embedded chapters; keeping file-based chapters"
+                );
+                None
+            }
+        }
+    }
+
+    /// Replace the single whole-file chapter with the chapters authored in the
+    /// file itself. Titles stay verbatim unless the book defines a template.
+    async fn process_embedded_chapters(
+        &self,
+        book_id: &str,
+        file: &Path,
+        chapters: &[crate::core::audio::metadata::AudioChapter],
+        titles: ChapterTitleOptions<'_>,
+    ) -> Result<bool> {
+        self.check_cancellation(titles.task_id).await?;
+        let book = self.book_repo.find_by_id(book_id).await?.ok_or_else(|| {
+            TingError::not_found(
+                LookupErrorKind::Book,
+                "process_embedded_chapters::not_found",
+                "Book not found".to_string(),
+            )
+        })?;
+        let existing = self.chapter_repo.find_by_book(book_id).await?;
+        // A manually curated chapter list owns the book; never replace it.
+        if existing.iter().any(|chapter| chapter.manual_corrected != 0) {
+            info!(book_id = %book_id, "Keeping manually curated chapters");
+            return Ok(false);
+        }
+
+        let file_string = file.to_string_lossy().to_string();
+        let file_key = canonical_existing_path(file);
+        let same_file = |path: &str| {
+            path == file_string || canonical_existing_path(Path::new(path)) == file_key
+        };
+        let base_hash = self.calculate_file_hash(file)?;
+        let mut processed_ids = HashSet::new();
+        let mut has_changes = false;
+
+        for (index, chapter) in chapters.iter().enumerate() {
+            let start_ms = chapter.start_ms.max(0);
+            let end_ms = chapter.end_ms.max(start_ms + 1);
+            let chapter_index = i32::try_from(index + 1).unwrap_or(i32::MAX);
+            let raw_title = titles
+                .overrides
+                .and_then(|overrides| overrides.get(index))
+                .map(|title| title.trim())
+                .filter(|title| !title.is_empty())
+                .unwrap_or_else(|| chapter.title.trim());
+            let fallback = format!("Chapter {chapter_index}");
+            let raw_title = if raw_title.is_empty() {
+                fallback.as_str()
+            } else {
+                raw_title
+            };
+            let title = apply_chapter_title_template(
+                titles.template,
+                book.title.as_deref(),
+                chapter_index,
+                raw_title,
+            );
+            let duration = (((end_ms - start_ms) as f64) / 1000.0).round().max(1.0) as i32;
+
+            if let Some(mut row) = existing
+                .iter()
+                .find(|row| same_file(&row.path) && row.start_time == Some(start_ms))
+                .cloned()
+            {
+                let mut changed = false;
+                if row.title.as_deref() != Some(title.as_str()) {
+                    row.title = Some(title);
+                    changed = true;
+                }
+                if row.chapter_index != Some(chapter_index) {
+                    row.chapter_index = Some(chapter_index);
+                    changed = true;
+                }
+                if row.duration != Some(duration) {
+                    row.duration = Some(duration);
+                    changed = true;
+                }
+                if row.end_time != Some(end_ms) {
+                    row.end_time = Some(end_ms);
+                    changed = true;
+                }
+                let hash = segment_hash(&base_hash, start_ms);
+                if row.hash.as_deref() != Some(hash.as_str()) {
+                    row.hash = Some(hash);
+                    changed = true;
+                }
+                if changed {
+                    self.chapter_repo.update(&row).await?;
+                    has_changes = true;
+                }
+                processed_ids.insert(row.id);
+            } else {
+                let chapter_id = Uuid::new_v4().to_string();
+                let row = Chapter {
+                    id: chapter_id.clone(),
+                    book_id: book_id.to_string(),
+                    title: Some(title),
+                    path: file_string.clone(),
+                    duration: Some(duration),
+                    chapter_index: Some(chapter_index),
+                    is_extra: 0,
+                    hash: Some(segment_hash(&base_hash, start_ms)),
+                    manual_corrected: 0,
+                    start_time: Some(start_ms),
+                    end_time: Some(end_ms),
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                };
+                self.chapter_repo.create(&row).await?;
+                processed_ids.insert(chapter_id);
+                has_changes = true;
+            }
+        }
+
+        // Drop the previous whole-file chapter and any chapter that no longer
+        // exists in the file's chapter table.
+        for row in existing {
+            if same_file(&row.path) && !processed_ids.contains(&row.id) {
+                self.chapter_repo.delete(&row.id).await?;
+                has_changes = true;
+            }
+        }
+
+        info!(
+            book_id = %book_id,
+            chapters = chapters.len(),
+            "Applied embedded audio chapters"
+        );
         Ok(has_changes)
     }
 
@@ -549,6 +773,30 @@ impl LibraryScanner {
 }
 fn canonical_existing_path(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+struct ChapterTitleOptions<'a> {
+    task_id: Option<&'a str>,
+    template: Option<&'a str>,
+    overrides: Option<&'a [String]>,
+}
+
+/// Time range stored on the chapter of a single-file audiobook. Both bounds
+/// stay empty for books that use one file per chapter.
+fn segment_bounds(single_file: bool, duration: i32) -> (Option<i64>, Option<i64>) {
+    if !single_file {
+        return (None, None);
+    }
+    let end = (duration > 0).then(|| i64::from(duration) * 1000);
+    (Some(0), end)
+}
+
+fn segment_hash(base_hash: &str, start_ms: i64) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(base_hash.as_bytes());
+    hasher.update(b"#");
+    hasher.update(start_ms.to_le_bytes());
+    format!("{:x}", hasher.finalize())
 }
 
 #[cfg(test)]

@@ -67,7 +67,7 @@ export interface UnverifiedPluginInstallConfirmation {
 }
 
 export type PluginCapability =
-  | { id: string; kind: "metadata_provider"; operations: string[]; auto_scrape: boolean; aggregate_auto_scrape: boolean; search_fields: ScraperSearchField[]; filters_schema?: Record<string, unknown>; result_fields: Array<{ key: string; label: LocalizedText }> }
+  | { id: string; kind: "metadata_provider"; operations: string[]; book_source?: boolean; auto_scrape: boolean; aggregate_auto_scrape: boolean; search_fields: ScraperSearchField[]; filters_schema?: Record<string, unknown>; result_fields: Array<{ key: string; label: LocalizedText }> }
   | { id: string; kind: "format_handler"; extensions: string[]; operations: string[] }
   | { id: string; kind: "tool_provider"; invoke: "invokeTool"; tools: Array<{ name: string; description: LocalizedText; input_schema: unknown; output_schema: unknown; side_effects: boolean }> }
   | { id: string; kind: "http_route"; route: { method: string; path: string; auth: "user" | "public" | "signed" | "public_or_signed" } }
@@ -113,6 +113,7 @@ export interface ScraperSource {
   description?: string;
   version: string;
   enabled: boolean;
+  book_source?: boolean;
   auto_scrape: boolean;
   aggregate_auto_scrape: boolean;
   search_fields: ScraperSearchField[];
@@ -123,6 +124,7 @@ export interface ScraperSource {
 export interface ScraperSearchItem {
   id: string | null;
   source_url: string | null;
+  added_book_id?: string | null;
   title: string;
   author: string | null;
   narrator?: string | null;

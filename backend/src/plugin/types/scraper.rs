@@ -17,6 +17,7 @@ pub struct ScraperSourceInfo {
     pub version: String,
     /// Whether the plugin is enabled
     pub enabled: bool,
+    pub book_source: bool,
     /// Whether the plugin can be used by automatic library scraping
     pub auto_scrape: bool,
     /// Whether this source aggregates candidates from other scraper sources

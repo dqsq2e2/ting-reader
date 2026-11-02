@@ -1,5 +1,6 @@
 import { apiErrorMessage } from '../../core/api/errors';
 import { useBookOperations } from '../../core/hooks/useBooks';
+import { libraryCacheIdentity, libraryViewCache } from '../../core/api/libraryCache';
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
@@ -18,23 +19,44 @@ import { localeCompare } from '../../core/utils/locale';
 import { publishBookshelfCoverShape } from '../../core/hooks/useBookshelfCoverShape';
 import BookshelfListItem from './BookshelfListItem';
 
+type ShelfLibrary = Pick<Library, 'id' | 'name' | 'library_type'>;
+interface ShelfSnapshot {
+  books: Book[];
+  series: Series[];
+  libraries: ShelfLibrary[];
+  libraryId: string;
+  sortBy: 'createdAt' | 'title' | 'author' | 'year';
+  iconSize: 'small' | 'medium' | 'large';
+  coverShape: 'rect' | 'square';
+  viewMode: 'grid' | 'list';
+}
+
 const BookshelfPage: React.FC = () => {
+  const identity = useAuthStore(state => libraryCacheIdentity(state.serverUrl || state.activeUrl, state.token ? state.user?.id : undefined));
+  return <BookshelfContents key={identity} cacheIdentity={identity} />;
+};
+
+const BookshelfContents: React.FC<{ cacheIdentity: string }> = ({ cacheIdentity }) => {
+  const [snapshot] = useState(() => libraryViewCache.get<ShelfSnapshot>(cacheIdentity, 'shelf'));
+  const [savedView] = useState(() => libraryViewCache.get<{ count: number; scroll: number }>(cacheIdentity, 'shelf-view'));
+  const dataRequest = React.useRef<AbortController | null>(null);
+  const loadedLibrary = React.useRef(snapshot?.libraryId);
   const bookOperations = useBookOperations();
   const { t } = useTranslation();
   const currentChapter = usePlayerStore((state) => state.currentChapter);
   const user = useAuthStore((state) => state.user);
   const isAdmin = user?.role === 'admin';
-  const [books, setBooks] = useState<Book[]>([]);
-  const [series, setSeries] = useState<Series[]>([]);
-  const [libraries, setLibraries] = useState<Library[]>([]);
-  const [selectedLibraryId, setSelectedLibraryId] = useState<string>('');
-  const [loading, setLoading] = useState(true);
-  const [sortBy, setSortBy] = useState<'createdAt' | 'title' | 'author' | 'year'>('createdAt');
-  const [iconSize, setIconSize] = useState<'small' | 'medium' | 'large'>('medium');
-  const [coverShape, setCoverShape] = useState<'rect' | 'square'>('square');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [books, setBooks] = useState<Book[]>(snapshot?.books ?? []);
+  const [series, setSeries] = useState<Series[]>(snapshot?.series ?? []);
+  const [libraries, setLibraries] = useState<ShelfLibrary[]>(snapshot?.libraries ?? []);
+  const [selectedLibraryId, setSelectedLibraryId] = useState<string>(snapshot?.libraryId ?? '');
+  const [loading, setLoading] = useState(!snapshot);
+  const [sortBy, setSortBy] = useState<ShelfSnapshot['sortBy']>(snapshot?.sortBy ?? 'createdAt');
+  const [iconSize, setIconSize] = useState<ShelfSnapshot['iconSize']>(snapshot?.iconSize ?? 'medium');
+  const [coverShape, setCoverShape] = useState<ShelfSnapshot['coverShape']>(snapshot?.coverShape ?? 'square');
+  const [viewMode, setViewMode] = useState<ShelfSnapshot['viewMode']>(snapshot?.viewMode ?? 'grid');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
-  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [settingsLoaded, setSettingsLoaded] = useState(!!snapshot);
   
   // Alphabet Index State
   const [activeLetter, setActiveLetter] = useState<string | null>(null);
@@ -64,8 +86,23 @@ const BookshelfPage: React.FC = () => {
   }, [confirmUnread, savingReadStatus]);
 
   // Lazy loading state
-  const [visibleCount, setVisibleCount] = useState(50);
+  const [visibleCount, setVisibleCount] = useState(savedView?.count ?? 50);
   const loadMoreRef = React.useRef<HTMLDivElement>(null);
+  const visibleCountRef = React.useRef(visibleCount);
+  useEffect(() => { visibleCountRef.current = visibleCount; }, [visibleCount]);
+  React.useLayoutEffect(() => {
+    const container = document.getElementById('main-content');
+    if (!container) return;
+    const scroll = savedView?.scroll ?? 0;
+    container.scrollTo({ top: scroll, behavior: 'instant' });
+    let latestScroll = scroll;
+    const record = () => { latestScroll = container.scrollTop; };
+    container.addEventListener('scroll', record, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', record);
+      libraryViewCache.set(cacheIdentity, 'shelf-view', { count: visibleCountRef.current, scroll: latestScroll });
+    };
+  }, [cacheIdentity, savedView]);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -91,20 +128,24 @@ const BookshelfPage: React.FC = () => {
   }, [books.length, series.length, sortBy, selectedLibraryId]);
 
   // Reset visible count when filters change
+  const previousFilter = React.useRef(`${sortBy}:${selectedLibraryId}`);
   useEffect(() => {
+    const filter = `${sortBy}:${selectedLibraryId}`;
+    if (previousFilter.current === filter) return;
+    previousFilter.current = filter;
     const timer = window.setTimeout(() => setVisibleCount(50), 0);
     return () => window.clearTimeout(timer);
   }, [sortBy, selectedLibraryId]);
 
   useEffect(() => {
+    const request = new AbortController();
     const loadSettings = async () => {
       try {
-        const res = await apiClient.get('/api/settings');
+        const res = await apiClient.get('/api/settings', { signal: request.signal });
+        if (request.signal.aborted) return;
         const settings = res.data.settings_json || {};
         
-        if (settings.bookshelf_library_id) {
-          setSelectedLibraryId(settings.bookshelf_library_id);
-        }
+        setSelectedLibraryId(settings.bookshelf_library_id || '');
         if (settings.bookshelf_sort_by) {
           setSortBy(settings.bookshelf_sort_by);
         }
@@ -116,12 +157,13 @@ const BookshelfPage: React.FC = () => {
         }
         setViewMode(settings.bookshelf_view_mode === 'list' ? 'list' : 'grid');
       } catch (err) {
-        console.error('Failed to load bookshelf settings', err);
+        if (!request.signal.aborted) console.error('Failed to load bookshelf settings', err);
       } finally {
-        setSettingsLoaded(true);
+        if (!request.signal.aborted) setSettingsLoaded(true);
       }
     };
     loadSettings();
+    return () => request.abort();
   }, []);
 
   // Close operations menu when clicking outside
@@ -176,10 +218,14 @@ const BookshelfPage: React.FC = () => {
   };
 
   const fetchData = async () => {
-    setLoading(true);
+    dataRequest.current?.abort();
+    const request = new AbortController();
+    dataRequest.current = request;
+    setLoading(loadedLibrary.current !== selectedLibraryId);
     try {
       // 1. Fetch Libraries first
-      const libsRes = await apiClient.get('/api/libraries');
+      const libsRes = await apiClient.get('/api/libraries', { signal: request.signal });
+      if (request.signal.aborted) return;
       const libs = libsRes.data;
       setLibraries(libs);
 
@@ -200,25 +246,36 @@ const BookshelfPage: React.FC = () => {
 
       // 3. Fetch Books & Series with effective ID
       const [booksRes, seriesRes] = await Promise.all([
-        apiClient.get('/api/books', { params: { library_id: effectiveLibraryId || undefined } }),
-        apiClient.get('/api/v1/series', { params: { library_id: effectiveLibraryId || undefined } })
+        apiClient.get('/api/books', { signal: request.signal, params: { library_id: effectiveLibraryId || undefined } }),
+        apiClient.get('/api/v1/series', { signal: request.signal, params: { library_id: effectiveLibraryId || undefined } })
       ]);
+      if (request.signal.aborted) return;
+      loadedLibrary.current = effectiveLibraryId;
       setBooks(booksRes.data);
       setSeries(seriesRes.data);
     } catch (err) {
-      console.error('Failed to fetch bookshelf data', err);
+      if (!request.signal.aborted) console.error('Failed to fetch bookshelf data', err);
     } finally {
-      setLoading(false);
+      if (!request.signal.aborted) setLoading(false);
     }
   };
 
   useEffect(() => {
     if (settingsLoaded) {
       const timer = window.setTimeout(() => void fetchData(), 0);
-      return () => window.clearTimeout(timer);
+      return () => { window.clearTimeout(timer); dataRequest.current?.abort(); };
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLibraryId, settingsLoaded]);
+
+  useEffect(() => {
+    if (loading || loadedLibrary.current !== selectedLibraryId) return;
+    libraryViewCache.set(cacheIdentity, 'shelf', {
+      books, series,
+      libraries: libraries.map(({ id, name, library_type }) => ({ id, name, library_type })),
+      libraryId: selectedLibraryId, sortBy, iconSize, coverShape, viewMode,
+    } satisfies ShelfSnapshot);
+  }, [cacheIdentity, books, series, libraries, selectedLibraryId, sortBy, iconSize, coverShape, viewMode, loading]);
 
   const sortedBooks = [...books].sort((a, b) => {
     if (sortBy === 'title') return localeCompare(a.title, b.title);
@@ -544,9 +601,6 @@ const BookshelfPage: React.FC = () => {
           <div className="flex flex-wrap min-[550px]:flex-nowrap items-center gap-2 sm:gap-3 w-full min-[880px]:w-auto justify-end">
             {isSelectionMode ? (
               <div className="flex items-center gap-2 order-1 relative">
-                <span className="text-sm font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap hidden sm:inline">
-                  {t('bookshelf.selectedCount', { count: selectedBookIds.length + selectedSeriesIds.length })}
-                </span>
                 <button
                   onClick={handleSelectAll}
                   className="flex items-center gap-2 px-3 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-sm font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shrink-0"
@@ -566,7 +620,9 @@ const BookshelfPage: React.FC = () => {
                       disabled={savingReadStatus}
                       className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-sm font-bold shadow-lg shadow-primary-500/30 whitespace-nowrap shrink-0 transition-all active:scale-95"
                     >
-                      <span>{t('bookshelf.batchOperations', '操作')}</span>
+                      <span className="tabular-nums" aria-live="polite" aria-atomic="true">
+                        {t('bookshelf.batchOperationsWithCount', { count: selectedBookIds.length + selectedSeriesIds.length })}
+                      </span>
                       <ChevronDown size={14} className={`transition-transform duration-200 ${isOperationsOpen ? 'rotate-180' : ''}`} />
                     </button>
                     {isOperationsOpen && (

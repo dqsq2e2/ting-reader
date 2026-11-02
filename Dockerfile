@@ -97,7 +97,7 @@ COPY --from=frontend-builder /app/frontend/dist /app/static
 # Create necessary directories
 RUN mkdir -p /app/data /app/plugins /app/temp /app/storage /app/preinstalled-plugins
 
-ARG TING_PLUGIN_STORE_VERSION=2.0.2
+ARG TING_PLUGIN_STORE_VERSION=2.0.4
 ADD https://github.com/dqsq2e2/ting-reader-plugin-store/releases/download/v${TING_PLUGIN_STORE_VERSION}/ting-reader-plugin-store-${TING_PLUGIN_STORE_VERSION}.tr /app/preinstalled-plugins/ting-reader-plugin-store.tr
 
 # Set environment variables

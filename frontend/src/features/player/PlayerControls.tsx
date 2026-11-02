@@ -11,6 +11,23 @@ const miniThemedColor = (themeColor: string | undefined, useDarkControls: boolea
   !themeColor || useDarkControls ? undefined
     : isLight(themeColor) ? '#475569' : setAlpha(themeColor, 0.6);
 
+const MiniPlayerChapterButton: React.FC<{
+  onClick: () => void;
+  tint?: string;
+  useDarkControls: boolean;
+  mobile?: boolean;
+}> = ({ onClick, tint, useDarkControls, mobile = false }) => {
+  const { t } = useTranslation();
+  return (
+    <button type="button" onClick={onClick} title={t('player.chapterList')}
+      aria-label={t('player.chapterList')} aria-haspopup="dialog"
+      className={`shrink-0 flex items-center justify-center transition-colors hover:scale-110 ${mobile ? 'w-10 h-10 p-2' : 'w-7 h-7 p-1'} ${useDarkControls ? 'text-slate-200 hover:text-white' : 'text-slate-400 dark:text-slate-300'}`}
+      style={{ color: tint }}>
+      <ListMusic size={mobile ? 24 : 20} />
+    </button>
+  );
+};
+
 const PlayerPlayButton: React.FC<{
   playing: boolean;
   onClick: () => void;
@@ -294,6 +311,7 @@ interface MiniPlayerDesktopExtrasProps {
   onCyclePlaybackSpeed: () => void;
   onCollapse: () => void;
   onExpand: () => void;
+  onOpenChapterList: () => void;
 }
 
 export const MiniPlayerDesktopExtras: React.FC<MiniPlayerDesktopExtrasProps> = ({
@@ -310,11 +328,13 @@ export const MiniPlayerDesktopExtras: React.FC<MiniPlayerDesktopExtrasProps> = (
   onCyclePlaybackSpeed,
   onCollapse,
   onExpand,
+  onOpenChapterList,
 }) => {
   const { t } = useTranslation();
   const tint = miniThemedColor(themeColor, useDarkControls);
   return (
     <div className="hidden md:flex items-center gap-4 lg:gap-6 min-w-[100px] lg:min-w-[140px] justify-end">
+      <MiniPlayerChapterButton onClick={onOpenChapterList} tint={tint} useDarkControls={useDarkControls} />
       <div className="relative" ref={volumeControlRef}>
         <button
           onClick={(e) => {
@@ -386,6 +406,7 @@ interface MiniPlayerMobileControlsProps extends PlayerProgressBarProps {
   onNext: () => void;
   onSeekTo: (time: number) => void;
   onCollapse: () => void;
+  onOpenChapterList: () => void;
 }
 
 export const MiniPlayerMobileControls: React.FC<MiniPlayerMobileControlsProps> = ({
@@ -407,6 +428,7 @@ export const MiniPlayerMobileControls: React.FC<MiniPlayerMobileControlsProps> =
   onNext,
   onSeekTo,
   onCollapse,
+  onOpenChapterList,
 }) => {
   const { t } = useTranslation();
   const tint = miniThemedColor(themeColor, useDarkControls);
@@ -464,6 +486,7 @@ export const MiniPlayerMobileControls: React.FC<MiniPlayerMobileControlsProps> =
             </button>
           </div>
         )}
+        <MiniPlayerChapterButton onClick={onOpenChapterList} tint={tint} useDarkControls={useDarkControls} mobile />
         {!isWidgetMode && (
           <button
             onClick={onCollapse}

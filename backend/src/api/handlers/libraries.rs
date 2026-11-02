@@ -100,12 +100,23 @@ pub async fn list_libraries(
     State(state): State<AppState>,
     user: crate::auth::middleware::AuthUser,
 ) -> Result<impl IntoResponse> {
-    let libraries = if user.role == "admin" {
+    let mut libraries = if user.role == "admin" {
         state.library_repo.find_all().await?
     } else {
         state.library_repo.find_by_user_access(&user.id).await?
     };
 
+    if user.role != "admin" {
+        libraries.extend(
+            state
+                .library_repo
+                .find_source_by_user_book_access(&user.id)
+                .await?,
+        );
+    }
+
+    libraries.sort_by(|left, right| left.name.cmp(&right.name));
+    libraries.dedup_by(|left, right| left.id == right.id);
     let library_responses: Vec<LibraryResponse> = libraries.into_iter().map(Into::into).collect();
 
     Ok(Json(library_responses))
@@ -655,6 +666,39 @@ pub async fn scan_library(
                 format!("Library {} not found", library_id),
             )
         })?;
+
+    if library.library_type == "source" {
+        let task_payload = crate::core::task_queue::TaskPayload::Custom {
+            task_type: "library_scan".to_string(),
+            data: serde_json::json!({
+                "library_id": library.id,
+                "source_sync": true,
+            }),
+        };
+        let task = crate::core::task_queue::Task::new(
+            format!("library_scan_{}", library.id),
+            crate::core::task_queue::Priority::Normal,
+            task_payload,
+        );
+        let submitted_task_id = state.task_queue.submit(task).await.map_err(|error| {
+            let message = format!("Failed to queue source synchronization: {}", error);
+            TingError::task(
+                TaskErrorKind::Execution,
+                "scan_library::source_sync",
+                message,
+            )
+            .with_source(anyhow::anyhow!(error))
+        })?;
+
+        return Ok((
+            StatusCode::ACCEPTED,
+            Json(LibraryScanResponse {
+                task_id: submitted_task_id,
+                status: "queued".to_string(),
+                message: format!("Source synchronization started for '{}'", library.name),
+            }),
+        ));
+    }
 
     let library_path = if library.library_type == "local" {
         let config = state.config.read().await;

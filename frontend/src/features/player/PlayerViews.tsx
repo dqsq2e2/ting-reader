@@ -46,25 +46,25 @@ export const CollapsedPlayerView: React.FC<CollapsedPlayerViewProps> = ({
 );
 
 // ─── ExpandedPlayerHeader ──────────────────────────────────────────────────
-// 展开视图顶部条：左侧收起按钮、中间章节/书名标题、右侧设置按钮。
+// 展开视图顶部条：左侧收起按钮、中间书名 + 作者/演播、右侧设置按钮。
 
 interface ExpandedPlayerHeaderProps {
-  chapterTitle: string;
   bookTitle?: string;
+  authorText?: string;
   onExit: () => void;
   onOpenSettings: () => void;
 }
 
 export const ExpandedPlayerHeader: React.FC<ExpandedPlayerHeaderProps> = ({
-  chapterTitle,
   bookTitle,
+  authorText,
   onExit,
   onOpenSettings,
 }) => {
   const { t } = useTranslation();
 
   return (
-    <div className="flex items-center justify-between w-full max-w-[520px] mx-auto pb-3">
+    <div className="flex items-center justify-between w-full max-w-[520px] min-[700px]:landscape:max-w-[1280px] mx-auto pb-3">
       <button
         onClick={onExit}
         className="p-2 -ml-2 rounded-full text-slate-700 dark:text-white hover:bg-white/50 dark:hover:bg-slate-800/60 transition-colors"
@@ -73,8 +73,8 @@ export const ExpandedPlayerHeader: React.FC<ExpandedPlayerHeaderProps> = ({
         <ChevronUp size={24} className="rotate-180" />
       </button>
       <div className="flex-1 text-center px-3 min-w-0">
-        <h2 className="text-sm sm:text-base font-bold dark:text-white text-[#4A3728] truncate">{chapterTitle}</h2>
-        <p className="text-[10px] sm:text-xs text-slate-500 truncate">{bookTitle}</p>
+        <h2 className="text-sm sm:text-base font-bold dark:text-white text-[#4A3728] truncate">{bookTitle}</h2>
+        <p className="text-[10px] sm:text-xs text-slate-500 truncate">{authorText}</p>
       </div>
       <button
         onClick={onOpenSettings}
@@ -119,44 +119,43 @@ export const MiniPlayerBookInfo: React.FC<MiniPlayerBookInfoProps> = ({
   </div>
 );
 
-// ─── ExpandedCoverAndMeta ──────────────────────────────────────────────────
-// 展开视图中部：大封面 + 章节标题 + 演播者/作者；error 横幅也在这里渲染。
+// ─── ExpandedCover ─────────────────────────────────────────────────────────
+// 竖屏与横屏左侧的大封面。
 
-interface ExpandedCoverAndMetaProps {
+interface ExpandedCoverProps {
   book: Book | null | undefined;
-  chapterTitle: string;
   expandedCoverSizeClass: string;
+}
+
+export const ExpandedCover: React.FC<ExpandedCoverProps> = ({
+  book,
+  expandedCoverSizeClass,
+}) => (
+  <div className={`${expandedCoverSizeClass} rounded-[28px] sm:rounded-[36px] overflow-hidden shadow-2xl border-4 sm:border-8 border-white dark:border-slate-800 transition-all duration-500`}>
+    <PlayerCover book={book} />
+  </div>
+);
+
+// ─── ExpandedChapterTitle ──────────────────────────────────────────────────
+// 章节名：竖屏在封面下方，横屏在右侧功能按钮上方；error 横幅跟随章节名。
+
+interface ExpandedChapterTitleProps {
+  chapterTitle: string;
   error: string | null;
 }
 
-export const ExpandedCoverAndMeta: React.FC<ExpandedCoverAndMetaProps> = ({
-  book,
+export const ExpandedChapterTitle: React.FC<ExpandedChapterTitleProps> = ({
   chapterTitle,
-  expandedCoverSizeClass,
   error,
-}) => {
-  const { t } = useTranslation();
-
-  return (
-    <>
-      <div className={`${expandedCoverSizeClass} rounded-[28px] sm:rounded-[36px] overflow-hidden shadow-2xl border-4 sm:border-8 border-white dark:border-slate-800 transition-all duration-500`}>
-        <PlayerCover book={book} />
+}) => (
+  <div className="w-full min-w-0 text-center">
+    <h1 className="text-xl sm:text-2xl font-black leading-snug dark:text-white text-[#4A3728] line-clamp-2">
+      {chapterTitle}
+    </h1>
+    {error && (
+      <div className="mt-4 w-full rounded-2xl bg-red-500/15 border border-red-200/30 px-4 py-2 text-center text-xs font-bold text-red-600 dark:text-red-200">
+        {error}
       </div>
-
-      <div className="text-center w-full min-w-0">
-        <h1 className="text-xl sm:text-2xl font-black leading-snug dark:text-white text-[#4A3728] line-clamp-2">
-          {chapterTitle}
-        </h1>
-        <p className="mt-1.5 text-sm text-slate-500 truncate">
-          {book?.narrator || book?.author || book?.title || t('player.unknownAuthor')}
-        </p>
-      </div>
-
-      {error && (
-        <div className="w-full rounded-2xl bg-red-500/15 border border-red-200/30 px-4 py-2 text-center text-xs font-bold text-red-600 dark:text-red-200">
-          {error}
-        </div>
-      )}
-    </>
-  );
-};
+    )}
+  </div>
+);

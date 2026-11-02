@@ -239,13 +239,13 @@ export const getPlayerCoverSizes = (coverShape: CoverShape): PlayerCoverSizes =>
     return {
       collapsed: 'w-14 h-14 sm:w-16 sm:h-16',
       mini: 'w-12 h-12 max-[380px]:w-10 max-[380px]:h-10 sm:w-16 sm:h-16',
-      expanded: 'w-full max-w-[240px] sm:max-w-[320px] lg:max-w-[400px] aspect-square',
+      expanded: 'w-full max-w-[240px] sm:max-w-[320px] min-[700px]:landscape:max-w-[400px] aspect-square',
     };
   }
   return {
     collapsed: 'w-14 h-14 sm:w-16 sm:h-16',
     mini: 'w-12 h-12 max-[380px]:w-10 max-[380px]:h-10 sm:w-16 sm:h-16',
-    expanded: 'w-full max-w-[220px] sm:max-w-[280px] lg:max-w-[320px] aspect-[3/4]',
+    expanded: 'w-full max-w-[220px] sm:max-w-[280px] min-[700px]:landscape:max-w-[320px] aspect-[3/4]',
   };
 };
 

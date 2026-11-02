@@ -31,7 +31,7 @@ jobs:
         run: |
           set -euo pipefail
           for plugin in ai-scraper-js ai-cover-generator ai-booklist-assistant rss-feed ting-reader-plugin-store; do
-            git clone --depth 1 --branch v2.0.2 \
+            git clone --depth 1 --branch v2.0.4 \
               "https://github.com/dqsq2e2/${plugin}.git" \
               "$RUNNER_TEMP/ting-reader-js-plugins/${plugin}"
           done

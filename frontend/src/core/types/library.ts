@@ -20,7 +20,7 @@ export interface ScraperConfig {
 export interface Library {
   id: string;
   name: string;
-  library_type: 'webdav' | 'local' | 'rss';
+  library_type: 'webdav' | 'local' | 'rss' | 'source';
   url: string;
   username?: string;
   password?: string;

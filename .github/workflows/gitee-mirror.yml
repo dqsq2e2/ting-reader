@@ -1,97 +1,23 @@
-name: Notify Gitee Mirror
+name: Gitee Mirror Fallback
+
+# 手动兜底：日常镜像同步由 Gitee 侧流水线执行
+# （.workflow/gitee-mirror.yml，定时从 GitHub 拉取），
+# 本工作流仅在需要时手动触发，运行同一份 .workflow/mirror_sync.sh。
 
 on:
-  push:
-    branches: [main]
-  release:
-    types: [published, edited]
-  workflow_run:
-    workflows: ["Docker Build, Push and FPK Release", "Native FPK Build and Release"]
-    types: [completed]
   workflow_dispatch:
-  workflow_call:
-    secrets:
-      GITEE_TOKEN:
-        required: true
 
 permissions:
   contents: read
 
-concurrency:
-  group: gitee-notify-${{ github.repository }}
-  cancel-in-progress: false
-
 jobs:
-  notify:
-    if: >-
-      github.repository_owner == 'dqsq2e2' &&
-      (github.event_name != 'workflow_run' ||
-       (github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.event != 'pull_request' &&
-        github.event.workflow_run.head_repository.full_name == github.repository))
+  mirror:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
     steps:
-      - name: Notify Gitee to pull updates
-        uses: actions/github-script@v7
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Run mirror sync
         env:
           SYNC_GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-        with:
-          script: |
-            const token = process.env.SYNC_GITEE_TOKEN;
-            if (!token) throw new Error('GITEE_TOKEN is not configured');
-            const base = 'https://gitee.com/api/v5/repos/dqsq2e2/ting-reader-mirror-ci/contents/';
-            const branch = 'main';
-            const event = {
-              repository: context.repo.owner + '/' + context.repo.repo,
-              event: context.eventName,
-              sha: context.payload.workflow_run?.head_sha ?? context.sha,
-              ref: context.ref,
-              run: context.runId,
-              attempt: process.env.GITHUB_RUN_ATTEMPT,
-            };
-            async function update(path, content, message) {
-              const endpoint = base + path;
-              for (let attempt = 0; attempt < 6; attempt++) {
-                try {
-                  const current = await fetch(endpoint + '?ref=' + branch, {
-                    headers: { Authorization: 'Bearer ' + token },
-                    signal: AbortSignal.timeout(30000),
-                  });
-                  if (current.status !== 404 && !current.ok) {
-                    throw new Error('Cannot read Gitee notification: HTTP ' + current.status);
-                  }
-                  const existing = current.ok ? await current.json() : null;
-                  if (existing?.content &&
-                      Buffer.from(existing.content, 'base64').equals(Buffer.from(content, 'base64'))) {
-                    return;
-                  }
-                  const sha = existing?.sha;
-                  const response = await fetch(endpoint, {
-                    method: sha ? 'PUT' : 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      access_token: token,
-                      branch,
-                      content,
-                      message,
-                      ...(sha ? { sha } : {}),
-                    }),
-                    signal: AbortSignal.timeout(30000),
-                  });
-                  if (!response.ok) {
-                    // Response bodies may echo credentials.
-                    throw new Error('Gitee notification failed: HTTP ' + response.status);
-                  }
-                  return;
-                } catch (error) {
-                  if (attempt === 5) throw error;
-                  core.warning(error.message);
-                  await new Promise(resolve => setTimeout(resolve, 2000 * (attempt + 1)));
-                }
-              }
-            }
-            await update('requests/latest.json',
-              Buffer.from(JSON.stringify(event) + '\n').toString('base64'),
-              'ci: request mirror sync from ' + event.repository);
-            core.info('Gitee notified; code and release assets will be pulled by Gitee Go.');
+        run: bash .workflow/mirror_sync.sh

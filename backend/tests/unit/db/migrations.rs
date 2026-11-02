@@ -1,11 +1,59 @@
 use super::*;
 
 #[test]
+fn migration_v31_adds_embedded_chapter_time_ranges() {
+    let mut conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(MIGRATION_TABLE).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE chapters (
+            id TEXT PRIMARY KEY,
+            book_id TEXT,
+            title TEXT,
+            path TEXT NOT NULL,
+            duration INTEGER,
+            chapter_index INTEGER,
+            is_extra INTEGER,
+            hash TEXT,
+            created_at TEXT
+        );
+        INSERT INTO chapters (id, path) VALUES ('legacy', 'book.m4b');",
+    )
+    .unwrap();
+
+    apply_migration(&mut conn, 31, MIGRATION_V31).unwrap();
+
+    let (start, end): (Option<i64>, Option<i64>) = conn
+        .query_row(
+            "SELECT start_time, end_time FROM chapters WHERE id = 'legacy'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((start, end), (None, None));
+
+    conn.execute(
+        "INSERT INTO chapters (id, path, start_time, end_time) VALUES ('c1', 'book.m4b', 0, 38173)",
+        [],
+    )
+    .unwrap();
+    let (start, end): (i64, i64) = conn
+        .query_row(
+            "SELECT start_time, end_time FROM chapters WHERE id = 'c1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((start, end), (0, 38_173));
+}
+
+#[test]
 fn migration_v30_moves_legacy_title_flags_into_priority_without_losing_settings() {
     let mut conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(MIGRATION_TABLE).unwrap();
     conn.execute_batch(
         "CREATE TABLE libraries (id TEXT PRIMARY KEY, type TEXT, scraper_config TEXT);
+         CREATE TABLE chapters (id TEXT PRIMARY KEY, book_id TEXT, path TEXT NOT NULL);
+         CREATE TABLE tasks (id TEXT PRIMARY KEY);
          INSERT INTO schema_migrations (version) VALUES (29);",
     )
     .unwrap();

@@ -191,7 +191,10 @@ async fn remote_range_reader_handles_partial_and_ignored_ranges() {
                     .await
                     .unwrap()
             } else {
-                service.get_http_reader(&url, Some((3, 6))).await.unwrap()
+                service
+                    .get_http_reader(&url, Some((3, 6)), None, None)
+                    .await
+                    .unwrap()
             };
             assert_eq!(size, expected_size);
             let mut data = Vec::new();
@@ -200,6 +203,57 @@ async fn remote_range_reader_handles_partial_and_ignored_ranges() {
         }
         task.abort();
     }
+}
+
+#[tokio::test]
+async fn source_media_preserves_headers_and_range_and_enforces_network_permissions() {
+    use axum::{Router, response::IntoResponse, routing::get};
+    let router = Router::new().route(
+        "/chapter",
+        get(|headers: axum::http::HeaderMap| async move {
+            assert_eq!(headers["referer"], "https://source.example/");
+            assert_eq!(headers["authorization"], "Bearer source-only");
+            assert_eq!(headers["range"], "bytes=3-5");
+            assert_eq!(headers["accept-encoding"], "identity");
+            (
+                StatusCode::PARTIAL_CONTENT,
+                [("content-range", "bytes 3-5/9")],
+                "def",
+            )
+                .into_response()
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    let headers = std::collections::BTreeMap::from([
+        ("Referer".into(), "https://source.example/".into()),
+        ("Authorization".into(), "Bearer source-only".into()),
+    ]);
+    let service = StorageService::new();
+    let url = format!("http://{address}/chapter");
+    assert!(
+        service
+            .get_http_reader(&url, Some((3, 6)), Some(&headers), Some(&[]))
+            .await
+            .is_err()
+    );
+    let (mut reader, total) = service
+        .get_http_reader(
+            &url,
+            Some((3, 6)),
+            Some(&headers),
+            Some(&["127.0.0.1".into()]),
+        )
+        .await
+        .unwrap();
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes).await.unwrap();
+    assert_eq!(total, 9);
+    assert_eq!(bytes, b"def");
+    server.abort();
 }
 
 #[tokio::test]
@@ -221,7 +275,7 @@ async fn remote_range_reader_rejects_wrong_offsets_and_short_ignored_ranges() {
         let (url, task) = source(status, content_range, data, false).await;
         assert!(
             StorageService::new()
-                .get_http_reader(&url, Some((3, 6)))
+                .get_http_reader(&url, Some((3, 6)), None, None)
                 .await
                 .is_err()
         );
@@ -239,7 +293,7 @@ async fn remote_range_at_eof_is_an_empty_remainder() {
     )
     .await;
     let (mut reader, size) = StorageService::new()
-        .get_http_reader(&url, Some((3, 6)))
+        .get_http_reader(&url, Some((3, 6)), None, None)
         .await
         .unwrap();
     assert_eq!(size, 3);

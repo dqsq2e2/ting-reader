@@ -157,22 +157,31 @@ const BookHeaderSection: React.FC<Props> = ({
             className="font-bold text-slate-900 dark:text-white leading-tight transition-all duration-300 text-xl sm:text-2xl md:text-3xl"
             maxLines={2}
           />
-          <div className="flex flex-wrap justify-center md:justify-start gap-x-4 gap-y-2 mt-4 text-sm">
-            <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
-              <User size={16} className="text-primary-500" />
-              <span className="font-bold">
+          <div className="flex w-full min-w-0 flex-nowrap items-center justify-center gap-x-3 overflow-hidden mt-4 text-sm sm:gap-x-4 md:justify-start">
+            <div className="flex min-w-0 max-w-[10rem] shrink items-center gap-1.5 text-slate-600 dark:text-slate-400">
+              <User size={16} className="shrink-0 text-primary-500" />
+              <span
+                className="block min-w-0 max-w-[10rem] truncate font-bold"
+                title={book.author || t("bookshelf.unknownAuthor")}
+              >
                 {book.author || t("bookshelf.unknownAuthor")}
               </span>
             </div>
-            <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
-              <Mic2 size={16} className="text-primary-500" />
-              <span className="font-bold">
+            <div className="flex min-w-0 max-w-[10rem] shrink items-center gap-1.5 text-slate-600 dark:text-slate-400">
+              <Mic2 size={16} className="shrink-0 text-primary-500" />
+              <span
+                className="block min-w-0 max-w-[10rem] truncate font-bold"
+                title={book.narrator || t("bookshelf.unknownNarrator")}
+              >
                 {book.narrator || t("bookshelf.unknownNarrator")}
               </span>
             </div>
-            <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
-              <ListMusic size={16} className="text-primary-500" />
-              <span className="font-bold">
+            <div className="flex min-w-0 max-w-[8rem] shrink items-center gap-1.5 text-slate-600 dark:text-slate-400">
+              <ListMusic size={16} className="shrink-0 text-primary-500" />
+              <span
+                className="block min-w-0 max-w-[8rem] truncate font-bold"
+                title={t("bookshelf.chapterCount", { count: chapterTotalCount })}
+              >
                 {t("bookshelf.chapterCount", { count: chapterTotalCount })}
               </span>
             </div>

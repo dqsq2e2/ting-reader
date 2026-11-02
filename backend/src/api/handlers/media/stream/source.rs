@@ -12,6 +12,20 @@ use ting_plugin_contract::format::FormatOperation;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 
+async fn remote_reader(
+    state: &crate::api::state::AppState,
+    library: &crate::db::models::Library,
+    path: &str,
+    range: Option<(u64, u64)>,
+    source_audio: Option<&crate::core::books::sources::SourceAudio>,
+) -> Result<(Box<dyn tokio::io::AsyncRead + Send + Unpin>, u64)> {
+    if let Some(source) = source_audio {
+        source.reader(&state.storage_service, range).await
+    } else {
+        get_remote_media_reader(state, library, path, range).await
+    }
+}
+
 pub(super) async fn stream_source(context: StreamContext) -> Result<axum::response::Response> {
     let StreamContext {
         state,
@@ -22,7 +36,18 @@ pub(super) async fn stream_source(context: StreamContext) -> Result<axum::respon
         method,
         headers,
         user,
+        source_audio,
     } = context;
+    let mime_type = source_audio
+        .as_ref()
+        .map(|source| {
+            source
+                .descriptor
+                .mime
+                .clone()
+                .unwrap_or_else(|| stream_mime_type_from_path(&source.descriptor.url))
+        })
+        .unwrap_or_else(|| stream_mime_type_from_path(&chapter.path));
     let chapter_id = chapter.id.clone();
     let is_head_request = method == axum::http::Method::HEAD;
     let is_download_request = is_download_query(&params);
@@ -34,7 +59,7 @@ pub(super) async fn stream_source(context: StreamContext) -> Result<axum::respon
     let cached_size_unknown = cached
         .as_ref()
         .is_some_and(|entry| entry.total_size.is_none());
-    let plugin_handles_format = if cached.is_some() {
+    let plugin_handles_format = if cached.is_some() && source_audio.is_none() {
         state
             .plugin_manager
             .has_format_operation(
@@ -59,7 +84,7 @@ pub(super) async fn stream_source(context: StreamContext) -> Result<axum::respon
             headers
                 .get(header::RANGE)
                 .and_then(|value| value.to_str().ok()),
-            stream_mime_type_from_path(&chapter.path),
+            mime_type.clone(),
             is_head_request,
             move |start, end| async move {
                 let cache_path = tail_state.cache_manager.get_cache_path(&tail_chapter_id);
@@ -100,13 +125,14 @@ pub(super) async fn stream_source(context: StreamContext) -> Result<axum::respon
         tracing::debug!(target: "media", chapter_id = %chapter_id, "Serving from disk cache");
 
         // Check if we need to use a format plugin even for cached files (source file is cached)
-        let plugin_handles_format = state
-            .plugin_manager
-            .has_format_operation(
-                std::path::Path::new(&chapter.path),
-                FormatOperation::OpenDecrypt,
-            )
-            .await?;
+        let plugin_handles_format = source_audio.is_none()
+            && state
+                .plugin_manager
+                .has_format_operation(
+                    std::path::Path::new(&chapter.path),
+                    FormatOperation::OpenDecrypt,
+                )
+                .await?;
 
         if plugin_handles_format {
             // If a plugin handles this format, we use the cached file as the source for the plugin logic
@@ -121,7 +147,7 @@ pub(super) async fn stream_source(context: StreamContext) -> Result<axum::respon
             // This is handled by the `if cache_path.exists()` checks in the plugin block
         } else {
             let file_size = tokio::fs::metadata(&cache_path).await?.len();
-            let mime_type = stream_mime_type_from_path(&chapter.path);
+            let mime_type = mime_type.clone();
 
             let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
             if let Some(range_str) = range_header
@@ -183,13 +209,14 @@ pub(super) async fn stream_source(context: StreamContext) -> Result<axum::respon
 
     // Determine if we need to use a format plugin
     // Instead of hardcoding extensions, we ask the plugin manager if any loaded plugin supports this extension
-    let plugin_handles_format = state
-        .plugin_manager
-        .has_format_operation(
-            std::path::Path::new(&chapter.path),
-            FormatOperation::OpenDecrypt,
-        )
-        .await?;
+    let plugin_handles_format = source_audio.is_none()
+        && state
+            .plugin_manager
+            .has_format_operation(
+                std::path::Path::new(&chapter.path),
+                FormatOperation::OpenDecrypt,
+            )
+            .await?;
 
     if plugin_handles_format {
         tracing::info!(chapter_id = %chapter_id, "Processing file with format plugin");
@@ -306,7 +333,7 @@ pub(super) async fn stream_source(context: StreamContext) -> Result<axum::respon
             Some((parsed.start, parsed.end))
         } else if cached_size_unknown || r.starts_with("bytes=-") {
             let (reader, total) =
-                get_remote_media_reader(&state, &library, &chapter.path, None).await?;
+                remote_reader(&state, &library, &chapter.path, None, source_audio.as_ref()).await?;
             if total > 0 {
                 let parsed = state.audio_streamer.parse_range_header(r, total)?;
                 Some((parsed.start, parsed.end))
@@ -374,14 +401,21 @@ pub(super) async fn stream_source(context: StreamContext) -> Result<axum::respon
     } else if let Some(probe) = remote_probe {
         probe
     } else {
-        get_remote_media_reader(&state, &library, &chapter.path, range).await?
+        remote_reader(
+            &state,
+            &library,
+            &chapter.path,
+            range,
+            source_audio.as_ref(),
+        )
+        .await?
     };
 
     // A source without a total length cannot resolve suffix/open-ended ranges.
     // Ignore Range and stream the full representation without inventing a length.
     if total_size == 0 && range.is_some() && library.library_type != "local" {
         (reader, total_size) =
-            get_remote_media_reader(&state, &library, &chapter.path, None).await?;
+            remote_reader(&state, &library, &chapter.path, None, source_audio.as_ref()).await?;
         range = None;
     }
 
@@ -414,8 +448,6 @@ pub(super) async fn stream_source(context: StreamContext) -> Result<axum::respon
     // Convert AsyncRead to Stream
     let stream = ReaderStream::new(reader);
     let body = Body::from_stream(stream);
-
-    let mime_type = stream_mime_type_from_path(&chapter.path);
 
     if range.is_some() {
         let content_range = format!("bytes {}-{}/{}", start, end.saturating_sub(1), total_size);

@@ -301,6 +301,15 @@ impl LibraryScanner {
                         "Using core audio metadata to process the first {} file",
                         ext
                     );
+                    tracing::debug!(
+                        embedded_chapters = meta.chapters.len(),
+                        codec = ?meta.codec,
+                        sample_rate = ?meta.sample_rate,
+                        channels = ?meta.channels,
+                        bit_depth = ?meta.bit_depth,
+                        bitrate_kbps = ?meta.bitrate_kbps,
+                        "Audio stream details"
+                    );
                 } else {
                     tracing::debug!(
                         "Using core audio metadata to process file #{} ({}) for supplemental metadata",
@@ -344,6 +353,52 @@ impl LibraryScanner {
                     && !g.trim().is_empty()
                 {
                     m.genre = Some(g);
+                }
+
+                if (index == 0 || m.subtitle.is_none())
+                    && let Some(subtitle) = meta.subtitle
+                    && !subtitle.trim().is_empty()
+                {
+                    m.subtitle = Some(subtitle);
+                }
+                if (index == 0 || m.publisher.is_none())
+                    && let Some(publisher) = meta.publisher
+                    && !publisher.trim().is_empty()
+                {
+                    m.publisher = Some(publisher);
+                }
+                if (index == 0 || m.published_date.is_none())
+                    && let Some(date) = meta.published_date
+                    && !date.trim().is_empty()
+                {
+                    if m.published_year.is_none() {
+                        m.published_year = date
+                            .get(0..4)
+                            .filter(|year| year.chars().all(|ch| ch.is_ascii_digit()))
+                            .map(str::to_string);
+                    }
+                    m.published_date = Some(date);
+                }
+                if (index == 0 || m.language.is_none())
+                    && let Some(language) = meta.language
+                    && !language.trim().is_empty()
+                {
+                    m.language = Some(language);
+                }
+                if (index == 0 || m.asin.is_none())
+                    && let Some(asin) = meta.asin
+                    && !asin.trim().is_empty()
+                {
+                    m.asin = Some(asin);
+                }
+                if (index == 0 || m.isbn.is_none())
+                    && let Some(isbn) = meta.isbn
+                    && !isbn.trim().is_empty()
+                {
+                    m.isbn = Some(isbn);
+                }
+                if meta.explicit {
+                    m.explicit = true;
                 }
 
                 if (index == 0 || m.description.is_none())

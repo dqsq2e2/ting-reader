@@ -12,7 +12,7 @@ import { resolvePlaybackDuration } from '../../core/utils/duration';
 import { getCoverUrl } from '../../core/utils/image';
 import { getRuntimeBaseUrl, getRuntimeUrl } from '../../core/utils/runtimeUrl';
 import { PLAYBACK_PREFERENCES_UPDATED, type PlaybackPreferences } from '../../core/utils/playbackPreferences';
-import { HlsPlaybackSession, type HlsPlaybackInfo } from './playbackSession';
+import { ChapterAdvance, chapterIntroPosition, chapterResumePosition, isChapterOutro, HlsPlaybackSession, PendingMediaSeek, type HlsPlaybackInfo } from './playbackSession';
 import { isAppleMobileBrowser, isStrmPath } from './platform';
 import { registerMediaSessionControls, updateMediaSessionMetadata, updateMediaSessionPlayback } from './mediaSession';
 import { useSleepTimer, useStuckDecodeDetector, useNextChapterPreloader, useProgressSync, getBufferedEndAt } from './playerHelpers';
@@ -34,6 +34,7 @@ export const usePlayback = () => {
     currentBook,
     currentChapter,
     isPlaying,
+    playbackRevision,
     currentTime,
     duration,
     setCurrentTime,
@@ -93,15 +94,23 @@ export const usePlayback = () => {
   const currentBookId = currentBook?.id;
   const currentChapterId = currentChapter?.id;
   const chapterDuration = currentChapter?.duration;
+  // Chapters extracted from an M4B chapter table describe a time range inside
+  // a shared audio file. `currentTime` in the store stays chapter-relative;
+  // these bounds convert to and from the absolute media timeline.
+  const chapterStart = Math.max(0, (currentChapter?.start_time ?? 0) / 1000);
+  const chapterEnd = currentChapter?.end_time
+    ? Math.max(chapterStart, currentChapter.end_time / 1000)
+    : null;
+  const chapterSegmentDuration = chapterEnd !== null ? Math.max(0, chapterEnd - chapterStart) : 0;
   const isInitialLoadRef = useRef(true);
+  const pendingMediaSeek = useRef(new PendingMediaSeek());
+  const chapterAdvanceRef = useRef(new ChapterAdvance());
   const transcodeFallbackChapterRef = useRef<string | null>(null);
   const hlsRequestIdRef = useRef(0);
   const hlsPendingSeekRef = useRef<number | null>(null);
   const hlsSeekingRef = useRef(false);
   const sourceSwitchingRef = useRef(false);
   const hlsOwnerRef = useRef<HlsPlaybackSession | null>(null);
-  // 防止 skip-outro 在同一章节内多次触发 nextChapter。
-  const skipOutroChapterRef = useRef<string | null>(null);
   const shouldUseHlsForCurrentChapter =
     isAppleMobileBrowser() &&
     isStrmPath(currentChapter?.path) &&
@@ -122,7 +131,7 @@ export const usePlayback = () => {
       streamStartOffset.chapterId === chapterId
         ? streamStartOffset.offset
         : currentChapter?.id === chapterId
-          ? Math.max(0, Math.floor(currentTime || 0))
+          ? chapterStart + Math.max(0, Math.floor(currentTime || 0))
           : 0;
     const explicitSeekOffset = currentChapter?.id === chapterId ? seekOffset : null;
     const requestSeekOffset = explicitSeekOffset !== null ? explicitSeekOffset : initialOffset;
@@ -150,13 +159,13 @@ export const usePlayback = () => {
     const chapterStartOffset =
       streamStartOffset.chapterId === currentChapter?.id
         ? streamStartOffset.offset
-        : 0;
+        : chapterStart;
     const fallbackOffset = Math.max(
       0,
-      isInitialLoadRef.current ? chapterStartOffset : currentTime,
+      isInitialLoadRef.current ? chapterStartOffset : chapterStart + currentTime,
     );
     setSeekOffset(fallbackOffset);
-    setCurrentTime(fallbackOffset);
+    setCurrentTime(Math.max(0, fallbackOffset - chapterStart));
     if (shouldUseHlsForCurrentChapter) {
       setHlsUnavailable(true);
     }
@@ -200,20 +209,23 @@ export const usePlayback = () => {
 
   useEffect(() => {
     const chapterId = currentChapter?.id ?? null;
+    // Keep the absolute media offset: single-file chapters may start deep
+    // inside the audio, and the stream endpoint seeks by file position.
     const offset = chapterId
-      ? Math.max(0, Math.floor(usePlayerStore.getState().currentTime || 0))
+      ? chapterStart + Math.max(0, Math.floor(usePlayerStore.getState().currentTime || 0))
       : 0;
     const timer = window.setTimeout(
       () => setStreamStartOffset({ chapterId, offset }),
       0,
     );
     return () => window.clearTimeout(timer);
-  }, [currentChapter?.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentChapter?.id, playbackRevision]);
 
   // Reset all playback state when chapter ID changes
   useEffect(() => {
     isInitialLoadRef.current = true;
-    skipOutroChapterRef.current = null;
+    sourceSwitchingRef.current = true;
     hlsRequestIdRef.current += 1;
     const timer = window.setTimeout(() => {
       setError(null);
@@ -239,7 +251,7 @@ export const usePlayback = () => {
     }, 0);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentChapter?.id]);
+  }, [currentChapter?.id, playbackRevision]);
 
   // Update duration display when chapter duration is updated (e.g., after FFprobe)
   // without resetting shouldTranscode or retryCount
@@ -306,7 +318,6 @@ export const usePlayback = () => {
     const timer = window.setTimeout(() => {
       hlsPendingSeekRef.current = null;
       hlsSeekingRef.current = false;
-      sourceSwitchingRef.current = false;
       if (!currentChapter || !shouldUseHlsForCurrentChapter) {
         setHlsStreamUrl(null);
         setHlsSessionId(null);
@@ -315,16 +326,18 @@ export const usePlayback = () => {
         return;
       }
       const requestId = ++hlsRequestIdRef.current;
-      let startAt = Math.max(0, usePlayerStore.getState().currentTime || 0);
-      if (isInitialLoadRef.current && currentBook?.skip_intro && startAt < currentBook.skip_intro) {
-        startAt = currentBook.skip_intro;
+      let startRelative = Math.max(0, usePlayerStore.getState().currentTime || 0);
+      if (isInitialLoadRef.current) {
+        startRelative = chapterResumePosition(startRelative, currentChapter.duration,
+          currentBook?.skip_intro ?? 0, currentBook?.skip_outro ?? 0);
       }
+      const startAt = chapterStart + startRelative;
       sourceSwitchingRef.current = true;
       setHlsChapterId(currentChapter.id);
       setHlsStreamUrl(null);
       setHlsSessionId(null);
       setHlsSeekOffset(startAt);
-      setCurrentTime(startAt);
+      setCurrentTime(startRelative);
       isInitialLoadRef.current = false;
       const params: Record<string, string | number> = { transcode: "hls" };
       if (token) params.token = token;
@@ -370,7 +383,7 @@ export const usePlayback = () => {
       if (hlsOwnerRef.current === owner) hlsOwnerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentChapter?.id, currentChapter?.path, shouldUseHlsForCurrentChapter, currentBook?.skip_intro, token, API_BASE_URL]);
+  }, [currentChapter?.id, currentChapter?.path, playbackRevision, shouldUseHlsForCurrentChapter, currentBook?.skip_intro, token, API_BASE_URL]);
 
   // Reset initial load ref when retrying (to allow resume logic to run again)
   useEffect(() => {
@@ -427,6 +440,7 @@ export const usePlayback = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isPlaying,
+    playbackRevision,
     currentChapter?.id,
     retryCount,
     shouldTranscode,
@@ -461,12 +475,17 @@ export const usePlayback = () => {
   // Handle Skip Intro and Outro
   const handleTimeUpdate = () => {
     if (!audioRef.current) return;
+    if (usePlayerStore.getState().playbackRevision !== playbackRevision) return;
+    if (sourceSwitchingRef.current) return;
+    if (isSeeking || audioRef.current.seeking) return;
     if (isUsingHlsForCurrentChapter && hlsSeekingRef.current) return;
+    if (!pendingMediaSeek.current.apply(audioRef.current.getAttribute('src') ?? '', audioRef.current)) return;
 
     const rawTime = audioRef.current.currentTime;
     // Server-side seeked streams start from 0 but represent audio at an offset.
     const mediaOffset = getMediaOffset();
-    const time = rawTime + mediaOffset;
+    const absoluteTime = rawTime + mediaOffset;
+    const time = Math.max(0, absoluteTime - chapterStart);
 
     // Prevent overwriting persisted progress with 0 on initial load
     // If we are at the very beginning (time < 0.5) but store has significant progress (> 2s),
@@ -475,45 +494,44 @@ export const usePlayback = () => {
       return;
     }
 
-    // Mark initial load as done if we have successfully played past 1s
-    if (isInitialLoadRef.current && rawTime > 1) {
-      isInitialLoadRef.current = false;
-    }
-
     setCurrentTime(time);
 
     // Update buffered time more accurately
     if (audioRef.current.buffered.length > 0) {
       setBufferedTime(
-        getBufferedEndAt(audioRef.current.buffered, rawTime) + mediaOffset,
+        Math.max(
+          0,
+          getBufferedEndAt(audioRef.current.buffered, rawTime) + mediaOffset - chapterStart,
+        ),
       );
     }
 
-    // Handle Skip Intro
-    if (isInitialLoadRef.current && currentBook?.skip_intro) {
-      if (time < currentBook.skip_intro) {
-        audioRef.current.currentTime = currentBook.skip_intro;
-        setCurrentTime(currentBook.skip_intro);
+    // Use the same seek path for native audio and server-offset transcodes.
+    if (isInitialLoadRef.current) {
+      const intro = chapterIntroPosition(currentBook?.skip_intro ?? 0, currentBook?.skip_outro ?? 0, duration);
+      if (time < intro) {
+        seekToTime(intro);
       }
       isInitialLoadRef.current = false;
     }
 
-    // Handle Skip Outro
-    if (currentBook?.skip_outro && duration > 0) {
-      // Only skip if the chapter is long enough to actually have an outro
-      // and we've played at least some of it
-      const minChapterDuration =
-        (currentBook.skip_intro || 0) + currentBook.skip_outro + 10;
-      if (
-        duration > minChapterDuration &&
-        duration - time <= currentBook.skip_outro
-      ) {
-        // 每集只触发一次，避免 timeUpdate 反复调用 nextChapter。
-        if (skipOutroChapterRef.current !== currentChapter?.id) {
-          skipOutroChapterRef.current = currentChapter?.id ?? null;
-          advanceToNextChapter();
-        }
-      }
+    // A paused seek or a late event from an old source cannot advance playback.
+    if (!usePlayerStore.getState().isPlaying || audioRef.current.paused) return;
+    if (isChapterOutro(time, duration, currentBook?.skip_intro ?? 0, currentBook?.skip_outro ?? 0)) {
+      advanceToNextChapter();
+      return;
+    }
+
+    // A chapter taken from an embedded chapter table ends before the file
+    // does; advance once the segment boundary is reached. Skip-outro may have
+    // already advanced this tick, so it wins.
+    if (
+      chapterEnd !== null &&
+      duration > 0 &&
+      time >= duration - 0.2 &&
+      !sourceSwitchingRef.current
+    ) {
+      advanceToNextChapter();
     }
   };
 
@@ -536,11 +554,15 @@ export const usePlayback = () => {
 
   const handleProgress = () => {
     applyPendingHlsSeek();
+    if (audioRef.current) pendingMediaSeek.current.apply(audioRef.current.getAttribute('src') ?? '', audioRef.current);
     if (audioRef.current && audioRef.current.buffered.length > 0) {
       const rawTime = audioRef.current.currentTime;
       const mediaOffset = getMediaOffset();
       setBufferedTime(
-        getBufferedEndAt(audioRef.current.buffered, rawTime) + mediaOffset,
+        Math.max(
+          0,
+          getBufferedEndAt(audioRef.current.buffered, rawTime) + mediaOffset - chapterStart,
+        ),
       );
     }
   };
@@ -569,11 +591,11 @@ export const usePlayback = () => {
   const updateAudioDuration = () => {
     const audio = audioRef.current;
     if (!audio) return 0;
-    const sourceDuration = resolvePlaybackDuration(
-      currentChapter?.duration,
-      audio.duration,
-      shouldTranscode,
-    );
+    // An embedded chapter only covers its own slice of the file, so the media
+    // element's duration must never override the chapter length.
+    const sourceDuration = chapterEnd !== null
+      ? resolvePlaybackDuration(currentChapter?.duration, 0, true) || chapterSegmentDuration
+      : resolvePlaybackDuration(currentChapter?.duration, audio.duration, shouldTranscode);
     setDuration(sourceDuration);
     return sourceDuration;
   };
@@ -586,36 +608,19 @@ export const usePlayback = () => {
 
       // Resume position from store if this is the initial load for this chapter
       if (isInitialLoadRef.current && !isUsingHlsForCurrentChapter) {
-        const resumePosition = usePlayerStore.getState().currentTime;
-        const mediaOffset = getMediaOffset();
-        if (resumePosition > 0) {
-          // If progress is very close to the end (e.g., within 2 seconds or > 99%), start from the beginning
-          if (
-            browserDuration > 0 &&
-            (browserDuration - resumePosition < 2 ||
-              resumePosition / browserDuration > 0.99)
-          ) {
-            console.log(
-              `Chapter ${currentChapter?.title} completed; starting from the beginning`,
-            );
-            if (mediaOffset > 0) {
-              setSeekOffset(0);
-            } else {
-              audioRef.current.currentTime = 0;
-            }
-            setCurrentTime(0);
-          } else if (mediaOffset > 0) {
-            // The backend already sought before transcoding. This element's
-            // timeline starts at zero, so applying the absolute position again
-            // can seek past the shortened stream.
-            setCurrentTime(mediaOffset);
-          } else {
-            console.log(
-              `Resuming chapter ${currentChapter?.title} at ${resumePosition}s`,
-            );
-            audioRef.current.currentTime = resumePosition;
-          }
+        const chapterLength = chapterEnd !== null
+          ? (resolvePlaybackDuration(currentChapter?.duration, 0, true) || chapterSegmentDuration)
+          : browserDuration;
+        const resume = chapterResumePosition(usePlayerStore.getState().currentTime, chapterLength,
+          currentBook?.skip_intro ?? 0, currentBook?.skip_outro ?? 0);
+        if (shouldTranscode) {
+          // A server-offset stream starts at zero and may not support Range.
+          if (Math.abs(chapterStart + resume - getMediaOffset()) > 0.25) seekToTime(resume);
+        } else {
+          pendingMediaSeek.current.request(audioRef.current.getAttribute('src') ?? '', chapterStart + resume);
+          pendingMediaSeek.current.apply(audioRef.current.getAttribute('src') ?? '', audioRef.current);
         }
+        setCurrentTime(resume);
       }
 
       // Ensure playback rate is applied
@@ -625,6 +630,7 @@ export const usePlayback = () => {
       if (
         !shouldTranscode &&
         currentChapter &&
+        currentChapter.end_time == null &&
         (!currentChapter.duration || currentChapter.duration === 0)
       ) {
         if (Number.isFinite(browserDuration) && browserDuration > 0) {
@@ -666,11 +672,14 @@ export const usePlayback = () => {
       0,
       duration > 0 ? Math.min(time, duration) : time,
     );
+    const absoluteTarget = chapterStart + targetTime;
+    isInitialLoadRef.current = false;
+    pendingMediaSeek.current.cancel();
 
     if (audioRef.current) {
       if (isUsingHlsForCurrentChapter && hlsSessionId) {
         const requestId = ++hlsRequestIdRef.current;
-        const relative = targetTime - hlsSeekOffset;
+        const relative = absoluteTarget - hlsSeekOffset;
         const ranges = audioRef.current.seekable;
         const locallySeekable = !hlsSeekingRef.current && relative >= 0 &&
           Array.from({ length: ranges.length }, (_, index) => index)
@@ -687,9 +696,9 @@ export const usePlayback = () => {
         hlsPendingSeekRef.current = null;
         // Serialize requests and discard queued stale targets. Response guards
         // alone cannot prevent an older server request stopping a newer process.
-        void hlsOwnerRef.current?.seek(targetTime).then(info => {
+        void hlsOwnerRef.current?.seek(absoluteTarget).then(info => {
           if (!info || requestId !== hlsRequestIdRef.current) return;
-          const offset = info.start_offset ?? targetTime;
+          const offset = info.start_offset ?? absoluteTarget;
           const playbackTime = info.playback_time ?? 0;
           const nextUrl = toAbsoluteMediaUrl(info.playlist_url);
           setHlsSeekOffset(offset);
@@ -720,11 +729,12 @@ export const usePlayback = () => {
       if (isNonSeekable && shouldTranscode) {
         // Reload audio with seek parameter (server-side seek via FFmpeg -ss)
         sourceSwitchingRef.current = true;
-        setSeekOffset(targetTime);
+        setSeekOffset(absoluteTarget);
         setCurrentTime(targetTime);
         isInitialLoadRef.current = false;
       } else {
-        audioRef.current.currentTime = targetTime;
+        pendingMediaSeek.current.request(audioRef.current.getAttribute('src') ?? '', absoluteTarget);
+        pendingMediaSeek.current.apply(audioRef.current.getAttribute('src') ?? '', audioRef.current);
         setCurrentTime(targetTime);
       }
     } else {
@@ -749,7 +759,14 @@ export const usePlayback = () => {
     return () => window.removeEventListener(BOOKMARK_SEEK_REQUESTED, onBookmarkSeek);
   }, []);
 
-  const onMediaPlay = React.useEffectEvent(() => setIsPlaying(true));
+  const onMediaPlay = React.useEffectEvent(() => {
+    const state = usePlayerStore.getState();
+    if (audioRef.current?.ended && state.currentBook && state.currentChapter) {
+      state.playChapter(state.currentBook, state.chapters, state.currentChapter, 0);
+    } else {
+      setIsPlaying(true);
+    }
+  });
   const onMediaPause = React.useEffectEvent(() => setIsPlaying(false));
   const onMediaPrevious = React.useEffectEvent(() => prevChapter());
   const onMediaNext = React.useEffectEvent(() => nextChapter());
@@ -780,9 +797,13 @@ export const usePlayback = () => {
     const cover = currentBook?.cover_url
       ? getCoverUrl(currentBook.cover_url, currentBook.library_id, currentBook.id)
       : null;
+    const artist = [
+      currentBook?.author?.trim(),
+      currentBook?.narrator?.trim(),
+    ].filter((part): part is string => !!part).join(" / ");
     updateMediaSessionMetadata(navigator.mediaSession, currentChapterId ? {
       title: currentChapter?.title || currentBook?.title || "",
-      artist: currentBook?.narrator || currentBook?.author || "",
+      artist,
       album: currentBook?.title || "",
       artwork: cover ? [{ src: new URL(cover, window.location.href).href }] : [],
     } : null);
@@ -803,9 +824,24 @@ export const usePlayback = () => {
       : ""
     : getStreamUrl(currentChapter.id);
 
+  React.useLayoutEffect(() => {
+    sourceSwitchingRef.current = true;
+    pendingMediaSeek.current.cancel();
+  }, [audioSrc]);
+
   // 切换到下一集并处理按集数睡眠定时：若集数已用完则暂停播放。
   const advanceToNextChapter = () => {
+    const current = usePlayerStore.getState();
+    if (!chapterAdvanceRef.current.claim(playbackRevision, current.playbackRevision, current.isPlaying)) return;
+    flushProgress(duration);
     const stopAfterThis = handleSleepChapterEnded();
+    const index = current.chapters.findIndex(chapter => chapter.id === current.currentChapter?.id);
+    if (index < 0 || index >= current.chapters.length - 1) {
+      setIsPlaying(false);
+      audioRef.current?.pause();
+      return;
+    }
+    sourceSwitchingRef.current = true;
     nextChapter();
     if (stopAfterThis) {
       // nextChapter 会同步把新章节置为播放状态；不要依赖 ended/pause 事件
@@ -815,7 +851,7 @@ export const usePlayback = () => {
   };
 
   const handleEnded = () => {
-    flushProgress(duration);
+    if (sourceSwitchingRef.current || !audioRef.current?.ended) return;
     // 按集数睡眠：播完设定集数后停在下一条开头，不再继续播放。
     advanceToNextChapter();
   };
@@ -829,6 +865,7 @@ export const usePlayback = () => {
     onDurationChange: updateAudioDuration,
     onCanPlay: () => {
       applyPendingHlsSeek();
+      if (audioRef.current) pendingMediaSeek.current.apply(audioRef.current.getAttribute('src') ?? '', audioRef.current);
       sourceSwitchingRef.current = false;
       setError(null);
       const audio = audioRef.current;
@@ -837,12 +874,18 @@ export const usePlayback = () => {
       }
     },
     onEnded: handleEnded,
+    onSeeked: () => {
+      if (audioRef.current) pendingMediaSeek.current.apply(audioRef.current.getAttribute('src') ?? '', audioRef.current);
+    },
     onPlay: () => {
+      if (audioRef.current && audioRef.current.readyState >= 3) {
+        sourceSwitchingRef.current = false;
+      }
       setIsPlaying(true);
       if (audioRef.current) audioRef.current.playbackRate = playbackSpeed;
     },
     onPause: () => {
-      if (!sourceSwitchingRef.current) setIsPlaying(false);
+      if (!sourceSwitchingRef.current && !audioRef.current?.ended) setIsPlaying(false);
     },
     onError: (e) => {
       const audio = audioRef.current;

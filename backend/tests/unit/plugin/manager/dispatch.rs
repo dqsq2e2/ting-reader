@@ -4,6 +4,37 @@ use crate::plugin::manager::{FailedPlugin, PluginConfig, PluginEntry};
 use crate::plugin::types::{Plugin, PluginMetadata};
 use std::sync::Arc;
 
+#[test]
+fn source_detail_shape_is_opt_in_and_requires_complete_unique_chapters() {
+    let mut capability: PluginCapability = serde_json::from_value(serde_json::json!({
+        "id":"metadata","kind":"metadata_provider","operations":["search","detail","resolve_audio"],
+        "search_fields":[],"result_fields":[]
+    }))
+    .unwrap();
+    let metadata = serde_json::json!({
+        "id":"one","source_url":null,"title":"Sample","author":null,"narrator":null,
+        "cover_url":null,"intro":null,"subtitle":null,"publisher":null,"language":null,
+        "genre":null,"published_year":null,"published_date":null,"isbn":null,"asin":null,
+        "explicit":null,"abridged":null,"tags":[],"duration":null,"score":null,
+        "chapter_title_template":null,"chapter_titles":[]
+    });
+    let request = serde_json::json!({"id":"one","url":null});
+    assert!(validate_capability_output(&capability, "detail", &request, &metadata).is_ok());
+    let mut detail = serde_json::json!({
+        "metadata":metadata,"chapters":[{"id":"chapter-1","title":"One","index":0,"duration":null,"source_url":null}]
+    });
+    assert!(validate_capability_output(&capability, "detail", &request, &detail).is_err());
+    if let PluginCapability::MetadataProvider(cap) = &mut capability {
+        cap.book_source = true;
+    }
+    assert!(validate_capability_output(&capability, "detail", &request, &metadata).is_err());
+    assert!(validate_capability_output(&capability, "detail", &request, &detail).is_ok());
+    detail["chapters"] = serde_json::json!([detail["chapters"][0], detail["chapters"][0]]);
+    assert!(validate_capability_output(&capability, "detail", &request, &detail).is_err());
+    detail["chapters"] = serde_json::json!([]);
+    assert!(validate_capability_output(&capability, "detail", &request, &detail).is_err());
+}
+
 #[tokio::test]
 async fn resource_scope_rejections_preserve_permission_and_cancellation_codes() {
     use crate::plugin::host_api::resources::ResourceScope;

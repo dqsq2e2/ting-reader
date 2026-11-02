@@ -222,6 +222,8 @@ impl StorageService {
         &self,
         media_url: &str,
         range: Option<(u64, u64)>,
+        headers: Option<&std::collections::BTreeMap<String, String>>,
+        allowed_domains: Option<&[String]>,
     ) -> Result<(Box<dyn AsyncRead + Send + Unpin>, u64)> {
         let url = Url::parse(media_url).map_err(|e| {
             let message = e.to_string();
@@ -241,33 +243,71 @@ impl StorageService {
             ));
         }
 
-        let mut req = self
-            .client
-            .get(url.clone())
-            .header("Accept", "*/*")
-            .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-            .header("Accept-Encoding", "identity")
-            .header("Connection", "keep-alive");
-
-        if let Some((start, end)) = range {
-            let end_byte = if end > 0 { end.saturating_sub(1) } else { 0 };
-            if end > start {
-                req = req.header("Range", format!("bytes={}-{}", start, end_byte));
-            } else {
-                req = req.header("Range", format!("bytes={}-", start));
+        let mut request_headers = header::HeaderMap::new();
+        if let Some(headers) = headers {
+            for (name, value) in headers {
+                let name = header::HeaderName::from_bytes(name.as_bytes()).map_err(|error| {
+                    TingError::validation(
+                        InputErrorKind::InvalidValue,
+                        "media.headers",
+                        error.to_string(),
+                    )
+                })?;
+                let value = header::HeaderValue::from_str(value).map_err(|error| {
+                    TingError::validation(
+                        InputErrorKind::InvalidValue,
+                        "media.headers",
+                        error.to_string(),
+                    )
+                })?;
+                request_headers.insert(name, value);
             }
         }
-
-        let res = req.send().await.map_err(|e| {
-            let message = e.to_string();
-            TingError::network(
-                NetworkErrorKind::Transport,
-                "get_http_reader::network",
-                message,
-            )
-            .with_source(anyhow::anyhow!(e))
-        })?;
-
+        request_headers.insert(
+            header::ACCEPT_ENCODING,
+            header::HeaderValue::from_static("identity"),
+        );
+        if let Some((start, end)) = range {
+            let value = if end > start {
+                format!("bytes={}-{}", start, end - 1)
+            } else {
+                format!("bytes={}-", start)
+            };
+            request_headers.insert(
+                header::RANGE,
+                header::HeaderValue::from_str(&value).map_err(|error| {
+                    TingError::validation(
+                        InputErrorKind::InvalidValue,
+                        "media.range",
+                        error.to_string(),
+                    )
+                })?,
+            );
+        }
+        let res = if let Some(domains) = allowed_domains {
+            crate::plugin::host_api::http::media_response(media_url, request_headers, domains)
+                .await
+                .map_err(|error| {
+                    TingError::network(
+                        NetworkErrorKind::Transport,
+                        "media.source",
+                        error.to_string(),
+                    )
+                })?
+        } else {
+            self.client
+                .get(url)
+                .headers(request_headers)
+                .send()
+                .await
+                .map_err(|error| {
+                    TingError::network(
+                        NetworkErrorKind::Transport,
+                        "media.http",
+                        error.without_url().to_string(),
+                    )
+                })?
+        };
         remote_response_reader(res, range).await
     }
 

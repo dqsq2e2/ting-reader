@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { ChapterAdvance, chapterIntroPosition, chapterResumePosition, isChapterOutro, PendingMediaSeek } from '../src/features/player/playbackSession.ts';
+import { ProgressSocket } from '../src/core/api/progressSocket.ts';
 import { test } from 'node:test';
 import { resolvePlaybackDuration } from '../src/core/utils/duration.ts';
 import { HlsPlaybackSession, PlaybackSleep } from '../src/features/player/playbackSession.ts';
@@ -6,6 +8,163 @@ import type { HlsPlaybackInfo, HlsTransport } from '../src/features/player/playb
 import { ChapterCatalogue } from '../src/core/api/books.ts';
 import type { ChapterPage } from '../src/core/api/books.ts';
 import type { Chapter } from '../src/core/types/index.ts';
+
+test('intro and outro preserve short chapters without an arbitrary ten-second margin', () => {
+  assert.equal(chapterIntroPosition(15, 10, 20), 0);
+  assert.equal(isChapterOutro(18, 20, 15, 10), false);
+  assert.equal(chapterIntroPosition(15, 10, 30), 15);
+  assert.equal(isChapterOutro(20, 30, 15, 10), true);
+  assert.equal(isChapterOutro(19, 30, 15, 10), false);
+  assert.equal(isChapterOutro(29, 30, 15, 0), false);
+});
+
+test('chapter boundaries advance once and reject paused or superseded playback', () => {
+  const advance = new ChapterAdvance();
+  assert.equal(advance.claim(1, 1, false), false);
+  assert.equal(advance.claim(1, 2, true), false);
+  assert.equal(advance.claim(2, 2, true), true);
+  assert.equal(advance.claim(2, 2, true), false);
+  assert.equal(advance.claim(3, 3, true), true);
+});
+
+test('resume and replay share the same intro position for native and transcoded audio', () => {
+  assert.equal(chapterResumePosition(5, 600, 15, 10), 15);
+  assert.equal(chapterResumePosition(200, 600, 15, 10), 200);
+  assert.equal(chapterResumePosition(599, 600, 15, 10), 15);
+  assert.equal(chapterResumePosition(0, 20, 15, 10), 0);
+  assert.equal(chapterResumePosition(NaN, 600, 15, 10), 15);
+});
+
+test('native resume retries discarded seeks and does not overwrite a newer source or manual seek', () => {
+  const pending = new PendingMediaSeek();
+  const media = { currentTime: 0, readyState: 0, seeking: false };
+  pending.request('first', 30);
+  assert.equal(pending.apply('first', media), false);
+  media.readyState = 3;
+  assert.equal(pending.apply('first', media), false);
+  assert.equal(media.currentTime, 30);
+  media.currentTime = 0; // Platform discarded the seek while loading.
+  assert.equal(pending.apply('first', media), false);
+  assert.equal(media.currentTime, 30);
+  assert.equal(pending.apply('first', media), true);
+  pending.request('first', 90);
+  pending.apply('second', media);
+  assert.equal(media.currentTime, 30);
+  pending.request('second', 60);
+  pending.cancel();
+  assert.equal(pending.apply('second', media), true);
+  assert.equal(media.currentTime, 30);
+});
+
+test('native resume waits for buffering without restarting a confirmed seek', () => {
+  const pending = new PendingMediaSeek();
+  let currentTime = 0;
+  let seeks = 0;
+  const media = {
+    readyState: 1,
+    seeking: false,
+    get currentTime() { return currentTime; },
+    set currentTime(value: number) { currentTime = value; seeks++; },
+  };
+  pending.request('chapter', 30);
+  assert.equal(pending.apply('chapter', media), false);
+  assert.equal(seeks, 1);
+  media.readyState = 2;
+  for (let i = 0; i < 5; i++) assert.equal(pending.apply('chapter', media), false);
+  assert.equal(seeks, 1);
+  currentTime = 0; // A later native reset still needs correction.
+  assert.equal(pending.apply('chapter', media), false);
+  assert.equal(seeks, 2);
+  media.readyState = 3;
+  assert.equal(pending.apply('chapter', media), true);
+  assert.equal(seeks, 2);
+  currentTime = 35;
+  assert.equal(pending.apply('chapter', media), true);
+  assert.equal(currentTime, 35);
+});
+
+class TestSocket {
+  readyState = 0;
+  onopen: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  sent: string[] = [];
+  closed = 0;
+  open() { this.readyState = 1; this.onopen?.(); }
+  send(data: string) { this.sent.push(data); }
+  close() { this.readyState = 3; this.closed++; this.onclose?.(); }
+}
+
+function socketHarness() {
+  const sockets: TestSocket[] = [];
+  const connected: boolean[] = [];
+  const messages: unknown[] = [];
+  const connection = new ProgressSocket({
+    createSocket: () => {
+      const socket = new TestSocket();
+      sockets.push(socket);
+      return socket as unknown as WebSocket;
+    },
+    connected: value => connected.push(value),
+    message: value => messages.push(value),
+  });
+  return { connection, sockets, connected, messages };
+}
+
+test('progress sockets reconnect on missing pong and dispose all timers', t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const h = socketHarness();
+  h.connection.connect();
+  const socket = h.sockets[0];
+  socket.open();
+  t.mock.timers.tick(30000);
+  assert.deepEqual(socket.sent, ['{"type":"ping"}']);
+  t.mock.timers.tick(10000);
+  assert.equal(socket.closed, 1);
+  assert.equal(h.connected.at(-1), false);
+  t.mock.timers.tick(1000);
+  assert.equal(h.sockets.length, 2);
+  h.connection.dispose();
+  t.mock.timers.tick(120000);
+  assert.equal(h.sockets.length, 2);
+});
+
+test('progress sockets discard old callbacks and retry stalled handshakes', t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const h = socketHarness();
+  h.connection.connect();
+  const first = h.sockets[0];
+  const oldMessage = first.onmessage!;
+  const oldOpen = first.onopen!;
+  t.mock.timers.tick(15000);
+  t.mock.timers.tick(1000);
+  h.sockets[1].open();
+  oldMessage({ data: '{"type":"progress_updated"}' });
+  oldOpen();
+  assert.deepEqual(h.messages, []);
+  assert.equal(h.connected.filter(Boolean).length, 1);
+  h.connection.dispose();
+});
+
+test('foreground probes keep healthy progress sockets and reconnect dead ones', t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const h = socketHarness();
+  h.connection.connect();
+  h.sockets[0].open();
+  h.connection.resume();
+  h.sockets[0].onmessage!({ data: '{"type":"pong"}' });
+  t.mock.timers.tick(10000);
+  assert.equal(h.sockets.length, 1);
+  assert.equal(h.sockets[0].closed, 0);
+  h.connection.send({ type: 'progress_update', position: 20 });
+  assert.equal(JSON.parse(h.sockets[0].sent.at(-1)!).position, 20);
+  h.connection.resume();
+  t.mock.timers.tick(10000);
+  h.connection.resume();
+  assert.equal(h.sockets.length, 2);
+  h.connection.dispose();
+});
 import {
   registerMediaSessionControls,
   updateMediaSessionMetadata,

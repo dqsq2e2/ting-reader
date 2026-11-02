@@ -31,6 +31,19 @@ enum WebDavSyncResponseDisposition {
     Fallback,
 }
 
+/// Everything one RFC 6578 `sync-collection` run needs: the endpoint and
+/// credentials plus the cached snapshot the delta is applied to.
+struct WebDavSyncRequest<'a> {
+    library: &'a crate::db::models::Library,
+    root_url: &'a str,
+    previous_token: &'a str,
+    client: &'a reqwest::Client,
+    username: Option<&'a str>,
+    password: Option<&'a str>,
+    cached_dirs: &'a HashMap<String, LibraryScanState>,
+    cached_files: &'a HashMap<String, LibraryScanState>,
+}
+
 impl LibraryScanner {
     /// List all files in a WebDAV library recursively
     pub(super) async fn list_webdav_files(
@@ -103,16 +116,16 @@ impl LibraryScanner {
                 .find(&library.id, &root_url, "webdav_sync")
                 .await?
             && let Some(synced_files) = self
-                .try_webdav_sync_collection(
+                .try_webdav_sync_collection(WebDavSyncRequest {
                     library,
-                    &root_url,
-                    &sync_state.fingerprint,
-                    &client,
+                    root_url: &root_url,
+                    previous_token: &sync_state.fingerprint,
+                    client: &client,
                     username,
-                    password.as_deref(),
-                    &cached_dirs,
-                    &cached_files,
-                )
+                    password: password.as_deref(),
+                    cached_dirs: &cached_dirs,
+                    cached_files: &cached_files,
+                })
                 .await?
         {
             return Ok(synced_files);
@@ -410,17 +423,9 @@ impl LibraryScanner {
             .collect())
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn try_webdav_sync_collection(
         &self,
-        library: &crate::db::models::Library,
-        root_url: &str,
-        previous_token: &str,
-        client: &reqwest::Client,
-        username: Option<&str>,
-        password: Option<&str>,
-        cached_dirs: &HashMap<String, LibraryScanState>,
-        cached_files: &HashMap<String, LibraryScanState>,
+        request: WebDavSyncRequest<'_>,
     ) -> Result<
         Option<
             Vec<(
@@ -430,6 +435,16 @@ impl LibraryScanner {
             )>,
         >,
     > {
+        let WebDavSyncRequest {
+            library,
+            root_url,
+            previous_token,
+            client,
+            username,
+            password,
+            cached_dirs,
+            cached_files,
+        } = request;
         let mut current_dirs = cached_dirs.clone();
         let mut current_files = cached_files.clone();
         let mut request_token = previous_token.to_string();

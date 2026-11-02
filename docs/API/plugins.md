@@ -288,6 +288,46 @@ Native 包的 `download_url` 可以是平台映射：
 
 查询参数 `event` 可选，返回匹配的事件能力注册项。
 
+## 刮削与书源
+
+以下接口均需要登录。标记 `admin_only` 的插件只对管理员开放。
+
+### GET /api/v1/scraper/sources
+
+返回 `{ "sources": [...] }`。每项含 `id`（插件实例 ID）、`name`、`version`、`enabled`、`book_source`、`auto_scrape`、搜索字段和结果字段。搜索页仅将 `enabled: true` 且 `book_source: true` 的插件列为书源；未声明书源能力的旧刮削插件不变。
+
+### POST /api/v1/scraper/search
+
+```json
+{
+  "source": "example-source@1.0.0",
+  "query": "示例书籍",
+  "page": 1,
+  "page_size": 20
+}
+```
+
+返回 `{ "items": [...], "page": 1, "page_size": 20, "total": null, "has_more": false }`。分页大小以源站实际返回值为准。指定书源搜索时，结果中的 `added_book_id` 为当前用户可访问的已加入书籍 ID，未加入时为 `null`。常规刮削搜索的响应保持不变。
+
+### POST /api/v1/scraper/books
+
+```json
+{
+  "source": "example-source@1.0.0",
+  "book": { "id": "book-1", "url": null }
+}
+```
+
+后端调用书源 `detail`，验证元数据和首批章节后，在同一事务内持久化书籍、已返回章节以及当前用户的访问授权。书籍详情页的章节分页会按需调用 `list_chapters`，并对章节 ID 幂等写入，避免加入书架时一次拉取完整目录。未声明 `list_chapters` 的旧书源仍须在 `detail` 返回完整章节目录。系统自动创建 `source` 托管库，不需要用户创建存储库；该库会正常出现在存储库列表中，但不支持文件夹扫描，管理员可从编辑入口管理和删除其中已加入的书籍。失败时不留下半本书或空托管库。
+
+```json
+{ "book_id": "source-...", "already_added": false }
+```
+
+重复或并发加入不会重复建书；已有书籍返回相同的 `book_id` 和 `already_added: true`，并为当前用户补充该书的授权，不授予整个源库的访问权限。身份取自登录信息，不接受客户端传入用户或库 ID。
+
+加入后继续使用现有书籍详情、章节和 `/api/stream/:chapterId` 接口。服务端在读取音频时调用 `resolve_audio`，携带源站请求头代理媒体并支持 Range，客户端不会拿到源站认证头。源插件停用或卸载时，未缓存的媒体无法重新解析；重新安装相同插件 ID 的兼容版本可继续播放。能力输入输出及当前支持的媒体类型见[书源声明](../plugins/capabilities.md#书源)。
+
 ## HostGateway
 
 ### POST /api/v1/plugin-host/invoke

@@ -231,3 +231,43 @@ async fn invalid_audio_write_keeps_original_and_cleans_worker_staging() {
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 }
+
+#[test]
+fn maps_real_m4b_metadata_onto_book_fields() {
+    let Some(path) = std::env::var_os("TING_TEST_M4B_PATH") else {
+        return;
+    };
+    let mp4 = super::super::mp4::read_metadata(std::path::Path::new(&path)).unwrap();
+    let metadata = audio_metadata_from_mp4(&mp4);
+    assert_eq!(
+        metadata.title.as_deref(),
+        Some("The Worlds I See - Curiosity, Exploration, and Discovery at the Dawn of AI")
+    );
+    assert_eq!(metadata.album.as_deref(), Some("The Worlds I See"));
+    assert_eq!(
+        metadata.genre.as_deref(),
+        Some("Biographies & Memoirs:Professionals & Academics:Science & Technology")
+    );
+    assert_eq!(metadata.publisher.as_deref(), Some("Macmillan Audio"));
+    assert_eq!(metadata.asin.as_deref(), Some("B0BSP3QDZH"));
+    assert_eq!(metadata.language.as_deref(), Some("english"));
+    assert_eq!(metadata.published_date.as_deref(), Some("2023-11-07"));
+    assert_eq!(
+        metadata.author_narrator(),
+        (Some("Fei-Fei Li".into()), Some("Cindy Kay".into()))
+    );
+    assert_eq!(metadata.chapters.len(), 16);
+    assert_eq!(metadata.chapters[0].start_ms, 0);
+    assert_eq!(metadata.chapters[0].end_ms, 38_173);
+    assert_eq!(metadata.duration.round() as i64, 43_863);
+    assert_eq!(metadata.sample_rate, Some(44_100));
+    assert_eq!(metadata.channels, Some(2));
+    assert_eq!(metadata.codec.as_deref(), Some("mp4a"));
+    // The reference metadata reports 28 for this file, but the container's
+    // decoder config and the file size agree on roughly 125 kbps.
+    assert!(
+        metadata.bitrate_kbps.unwrap_or_default() > 50,
+        "{:?}",
+        metadata.bitrate_kbps
+    );
+}

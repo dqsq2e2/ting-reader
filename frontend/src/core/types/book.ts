@@ -14,7 +14,7 @@ export interface Book {
   created_at: string;
   updated_at?: string;
   is_favorite?: boolean;
-  library_type?: 'webdav' | 'local' | 'rss';
+  library_type?: 'webdav' | 'local' | 'rss' | 'source';
   can_write_metadata_files?: boolean;
   skip_intro?: number;
   skip_outro?: number;

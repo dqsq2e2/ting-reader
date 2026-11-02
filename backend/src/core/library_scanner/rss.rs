@@ -460,6 +460,8 @@ impl LibraryScanner {
                     is_extra: 0,
                     hash: Some(chapter_hash),
                     manual_corrected: 0,
+                    start_time: None,
+                    end_time: None,
                     created_at: chrono::Utc::now().to_rfc3339(),
                 };
                 self.chapter_repo.create(&chapter).await?;

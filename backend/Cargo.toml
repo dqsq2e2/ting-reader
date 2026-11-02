@@ -1,12 +1,12 @@
 [package]
 name = "ting_reader"
-version = "2.0.6"
+version = "2.0.7"
 edition = "2024"
 rust-version = "1.93"
 license = "AGPL-3.0-only"
 
 [dependencies]
-ting-plugin-contract = { git = "https://github.com/dqsq2e2/ting-reader-plugin-contract.git", tag = "v2.0.3" }
+ting-plugin-contract = { git = "https://github.com/dqsq2e2/ting-reader-plugin-contract.git", tag = "v2.0.4", version = "2.0.4" }
 reqwest = { version = "0.11", features = ["json", "rustls-tls", "stream"] }
 # HTTP Server
 axum = { version = "0.7", features = ["multipart", "ws"] }

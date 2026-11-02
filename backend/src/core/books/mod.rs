@@ -7,6 +7,7 @@ pub mod metadata;
 pub mod nfo_manager;
 pub mod scraper;
 pub mod service;
+pub mod sources;
 pub mod text_cleaner;
 
 pub use bookmarks::{BookmarkService, CreateBookmark};

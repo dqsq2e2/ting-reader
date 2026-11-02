@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import apiClient from '../../core/api/client';
 import { apiErrorMessage } from '../../core/api/errors';
-import type { Library, ScraperSource } from '../../core/types';
+import type { Book, Library, ScraperSource } from '../../core/types';
 import {
   Plus,
   Database,
@@ -18,7 +18,9 @@ import {
   RotateCcw,
   Rss,
   Globe,
-  Clock3
+  Clock3,
+  BookOpen,
+  X
 } from 'lucide-react';
 import HelpHint from '../../shared/ui/HelpHint';
 import ScraperConfigurator from './ScraperConfigurator';
@@ -101,6 +103,7 @@ const findRootForPath = (path: string, roots: StorageRoot[]) => {
 const libraryTypeLabel = (type: Library['library_type'], t: (key: string) => string) => {
   if (type === 'local') return t('adminLibraries.localStorage');
   if (type === 'rss') return t('adminLibraries.rssSubscription');
+  if (type === 'source') return t('adminLibraries.onlineSource');
   return 'WebDAV';
 };
 
@@ -110,6 +113,9 @@ const libraryTypeBadgeClass = (type: Library['library_type']) => {
   }
   if (type === 'rss') {
     return 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400';
+  }
+  if (type === 'source') {
+    return 'bg-violet-100 text-violet-600 dark:bg-violet-900/20 dark:text-violet-400';
   }
   return 'bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400';
 };
@@ -133,6 +139,10 @@ const AdminLibraries: React.FC = () => {
   const [testingConnection, setTestingConnection] = useState(false);
   const [savingLibrary, setSavingLibrary] = useState(false);
   const [deletingLibraryId, setDeletingLibraryId] = useState<string | null>(null);
+  const [sourceBooksLibrary, setSourceBooksLibrary] = useState<Library | null>(null);
+  const [sourceBooks, setSourceBooks] = useState<Book[]>([]);
+  const [loadingSourceBooks, setLoadingSourceBooks] = useState(false);
+  const [deletingSourceBookId, setDeletingSourceBookId] = useState<string | null>(null);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -230,6 +240,11 @@ const AdminLibraries: React.FC = () => {
   }, [isModalOpen, formData.type, currentBrowsePath, selectedStorageRoot]);
 
   const openEditModal = (lib: Library) => {
+    if (lib.library_type === 'source') {
+      void openSourceBooks(lib);
+      return;
+    }
+
     setEditingId(lib.id);
     setCurrentBrowsePath('');
     setSelectedStorageRoot('');
@@ -262,6 +277,43 @@ const AdminLibraries: React.FC = () => {
       scraper_config: scraperConfigStr
     });
     setIsModalOpen(true);
+  };
+
+  const openSourceBooks = async (lib: Library) => {
+    setSourceBooksLibrary(lib);
+    setSourceBooks([]);
+    setLoadingSourceBooks(true);
+    try {
+      const response = await apiClient.get('/api/books', {
+        params: { library_id: lib.id },
+      });
+      setSourceBooks(response.data as Book[]);
+    } catch (error) {
+      setSourceBooksLibrary(null);
+      alert(apiErrorMessage(error, t('adminLibraries.sourceBooksLoadFailed')));
+    } finally {
+      setLoadingSourceBooks(false);
+    }
+  };
+
+  const deleteSourceBook = async (book: Book) => {
+    if (deletingSourceBookId) return;
+    if (!window.confirm(t('adminLibraries.sourceBookDeleteConfirm', { title: book.title }))) {
+      return;
+    }
+
+    setDeletingSourceBookId(book.id);
+    try {
+      await apiClient.delete(`/api/books/${book.id}`, {
+        params: { delete_files: false },
+      });
+      setSourceBooks((current) => current.filter((item) => item.id !== book.id));
+      await fetchLibraries();
+    } catch (error) {
+      alert(apiErrorMessage(error, t('adminLibraries.sourceBookDeleteFailed')));
+    } finally {
+      setDeletingSourceBookId(null);
+    }
   };
 
   const handleTestConnection = async () => {
@@ -461,7 +513,7 @@ const AdminLibraries: React.FC = () => {
           <div key={lib.id} className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-100 dark:border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="flex items-center gap-4 min-w-0 w-full md:w-auto">
               <div className="w-14 h-14 rounded-xl bg-primary-50 dark:bg-primary-900/20 text-primary-600 flex items-center justify-center shrink-0">
-                {lib.library_type === 'rss' ? <Rss size={28} /> : <Database size={28} />}
+                {lib.library_type === 'rss' ? <Rss size={28} /> : lib.library_type === 'source' ? <BookOpen size={28} /> : <Database size={28} />}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -471,13 +523,13 @@ const AdminLibraries: React.FC = () => {
                   </span>
                 </div>
                 <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 mt-1">
-                  {lib.library_type !== 'local' && (
+                  {lib.library_type !== 'local' && lib.library_type !== 'source' && (
                     <div className="flex items-center gap-1.5 text-sm text-slate-500 min-w-0">
                       <Globe size={14} className="shrink-0" />
                       <span className="truncate max-w-[180px] sm:max-w-[240px] md:max-w-[300px]" title={lib.url}>{lib.url}</span>
                     </div>
                   )}
-                  {lib.library_type !== 'rss' && (
+                  {lib.library_type !== 'rss' && lib.library_type !== 'source' && (
                     <div className="flex items-center gap-1.5 text-sm text-slate-500 min-w-0">
                       <Folder size={14} className="shrink-0" />
                       <span className="truncate max-w-[180px] sm:max-w-[240px] md:max-w-[300px]" title={lib.library_type === 'local' ? lib.url : lib.root_path}>
@@ -485,47 +537,70 @@ const AdminLibraries: React.FC = () => {
                       </span>
                     </div>
                   )}
+                  {lib.library_type === 'source' && (
+                    <span className="text-sm text-slate-500">{t('adminLibraries.sourceLibraryHint')}</span>
+                  )}
                 </div>
               </div>
             </div>
 
             <div className="relative flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setSyncMenuOpenId(syncMenuOpenId === lib.id ? null : lib.id)}
-                disabled={scanning === lib.id}
-                className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-primary-50 dark:hover:bg-primary-900/20 text-slate-600 dark:text-slate-400 hover:text-primary-600 rounded-xl font-bold transition-all disabled:opacity-50"
-              >
-                {scanning === lib.id ? (
-                  <Loader2 size={18} className="animate-spin" />
-                ) : (
-                  <RefreshCw size={18} />
-                )}
-                {t('adminLibraries.sync')}
-                <ChevronDown size={16} className={`transition-transform ${syncMenuOpenId === lib.id ? 'rotate-180' : ''}`} />
-              </button>
-              {syncMenuOpenId === lib.id && (
-                <div className="absolute right-0 top-full mt-2 w-44 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl z-20 overflow-hidden">
+              {lib.library_type === 'source' ? (
+                <button
+                  type="button"
+                  onClick={() => void handleScan(lib.id)}
+                  disabled={scanning === lib.id}
+                  title={t('adminLibraries.sync')}
+                  className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-primary-50 dark:hover:bg-primary-900/20 text-slate-600 dark:text-slate-400 hover:text-primary-600 rounded-xl font-bold transition-all disabled:opacity-50"
+                >
+                  {scanning === lib.id ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <RefreshCw size={18} />
+                  )}
+                  {t('adminLibraries.sync')}
+                </button>
+              ) : (
+                <>
                   <button
                     type="button"
-                    onClick={() => handleScan(lib.id, 'incremental')}
-                    className="w-full px-4 py-3 text-left text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2"
+                    onClick={() => setSyncMenuOpenId(syncMenuOpenId === lib.id ? null : lib.id)}
+                    disabled={scanning === lib.id}
+                    className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-primary-50 dark:hover:bg-primary-900/20 text-slate-600 dark:text-slate-400 hover:text-primary-600 rounded-xl font-bold transition-all disabled:opacity-50"
                   >
-                    <RefreshCw size={15} />
-                    {t('adminLibraries.incrementalSync')}
+                    {scanning === lib.id ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <RefreshCw size={18} />
+                    )}
+                    {t('adminLibraries.sync')}
+                    <ChevronDown size={16} className={`transition-transform ${syncMenuOpenId === lib.id ? 'rotate-180' : ''}`} />
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => handleScan(lib.id, 'full')}
-                    className="w-full px-4 py-3 text-left text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2"
-                  >
-                    <RotateCcw size={15} />
-                    {t('adminLibraries.fullSync')}
-                  </button>
-                </div>
+                  {syncMenuOpenId === lib.id && (
+                    <div className="absolute right-0 top-full mt-2 w-44 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl z-20 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => handleScan(lib.id, 'incremental')}
+                        className="w-full px-4 py-3 text-left text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2"
+                      >
+                        <RefreshCw size={15} />
+                        {t('adminLibraries.incrementalSync')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleScan(lib.id, 'full')}
+                        className="w-full px-4 py-3 text-left text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2"
+                      >
+                        <RotateCcw size={15} />
+                        {t('adminLibraries.fullSync')}
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
               <button
                 onClick={() => openEditModal(lib)}
+                title={t('adminLibraries.editLibrary')}
                 className="p-2.5 text-slate-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-xl transition-all"
               >
                 <Edit size={20} />
@@ -574,6 +649,83 @@ const AdminLibraries: React.FC = () => {
                 {deletingLibraryId ? <Loader2 size={18} className="animate-spin" /> : null}
                 {t('adminLibraries.confirmDelete')}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sourceBooksLibrary && (
+        <div className="fixed inset-0 z-[210] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            onClick={() => !deletingSourceBookId && setSourceBooksLibrary(null)}
+          />
+          <div className="relative w-full max-w-2xl max-h-[85vh] overflow-hidden rounded-3xl bg-white shadow-2xl dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5 dark:border-slate-800">
+              <div className="min-w-0">
+                <h2 className="truncate text-xl font-bold dark:text-white">
+                  {t('adminLibraries.editLibrary')}
+                </h2>
+                <p className="mt-1 truncate text-sm text-slate-500">
+                  {sourceBooksLibrary.name}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => !deletingSourceBookId && setSourceBooksLibrary(null)}
+                className="rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                aria-label={t('common.cancel')}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="max-h-[calc(85vh-88px)] overflow-y-auto p-6">
+              {loadingSourceBooks ? (
+                <div className="flex items-center justify-center py-16 text-slate-400">
+                  <Loader2 size={24} className="mr-3 animate-spin" />
+                  {t('adminLibraries.sourceBooksLoading')}
+                </div>
+              ) : sourceBooks.length === 0 ? (
+                <div className="py-16 text-center text-sm text-slate-500">
+                  {t('adminLibraries.sourceBooksEmpty')}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {sourceBooks.map((book) => (
+                    <div
+                      key={book.id}
+                      className="flex items-center gap-4 rounded-2xl border border-slate-100 p-4 dark:border-slate-800"
+                    >
+                      <div className="h-14 w-10 shrink-0 overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800">
+                        {book.cover_url ? (
+                          <img src={book.cover_url} alt="" className="h-full w-full object-cover" />
+                        ) : (
+                          <BookOpen className="m-auto mt-4 text-slate-400" size={18} />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-semibold dark:text-white">{book.title}</p>
+                        <p className="mt-1 truncate text-sm text-slate-500">
+                          {[book.author, book.narrator].filter(Boolean).join(' / ') || t('adminLibraries.unknownBookCredit')}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void deleteSourceBook(book)}
+                        disabled={deletingSourceBookId === book.id}
+                        className="shrink-0 rounded-xl p-2.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-900/20"
+                        title={t('adminLibraries.deleteSourceBook')}
+                      >
+                        {deletingSourceBookId === book.id ? (
+                          <Loader2 size={18} className="animate-spin" />
+                        ) : (
+                          <Trash2 size={18} />
+                        )}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

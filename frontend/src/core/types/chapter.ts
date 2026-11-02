@@ -6,6 +6,10 @@ export interface Chapter {
   duration: number;
   chapter_index: number;
   is_extra?: number;
+  /** Milliseconds of the audio file that this chapter starts at (embedded chapter tables). */
+  start_time?: number | null;
+  /** Milliseconds of the audio file that this chapter ends at. */
+  end_time?: number | null;
   progress_position?: number;
   progress_updated_at?: string;
 }

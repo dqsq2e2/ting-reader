@@ -4,7 +4,7 @@
 
 | kind | 声明字段 | 固定操作 |
 | --- | --- | --- |
-| `metadata_provider` | `operations`、`search_fields`、`result_fields`、可选 `filters_schema`、`auto_scrape` | `search`，可选 `detail`、`list_chapters`、`chapter_detail`、`resolve_audio`、`fetch_cover` |
+| `metadata_provider` | `operations`、`search_fields`、`result_fields`、可选 `filters_schema`、`auto_scrape`、`book_source` | `search`，可选 `detail`、`list_chapters`、`chapter_detail`、`resolve_audio`、`fetch_cover`；书源必须实现 `search/detail/resolve_audio` |
 | `format_handler` | `extensions`、`operations` | `probe`、`extract_metadata`；可选 `get_metadata_read_size`、`write_metadata` |
 | `tool_provider` | `invoke: invokeTool`、`tools`，每项有名称、双向 schema、说明、`side_effects` | `invokeTool` |
 | `http_route` | `route.method/path/auth` | `handle` |
@@ -68,6 +68,59 @@
 | `chapter_titles` | 字符串数组 | 未知时为 `[]`，最多 500 项，每项非空且最多 512 字节 |
 
 JavaScript 使用 `publishSearch`，Rust 使用 `publish_search_for_request` 整理解析结果。对外结果包含上表全部字段，可空字段显式为 `null`，未知数组为 `[]`；平台内部的额外字段保留在插件内部。实现示例见[开发指南](./plugin-dev.md#4-实现业务)。
+
+## 书源
+
+普通刮削插件为已有音频补充元数据。将同一个 `metadata_provider` 声明为书源后，用户还可以在搜索页选择它，搜索远程书籍并加入书架，无需提前准备本地音频。省略 `book_source` 或设置为 `false` 时保持原有行为，无需修改旧插件。
+
+```yaml
+capabilities:
+  - id: metadata.search
+    kind: metadata_provider
+    book_source: true
+    operations: [search, detail, list_chapters, resolve_audio]
+    search_fields:
+      - key: title
+        label: { zh: 书名, en: Title }
+        required: true
+        type: text
+    result_fields:
+      - key: title
+        label: { zh: 书名, en: Title }
+permissions:
+  - type: network_access
+    domain: books.example.com
+  - type: network_access
+    domain: media.example.com
+```
+
+书源仍使用现有插件运行时和能力调度，不引入其他书源格式的适配器。搜索、详情和媒体域名均须声明网络权限。一个插件声明多个元数据能力时，现有刮削入口使用第一项，`book_source` 必须声明在这一项上。
+
+- `search`：请求及 `SearchPage` 与上文相同。每本可加入的书必须提供稳定的 `id`。
+- `detail`：输入为 `{ "id": "book-1", "url": null }`。只有书源返回 `SourceBookDetail`，即 `{ "metadata": ScraperResult, "chapters_complete": boolean, "chapters": ChapterItem[] }`；普通刮削器的 `detail` 仍返回 `ScraperResult`。`chapters_complete` 缺省为 `true`，兼容旧书源；声明 `list_chapters` 的书源可以设为 `false`，只返回首批章节。
+- `list_chapters`：输入为 `{ "source": { "id": "book-1", "url": null }, "page": 1, "page_size": 100 }`，返回 `{ "items": ChapterItem[], "page": 1, "page_size": 100, "total": number | null, "has_more": boolean | null }`。宿主只在书籍详情需要对应页时调用并缓存该页，避免加入书架时拉取完整目录。
+- `resolve_audio`：输入为 `{ "chapter_id": "chapter-1" }`，输出为下面的媒体描述。播放、下载、缓存或转码需要读取音频时才解析，不将临时地址和认证头保存到书籍记录。
+
+`metadata` 使用上文完整元数据字段，`id` 必须稳定、非空且不超过 512 字节，并与请求的 ID 一致。`chapters_complete: true` 时，`chapters` 为完整目录，包含 1–20000 项；为 `false` 时允许为空或只包含首批章节，但能力声明必须同时包含 `list_chapters`。每项包括 `id`、`title`、`index`、`duration` 和 `source_url`，未知时长和来源地址填 `null`。章节 ID、标题非空且最多 512 字节，ID 和排序索引在同一本书中唯一，索引、秒数不超过 `2147483647`。
+
+```json
+{
+  "type": "proxy",
+  "url": "https://media.example.com/audio/one.mp3",
+  "headers": { "Referer": "https://books.example.com/" },
+  "expires_at": null,
+  "seekable": true,
+  "mime": "audio/mpeg"
+}
+```
+
+这些是成功信封的 `data`，仍需通过 SDK `success(data)` 或 Rust 的对应结果接口返回。
+
+`headers` 可省略，最多 32 项；名称最多 128 字节、值最多 8192 字节，不接受换行、传输控制头或覆盖 `Host`、`Range`、`Accept-Encoding`。`expires_at` 为 RFC 3339 时间或 `null`，已过期地址会被拒绝。媒体代理始终在服务端携带这些头，并核对网络权限、DNS 解析地址及每次重定向，跨源跳转移除认证头和 Cookie。
+
+当前书源播放入口支持绝对 HTTP(S) 直链音频，`type` 为 `direct` 或 `proxy`，两者均经服务端代理，支持 Range 和已有 MP3/HLS 输出转码。这里的 HLS 输出转码不同于源站返回 HLS 播放列表：源站 `.m3u8`、`type: hls` 和相对 Host 路由暂不支持，会明确报错。插件不能将播放列表伪装为直链音频。
+
+加入书架使用现有书籍、章节及权限表。系统按稳定插件 ID 自动创建托管库，类型为 `source`，绑定信息保存在 `scraper_config`。在线托管库会像其他存储库一样出现在书架筛选和存储库管理中，但不参与文件夹扫描；在管理页的编辑入口可以查看并删除该在线库中已加入的书籍。同一源书按「插件 ID + 源书 ID」去重，插件升级不产生重复书籍；普通用户只获得自己加入的书的访问权限。
 
 ## 扩展格式
 

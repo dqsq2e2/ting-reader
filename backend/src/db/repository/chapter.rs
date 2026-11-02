@@ -18,7 +18,24 @@ fn map_chapter_row(row: &Row<'_>) -> rusqlite::Result<Chapter> {
         hash: row.get(7)?,
         created_at: row.get(8)?,
         manual_corrected: row.get(9).unwrap_or(0),
+        start_time: row.get(10).unwrap_or(None),
+        end_time: row.get(11).unwrap_or(None),
     })
+}
+
+const CHAPTER_COLUMNS: &str = "id, book_id, title, path, duration, chapter_index, is_extra, hash, created_at, manual_corrected, start_time, end_time";
+
+pub(super) fn insert_chapter(conn: &rusqlite::Connection, chapter: &Chapter) -> Result<()> {
+    conn.execute(
+        "INSERT INTO chapters (id, book_id, title, path, duration, chapter_index, is_extra, hash, manual_corrected, start_time, end_time)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        rusqlite::params![
+            chapter.id, chapter.book_id, chapter.title, chapter.path, chapter.duration,
+            chapter.chapter_index, chapter.is_extra, chapter.hash, chapter.manual_corrected,
+            chapter.start_time, chapter.end_time,
+        ],
+    )?;
+    Ok(())
 }
 
 /// Repository for Chapter entities
@@ -33,6 +50,11 @@ pub struct ChapterCounts {
     pub extra: usize,
     /// Chapters with no usable duration, excluding URL-reference STRM files.
     pub missing_duration: usize,
+    /// Distinct audio files referenced by the book, used to recognise
+    /// single-file audiobooks split into embedded chapters.
+    pub path_count: usize,
+    /// Chapters that carry an explicit start offset inside their file.
+    pub segmented: usize,
 }
 
 impl ChapterRepository {
@@ -44,33 +66,40 @@ impl ChapterRepository {
     /// Find chapters by book ID
     pub async fn find_by_book(&self, book_id: &str) -> Result<Vec<Chapter>> {
         let book_id = book_id.to_string();
-        self.db.execute(move |conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, book_id, title, path, duration, chapter_index, is_extra, hash, created_at, manual_corrected \
+        self.db
+            .execute(move |conn| {
+                let mut stmt = conn
+                    .prepare(&format!(
+                        "SELECT {CHAPTER_COLUMNS} \
                  FROM chapters WHERE book_id = ? ORDER BY is_extra ASC, chapter_index ASC"
-            ).map_err(TingError::DatabaseError)?;
+                    ))
+                    .map_err(TingError::DatabaseError)?;
 
-            let chapters = stmt.query_map([&book_id], map_chapter_row)
-            .map_err(TingError::DatabaseError)?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(TingError::DatabaseError)?;
+                let chapters = stmt
+                    .query_map([&book_id], map_chapter_row)
+                    .map_err(TingError::DatabaseError)?
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(TingError::DatabaseError)?;
 
-            Ok(chapters)
-        }).await
+                Ok(chapters)
+            })
+            .await
     }
 
     /// Find a chapter by its hash
     pub async fn find_by_hash(&self, hash: &str) -> Result<Option<Chapter>> {
         let hash = hash.to_string();
-        self.db.execute(move |conn| {
-            conn.query_row(
-                "SELECT id, book_id, title, path, duration, chapter_index, is_extra, hash, created_at, manual_corrected \
-                 FROM chapters WHERE hash = ?",
-                [&hash],
-                map_chapter_row
-            ).optional()
-            .map_err(TingError::DatabaseError)
-        }).await
+        self.db
+            .execute(move |conn| {
+                conn.query_row(
+                    &format!("SELECT {CHAPTER_COLUMNS} FROM chapters WHERE hash = ?"),
+                    [&hash],
+                    map_chapter_row,
+                )
+                .optional()
+                .map_err(TingError::DatabaseError)
+            })
+            .await
     }
 
     /// Delete chapters by book ID
@@ -97,7 +126,7 @@ impl ChapterRepository {
         self.db.execute(move |conn| {
             let mut stmt = conn.prepare(
                 "SELECT c.id, c.book_id, c.title, c.path, c.duration, c.chapter_index, c.is_extra, c.hash, c.created_at, \
-                 p.position, p.updated_at, c.manual_corrected \
+                 p.position, p.updated_at, c.manual_corrected, c.start_time, c.end_time \
                  FROM chapters c \
                  LEFT JOIN progress p ON c.id = p.chapter_id AND p.user_id = ? \
                  WHERE c.book_id = ? \
@@ -116,6 +145,8 @@ impl ChapterRepository {
                     hash: row.get(7)?,
                     created_at: row.get(8)?,
                     manual_corrected: row.get(11).unwrap_or(0),
+                    start_time: row.get(12).unwrap_or(None),
+                    end_time: row.get(13).unwrap_or(None),
                 };
                 let progress_position: Option<f64> = row.get(9)?;
                 let progress_updated_at: Option<String> = row.get(10)?;
@@ -134,17 +165,35 @@ impl ChapterRepository {
         let book_id = book_id.to_string();
         self.db
             .execute(move |conn| {
-                let (total, main, extra, missing_duration): (i64, i64, i64, i64) = conn
+                let (total, main, extra, missing_duration, path_count, segmented): (
+                    i64,
+                    i64,
+                    i64,
+                    i64,
+                    i64,
+                    i64,
+                ) = conn
                     .query_row(
                         "SELECT \
                          COUNT(*) AS total, \
                          COALESCE(SUM(CASE WHEN is_extra = 0 THEN 1 ELSE 0 END), 0) AS main, \
                          COALESCE(SUM(CASE WHEN is_extra != 0 THEN 1 ELSE 0 END), 0) AS extra, \
                          COALESCE(SUM(CASE WHEN COALESCE(duration, 0) <= 0 \
-                             AND LOWER(path) NOT LIKE '%.strm' THEN 1 ELSE 0 END), 0) AS missing_duration \
+                             AND LOWER(path) NOT LIKE '%.strm' THEN 1 ELSE 0 END), 0) AS missing_duration, \
+                         COUNT(DISTINCT path) AS path_count, \
+                         COALESCE(SUM(CASE WHEN start_time IS NOT NULL THEN 1 ELSE 0 END), 0) AS segmented \
                          FROM chapters WHERE book_id = ?",
                         [&book_id],
-                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                        |row| {
+                            Ok((
+                                row.get(0)?,
+                                row.get(1)?,
+                                row.get(2)?,
+                                row.get(3)?,
+                                row.get(4)?,
+                                row.get(5)?,
+                            ))
+                        },
                     )
                     .map_err(TingError::DatabaseError)?;
 
@@ -153,6 +202,8 @@ impl ChapterRepository {
                     main: main.max(0) as usize,
                     extra: extra.max(0) as usize,
                     missing_duration: missing_duration.max(0) as usize,
+                    path_count: path_count.max(0) as usize,
+                    segmented: segmented.max(0) as usize,
                 })
             })
             .await
@@ -175,7 +226,9 @@ impl ChapterRepository {
                                 COALESCE(SUM(CASE WHEN c.is_extra = 0 THEN 1 ELSE 0 END), 0) AS main,
                                 COALESCE(SUM(CASE WHEN c.is_extra != 0 THEN 1 ELSE 0 END), 0) AS extra,
                                 COALESCE(SUM(CASE WHEN COALESCE(c.duration, 0) <= 0
-                                    AND LOWER(c.path) NOT LIKE '%.strm' THEN 1 ELSE 0 END), 0) AS missing_duration
+                                    AND LOWER(c.path) NOT LIKE '%.strm' THEN 1 ELSE 0 END), 0) AS missing_duration,
+                                COUNT(DISTINCT c.path) AS path_count,
+                                COALESCE(SUM(CASE WHEN c.start_time IS NOT NULL THEN 1 ELSE 0 END), 0) AS segmented
                            FROM chapters c
                            JOIN books b ON b.id = c.book_id
                           WHERE b.library_id = ?
@@ -189,6 +242,8 @@ impl ChapterRepository {
                         let main: i64 = row.get(2)?;
                         let extra: i64 = row.get(3)?;
                         let missing_duration: i64 = row.get(4)?;
+                        let path_count: i64 = row.get(5)?;
+                        let segmented: i64 = row.get(6)?;
                         Ok((
                             row.get::<_, String>(0)?,
                             ChapterCounts {
@@ -196,6 +251,8 @@ impl ChapterRepository {
                                 main: main.max(0) as usize,
                                 extra: extra.max(0) as usize,
                                 missing_duration: missing_duration.max(0) as usize,
+                                path_count: path_count.max(0) as usize,
+                                segmented: segmented.max(0) as usize,
                             },
                         ))
                     })
@@ -278,7 +335,7 @@ impl ChapterRepository {
         self.db.execute(move |conn| {
             let sql = format!(
                 "SELECT c.id, c.book_id, c.title, c.path, c.duration, c.chapter_index, c.is_extra, c.hash, c.created_at, \
-                 p.position, p.updated_at, c.manual_corrected \
+                 p.position, p.updated_at, c.manual_corrected, c.start_time, c.end_time \
                  FROM chapters c \
                  LEFT JOIN progress p ON c.id = p.chapter_id AND p.user_id = ?1 \
                  WHERE c.book_id = ?2 AND (?3 IS NULL OR c.is_extra = ?3) \
@@ -308,6 +365,8 @@ impl ChapterRepository {
                             hash: row.get(7)?,
                             created_at: row.get(8)?,
                             manual_corrected: row.get(11).unwrap_or(0),
+                            start_time: row.get(12).unwrap_or(None),
+                            end_time: row.get(13).unwrap_or(None),
                         };
                         let progress_position: Option<f64> = row.get(9)?;
                         let progress_updated_at: Option<String> = row.get(10)?;
@@ -328,53 +387,44 @@ impl ChapterRepository {
 impl Repository<Chapter> for ChapterRepository {
     async fn find_by_id(&self, id: &str) -> Result<Option<Chapter>> {
         let id = id.to_string();
-        self.db.execute(move |conn| {
-            conn.query_row(
-                "SELECT id, book_id, title, path, duration, chapter_index, is_extra, hash, created_at, manual_corrected \
-                 FROM chapters WHERE id = ?",
-                [&id],
-                map_chapter_row
-            ).optional()
-            .map_err(TingError::DatabaseError)
-        }).await
+        self.db
+            .execute(move |conn| {
+                conn.query_row(
+                    &format!("SELECT {CHAPTER_COLUMNS} FROM chapters WHERE id = ?"),
+                    [&id],
+                    map_chapter_row,
+                )
+                .optional()
+                .map_err(TingError::DatabaseError)
+            })
+            .await
     }
 
     async fn find_all(&self) -> Result<Vec<Chapter>> {
-        self.db.execute(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, book_id, title, path, duration, chapter_index, is_extra, hash, created_at, manual_corrected \
-                 FROM chapters ORDER BY book_id, chapter_index ASC"
-            ).map_err(TingError::DatabaseError)?;
+        self.db
+            .execute(|conn| {
+                let mut stmt = conn
+                    .prepare(&format!(
+                        "SELECT {CHAPTER_COLUMNS} FROM chapters ORDER BY book_id, chapter_index ASC"
+                    ))
+                    .map_err(TingError::DatabaseError)?;
 
-            let chapters = stmt.query_map([], map_chapter_row)
-            .map_err(TingError::DatabaseError)?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(TingError::DatabaseError)?;
+                let chapters = stmt
+                    .query_map([], map_chapter_row)
+                    .map_err(TingError::DatabaseError)?
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(TingError::DatabaseError)?;
 
-            Ok(chapters)
-        }).await
+                Ok(chapters)
+            })
+            .await
     }
 
     async fn create(&self, chapter: &Chapter) -> Result<()> {
         let chapter = chapter.clone();
-        self.db.execute(move |conn| {
-            conn.execute(
-                "INSERT INTO chapters (id, book_id, title, path, duration, chapter_index, is_extra, hash, manual_corrected) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                rusqlite::params![
-                    &chapter.id,
-                    &chapter.book_id,
-                    &chapter.title,
-                    &chapter.path,
-                    chapter.duration,
-                    chapter.chapter_index,
-                    chapter.is_extra,
-                    &chapter.hash,
-                    chapter.manual_corrected,
-                ],
-            ).map_err(TingError::DatabaseError)?;
-            Ok(())
-        }).await
+        self.db
+            .execute(move |conn| insert_chapter(conn, &chapter))
+            .await
     }
 
     async fn update(&self, chapter: &Chapter) -> Result<()> {
@@ -383,7 +433,7 @@ impl Repository<Chapter> for ChapterRepository {
             .execute(move |conn| {
                 conn.execute(
                     "UPDATE chapters SET book_id = ?, title = ?, path = ?, duration = ?, \
-                 chapter_index = ?, is_extra = ?, hash = ?, manual_corrected = ? WHERE id = ?",
+                 chapter_index = ?, is_extra = ?, hash = ?, manual_corrected = ?, start_time = ?, end_time = ? WHERE id = ?",
                     rusqlite::params![
                         &chapter.book_id,
                         &chapter.title,
@@ -393,6 +443,8 @@ impl Repository<Chapter> for ChapterRepository {
                         chapter.is_extra,
                         &chapter.hash,
                         chapter.manual_corrected,
+                        chapter.start_time,
+                        chapter.end_time,
                         &chapter.id,
                     ],
                 )

@@ -20,6 +20,8 @@ fn db_chapter(id: &str, path: &str, title: &str, duration: i32) -> Chapter {
         is_extra: 0,
         hash: None,
         manual_corrected: 0,
+        start_time: None,
+        end_time: None,
         created_at: String::new(),
     }
 }

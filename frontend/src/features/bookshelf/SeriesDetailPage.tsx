@@ -44,7 +44,7 @@ const SeriesDetailPage: React.FC = () => {
   const operationsRef = useRef<HTMLDivElement>(null);
   const requestVersion = useRef(0);
   const pageVersion = useRef(0);
-  const { setIsSeriesEditing } = usePlayerStore();
+  const setIsSeriesEditing = usePlayerStore((state) => state.setIsSeriesEditing);
   
   // Filter & Sort state
   const [sortBy, setSortBy] = useState<SeriesSortBy>('default');

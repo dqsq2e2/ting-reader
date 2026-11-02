@@ -200,6 +200,12 @@ pub struct ChapterResponse {
     pub chapter_index: Option<i32>,
     pub is_extra: i32,
     pub created_at: String,
+    /// Milliseconds inside `path` for chapters read from an embedded chapter
+    /// table. `None` means the chapter plays the whole file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_time: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_time: Option<i64>,
     pub progress_position: Option<f64>,
     pub progress_updated_at: Option<String>,
 }
@@ -215,6 +221,8 @@ impl From<crate::db::models::Chapter> for ChapterResponse {
             chapter_index: chapter.chapter_index,
             is_extra: chapter.is_extra,
             created_at: chapter.created_at,
+            start_time: chapter.start_time,
+            end_time: chapter.end_time,
             progress_position: None,
             progress_updated_at: None,
         }

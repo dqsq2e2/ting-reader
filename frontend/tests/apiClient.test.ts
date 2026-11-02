@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { SavedSessionRecovery, type SessionSnapshot } from '../src/core/api/sessionRecovery.ts';
 import { afterEach, test } from 'node:test';
 import axios, { AxiosHeaders, type AxiosAdapter, type InternalAxiosRequestConfig } from 'axios';
 import { BookOperations, readChapterGroupOrders } from '../src/core/api/books.ts';
@@ -6,6 +7,102 @@ import type { Book } from '../src/core/types/index.ts';
 import { createSingleFlightAdapter } from '../src/core/api/mutations.ts';
 import { getGatewayBasePath, getRuntimeAssetUrl, getRuntimePath, getRuntimeUrl } from '../src/core/utils/runtimeUrl.ts';
 import { apiErrorCode, apiErrorMessage, apiErrorPayload, ApiRequestError, readApiError } from '../src/core/api/errors.ts';
+
+function sessionHarness() {
+  const user = { id: 'listener', username: 'Reader' };
+  let current: SessionSnapshot | null = {
+    revision: 1, token: 'expired', userId: user.id, username: user.username, server: 'https://reader.test',
+  };
+  let credentials = { username: user.username, password: 'saved', server: current.server };
+  let requests = 0;
+  let commits = 0;
+  let now = 0;
+  let signal: AbortSignal | undefined;
+  let login = async (): Promise<{ user: typeof user; token: string } | null> => ({ user, token: 'renewed' });
+  const recovery = new SavedSessionRecovery({
+    current: () => current,
+    credentials: () => credentials,
+    login: async (_session, _credentials, requestSignal) => {
+      requests++;
+      signal = requestSignal;
+      return login();
+    },
+    commit: (_user, token) => {
+      commits++;
+      current = current ? { ...current, token } : null;
+    },
+    rejected: error => error === 'rejected',
+    now: () => now,
+  });
+  return {
+    user, recovery,
+    get current() { return current; },
+    set current(value: SessionSnapshot | null) { current = value; },
+    get credentials() { return credentials; },
+    set credentials(value: typeof credentials) { credentials = value; },
+    get requests() { return requests; },
+    get commits() { return commits; },
+    get signal() { return signal; },
+    set login(value: typeof login) { login = value; },
+    set now(value: number) { now = value; },
+  };
+}
+
+test('expired sessions share one login and preserve their request lifetime', async () => {
+  const h = sessionHarness();
+  assert.deepEqual(await Promise.all([h.recovery.restore(), h.recovery.restore(), h.recovery.restore()]),
+    ['restored', 'restored', 'restored']);
+  assert.equal(h.requests, 1);
+  assert.equal(h.commits, 1);
+  assert.equal(h.current?.token, 'renewed');
+  assert.equal(h.current?.revision, 1);
+});
+
+test('saved passwords are not sent to another server or another account', async () => {
+  for (const patch of [{ server: 'https://other.test' }, { username: 'Other' }]) {
+    const h = sessionHarness();
+    h.credentials = { ...h.credentials, ...patch };
+    assert.equal(await h.recovery.restore(), 'unavailable');
+    assert.equal(h.requests, 0);
+  }
+});
+
+test('logout and account changes discard late login responses', async () => {
+  for (const logout of [true, false]) {
+    const h = sessionHarness();
+    let finish!: (value: { user: typeof h.user; token: string }) => void;
+    h.login = () => new Promise(resolve => { finish = resolve; });
+    const pending = h.recovery.restore();
+    await Promise.resolve();
+    h.recovery.cancel();
+    assert.equal(h.signal?.aborted, true);
+    h.current = logout ? null : { ...h.current!, revision: 2, userId: 'another' };
+    finish({ user: h.user, token: 'late' });
+    assert.equal(await pending, 'obsolete');
+    assert.equal(h.commits, 0);
+  }
+});
+
+test('transient login errors retain the session and throttle repeated recovery', async () => {
+  const h = sessionHarness();
+  h.login = async () => { throw new Error('network unavailable'); };
+  assert.equal(await h.recovery.restore(), 'transient');
+  assert.equal(await h.recovery.restore(), 'transient');
+  assert.equal(h.requests, 1);
+  assert.equal(h.current?.token, 'expired');
+  h.now = 30001;
+  assert.equal(await h.recovery.restore(), 'transient');
+  assert.equal(h.requests, 2);
+});
+
+test('rejected passwords and mismatched login identities are not restored', async () => {
+  const h = sessionHarness();
+  h.login = async () => { throw 'rejected'; };
+  assert.equal(await h.recovery.restore(), 'unavailable');
+  h.login = async () => ({ user: { ...h.user, id: 'another' }, token: 'wrong' });
+  assert.equal(await h.recovery.restore(), 'unavailable');
+  assert.equal(h.commits, 0);
+});
 
 test('API error parsing retains classification while displaying the server message', () => {
   const error = { response: { data: {

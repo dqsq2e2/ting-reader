@@ -67,7 +67,15 @@ impl TaskQueue {
             }
             TaskPayload::Custom { task_type, data } => match task_type.as_str() {
                 "library_scan" => {
-                    self.handle_library_scan(data, &task.id).await?;
+                    if data
+                        .get("source_sync")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+                    {
+                        self.handle_source_library_sync(data, &task.id).await?;
+                    } else {
+                        self.handle_library_scan(data, &task.id).await?;
+                    }
                 }
                 "write_metadata" => {
                     self.handle_write_metadata(data, &task.id).await?;
@@ -82,6 +90,81 @@ impl TaskQueue {
             }
         }
 
+        Ok(())
+    }
+
+    async fn handle_source_library_sync(
+        &self,
+        data: &serde_json::Value,
+        task_id: &str,
+    ) -> Result<()> {
+        let library_id = data["library_id"].as_str().ok_or_else(|| {
+            TingError::task(
+                TaskErrorKind::Unavailable,
+                "handle_source_library_sync::task",
+                "Missing library_id".to_string(),
+            )
+        })?;
+        let library_repo = self.library_repo.as_ref().ok_or_else(|| {
+            TingError::task(
+                TaskErrorKind::Unavailable,
+                "handle_source_library_sync::task",
+                "Library repository not configured".to_string(),
+            )
+        })?;
+        let book_repo = self.book_repo.as_ref().ok_or_else(|| {
+            TingError::task(
+                TaskErrorKind::Unavailable,
+                "handle_source_library_sync::task",
+                "Book repository not configured".to_string(),
+            )
+        })?;
+        let scraper_service = self.scraper_service.as_ref().ok_or_else(|| {
+            TingError::task(
+                TaskErrorKind::Unavailable,
+                "handle_source_library_sync::task",
+                "Scraper service not configured".to_string(),
+            )
+        })?;
+        let library = library_repo.find_by_id(library_id).await?.ok_or_else(|| {
+            TingError::not_found(
+                LookupErrorKind::Library,
+                "handle_source_library_sync::not_found",
+                format!("Library {} not found", library_id),
+            )
+        })?;
+        if library.library_type != "source" {
+            return Err(TingError::validation(
+                InputErrorKind::UnsupportedValue,
+                "handle_source_library_sync::validation",
+                "Only managed source libraries can use source synchronization".to_string(),
+            ));
+        }
+
+        let updated = scraper_service
+            .sync_source_library(book_repo, &library)
+            .await?;
+        if let Err(error) = self
+            .task_repo
+            .update_progress_key(
+                task_id,
+                "source.library.sync.completed",
+                serde_json::json!({
+                    "library_name": library.name,
+                    "updated": updated,
+                }),
+            )
+            .await
+        {
+            warn!(task_id = %task_id, error = %error, "Failed to update source sync progress");
+        }
+        info!(
+            task_id = %task_id,
+            library_id = %library.id,
+            library_name = %library.name,
+            updated,
+            "Source library synchronization completed"
+        );
         Ok(())
     }
 

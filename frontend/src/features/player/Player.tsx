@@ -35,7 +35,7 @@ import {
   MiniPlayerMobileControls,
 } from "./PlayerControls";
 import {
-  CollapsedPlayerView, ExpandedPlayerHeader, ExpandedCoverAndMeta, MiniPlayerBookInfo,
+  CollapsedPlayerView, ExpandedPlayerHeader, ExpandedCover, ExpandedChapterTitle, MiniPlayerBookInfo,
 } from "./PlayerViews";
 
 const Player: React.FC = () => {
@@ -78,6 +78,7 @@ const Player: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [currentGroupIndex, setCurrentGroupIndex] = useState(0);
   const [activeTab, setActiveTab] = useState<"main" | "extra">("main");
+  const [chapterAscending, setChapterAscending] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const volumeControlRef = useRef<HTMLDivElement>(null);
   const speedControlRef = useRef<HTMLDivElement>(null);
@@ -110,6 +111,12 @@ const Player: React.FC = () => {
   // Determine if we should use dark mode text colors (white/gray) for controls
   // In dark mode, we always want bright white/gray for contrast
   const useDarkControls = isDark;
+
+  const authorName = currentBook?.author?.trim();
+  const narratorName = currentBook?.narrator?.trim();
+  const authorText = [authorName, narratorName]
+    .filter(Boolean)
+    .join(' / ') || t('player.unknownAuthor');
 
   // Sync theme color from current book (stored value preferred, fallback to FAC extraction).
   useThemeColorSync(currentBook);
@@ -236,6 +243,9 @@ const Player: React.FC = () => {
       if (index !== -1) {
         const groupIndex = Math.floor(index / chaptersPerGroup);
         setCurrentGroupIndex(groupIndex);
+        const groupCount = Math.ceil(targetList.length / chaptersPerGroup);
+        // 从第一组进入默认正序；从最后一组（从后往前）进入默认逆序。
+        setChapterAscending(!(groupCount > 1 && groupIndex === groupCount - 1));
 
         setTimeout(() => {
           const chapterEl = document.getElementById(
@@ -264,6 +274,10 @@ const Player: React.FC = () => {
     }
 
     setShowChapters(true);
+  };
+
+  const handleToggleChapterOrder = () => {
+    setChapterAscending((prev) => !prev);
   };
 
   return (
@@ -388,6 +402,7 @@ const Player: React.FC = () => {
                 onNext={nextChapter}
                 onSeekTo={seekToTime}
                 onCollapse={() => setIsCollapsed(true)}
+                onOpenChapterList={openChapterList}
               />
 
               {/* Desktop Extra Controls - Visible on Tablet and Desktop */}
@@ -413,6 +428,7 @@ const Player: React.FC = () => {
                 }
                 onCollapse={() => setIsCollapsed(true)}
                 onExpand={() => setIsExpanded(true)}
+                onOpenChapterList={openChapterList}
               />
             </div>
           )}
@@ -436,21 +452,34 @@ const Player: React.FC = () => {
           }}
         >
           <ExpandedPlayerHeader
-            chapterTitle={currentChapter.title}
-            bookTitle={currentBook?.title}
+            bookTitle={currentBook?.title || currentChapter.title}
+            authorText={authorText}
             onExit={handleExitExpanded}
             onOpenSettings={() => setShowSettings(true)}
           />
 
-          <div className="flex-1 flex flex-col items-center justify-center max-w-[520px] mx-auto w-full gap-5 sm:gap-7">
-            <ExpandedCoverAndMeta
-              book={currentBook}
-              chapterTitle={currentChapter.title}
-              expandedCoverSizeClass={expandedCoverSizeClass}
-              error={error}
-            />
+          <div className="flex-1 flex flex-col items-center justify-center max-w-[520px] mx-auto w-full gap-5 sm:gap-7 min-[700px]:landscape:max-w-[1280px] min-[700px]:landscape:grid min-[700px]:landscape:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] min-[700px]:landscape:items-center min-[700px]:landscape:gap-16 xl:landscape:gap-24">
+            <div className="flex w-full min-w-0 flex-col items-center gap-5 sm:gap-7">
+              <ExpandedCover
+                book={currentBook}
+                expandedCoverSizeClass={expandedCoverSizeClass}
+              />
+              <div className="w-full min-[700px]:landscape:hidden">
+                <ExpandedChapterTitle
+                  chapterTitle={currentChapter.title}
+                  error={error}
+                />
+              </div>
+            </div>
 
             <div className="w-full flex flex-col gap-7 sm:gap-8">
+              <div className="hidden w-full min-[700px]:landscape:block">
+                <ExpandedChapterTitle
+                  chapterTitle={currentChapter.title}
+                  error={error}
+                />
+              </div>
+
               {/* Progress Bar Section */}
               <ExpandedProgressSection
                 currentTime={currentTime}
@@ -518,30 +547,6 @@ const Player: React.FC = () => {
             />
           )}
 
-          {/* Chapter List Drawer */}
-          <ChapterListDrawer
-            show={showChapters}
-            currentBook={currentBook}
-            currentChapter={currentChapter}
-            currentChapters={currentChapters}
-            groups={groups}
-            chaptersPerGroup={chaptersPerGroup}
-            currentGroupIndex={currentGroupIndex}
-            activeTab={activeTab}
-            extraChapters={extraChapters}
-            isPlaying={isPlaying}
-            effectiveThemeColor={effectiveThemeColor}
-            scrollRef={scrollRef}
-            onClose={() => setShowChapters(false)}
-            onSetActiveTab={setActiveTab}
-            onSetCurrentGroupIndex={setCurrentGroupIndex}
-            onScrollGroups={scrollGroups}
-            onPlayChapter={(chapter) =>
-              playChapter(currentBook!, currentChapters, chapter)
-            }
-            formatTime={formatTime}
-            getChapterProgressText={getLocalizedChapterProgressText}
-          />
           {showBookmarks && currentBook && currentChapter && <BookmarkManagerModal
             key={currentBook.id}
             bookId={currentBook.id}
@@ -553,6 +558,31 @@ const Player: React.FC = () => {
           />}
         </div>
       )}
+      <ChapterListDrawer
+        show={showChapters}
+        currentBook={currentBook}
+        currentChapter={currentChapter}
+        currentChapters={currentChapters}
+        groups={groups}
+        chaptersPerGroup={chaptersPerGroup}
+        currentGroupIndex={currentGroupIndex}
+        activeTab={activeTab}
+        extraChapters={extraChapters}
+        isPlaying={isPlaying}
+        chapterAscending={chapterAscending}
+        onToggleOrder={handleToggleChapterOrder}
+        effectiveThemeColor={effectiveThemeColor}
+        scrollRef={scrollRef}
+        onClose={() => setShowChapters(false)}
+        onSetActiveTab={setActiveTab}
+        onSetCurrentGroupIndex={setCurrentGroupIndex}
+        onScrollGroups={scrollGroups}
+        onPlayChapter={(chapter) =>
+          playChapter(currentBook!, currentChapters, chapter)
+        }
+        formatTime={formatTime}
+        getChapterProgressText={getLocalizedChapterProgressText}
+      />
     </div>
   );
 };

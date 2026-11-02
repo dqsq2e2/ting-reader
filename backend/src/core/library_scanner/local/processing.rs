@@ -55,6 +55,7 @@ impl LibraryScanner {
                                     json_chapters: None,
                                     chapter_title_template: None,
                                     chapter_title_overrides: None,
+                                    probe_embedded_chapters: false,
                                 },
                             )
                             .await?;
@@ -115,7 +116,11 @@ impl LibraryScanner {
             {
                 skip_metadata_update = chapter_counts
                     .get(book_id)
-                    .map(|counts| counts.total == files.len() && counts.missing_duration == 0)
+                    .map(|counts| {
+                        counts.path_count == files.len()
+                            && counts.missing_duration == 0
+                            && !embedded_chapters_pending(files, counts)
+                    })
                     .unwrap_or(false);
             }
 
@@ -287,6 +292,7 @@ impl LibraryScanner {
                     } else {
                         Some(chapter_titles.as_slice())
                     },
+                    probe_embedded_chapters: true,
                 },
             )
             .await?;
@@ -374,4 +380,16 @@ impl LibraryScanner {
         hasher.update(path_str.as_bytes());
         format!("{:x}", hasher.finalize())
     }
+}
+
+/// A single-file MP4 whose chapter table has not been read yet must be probed
+/// once even when the file itself is unchanged (for example after upgrading
+/// from a version that stored one chapter per file).
+pub(super) fn embedded_chapters_pending(
+    files: &[PathBuf],
+    counts: &crate::db::repository::chapter::ChapterCounts,
+) -> bool {
+    files.len() == 1
+        && crate::core::audio::mp4::is_mp4_family_extension(&files[0])
+        && counts.segmented < counts.total
 }

@@ -16,6 +16,7 @@ pub(crate) const MAX_COVER_BYTES: usize = 10 * 1024 * 1024;
 #[derive(Clone)]
 pub(crate) struct AudioInput {
     source: OsString,
+    local_path: Option<PathBuf>,
     authorization: Option<String>,
 }
 
@@ -23,6 +24,7 @@ impl AudioInput {
     pub(crate) fn local(path: &Path) -> Self {
         Self {
             source: path.as_os_str().into(),
+            local_path: Some(path.to_path_buf()),
             authorization: None,
         }
     }
@@ -30,6 +32,7 @@ impl AudioInput {
     pub(crate) fn remote(url: url::Url, authorization: Option<String>) -> Self {
         Self {
             source: url.to_string().into(),
+            local_path: None,
             authorization,
         }
     }
@@ -42,6 +45,14 @@ impl AudioInput {
     }
 }
 
+/// One authored chapter inside an audio file. Times are milliseconds.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct AudioChapter {
+    pub(crate) title: String,
+    pub(crate) start_ms: i64,
+    pub(crate) end_ms: i64,
+}
+
 #[derive(Debug, Default, Clone)]
 pub(crate) struct AudioFileMetadata {
     pub(crate) title: Option<String>,
@@ -51,8 +62,21 @@ pub(crate) struct AudioFileMetadata {
     pub(crate) composer: Option<String>,
     pub(crate) genre: Option<String>,
     pub(crate) description: Option<String>,
+    pub(crate) subtitle: Option<String>,
+    pub(crate) publisher: Option<String>,
+    pub(crate) published_date: Option<String>,
+    pub(crate) language: Option<String>,
+    pub(crate) asin: Option<String>,
+    pub(crate) isbn: Option<String>,
+    pub(crate) explicit: bool,
+    pub(crate) codec: Option<String>,
+    pub(crate) bit_depth: Option<u16>,
+    pub(crate) bitrate_kbps: Option<u32>,
+    pub(crate) sample_rate: Option<u32>,
+    pub(crate) channels: Option<u16>,
     pub(crate) duration: f64,
     pub(crate) cover_url: Option<String>,
+    pub(crate) chapters: Vec<AudioChapter>,
 }
 
 impl AudioFileMetadata {
@@ -97,11 +121,21 @@ struct ProbeStream {
 }
 
 #[derive(Default, Deserialize)]
+struct ProbeChapter {
+    start_time: Option<String>,
+    end_time: Option<String>,
+    #[serde(default)]
+    tags: BTreeMap<String, String>,
+}
+
+#[derive(Default, Deserialize)]
 struct ProbeOutput {
     #[serde(default)]
     format: ProbeSection,
     #[serde(default)]
     streams: Vec<ProbeStream>,
+    #[serde(default)]
+    chapters: Vec<ProbeChapter>,
 }
 
 fn parse_probe(bytes: &[u8]) -> Result<(AudioFileMetadata, Option<usize>)> {
@@ -138,6 +172,18 @@ fn parse_probe(bytes: &[u8]) -> Result<(AudioFileMetadata, Option<usize>)> {
         composer: tag(&["composer", "wm/composer"]),
         genre: tag(&["genre", "wm/genre"]),
         description: tag(&["description", "synopsis", "comment", "desc"]),
+        subtitle: tag(&["subtitle"]),
+        publisher: tag(&["publisher", "wm/publisher"]),
+        published_date: tag(&["date", "year", "wm/year"]),
+        language: tag(&["language", "lang"]),
+        asin: tag(&["asin", "audible_asin"]),
+        isbn: tag(&["isbn"]),
+        explicit: tag(&["parental_advisory", "rating"]).is_some_and(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "explicit" | "true" | "yes"
+            )
+        }),
         duration: probe
             .format
             .duration
@@ -145,7 +191,45 @@ fn parse_probe(bytes: &[u8]) -> Result<(AudioFileMetadata, Option<usize>)> {
             .and_then(|value| value.parse::<f64>().ok())
             .filter(|value| value.is_finite() && *value > 0.0)
             .unwrap_or_default(),
+        chapters: probe
+            .chapters
+            .iter()
+            .map(|chapter| {
+                let start_ms = chapter
+                    .start_time
+                    .as_deref()
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .filter(|value| value.is_finite())
+                    .map(|value| (value * 1000.0).round() as i64)
+                    .unwrap_or(0);
+                let end_ms = chapter
+                    .end_time
+                    .as_deref()
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .filter(|value| value.is_finite())
+                    .map(|value| (value * 1000.0).round() as i64)
+                    .unwrap_or(0);
+                let title = chapter
+                    .tags
+                    .iter()
+                    .find(|(key, _)| {
+                        matches!(
+                            key.to_ascii_lowercase().as_str(),
+                            "title" | "name" | "chapter_title"
+                        )
+                    })
+                    .map(|(_, value)| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or_else(|| format!("Chapter {}", start_ms / 1000));
+                AudioChapter {
+                    title,
+                    start_ms,
+                    end_ms: end_ms.max(start_ms),
+                }
+            })
+            .collect(),
         cover_url: None,
+        ..Default::default()
     };
     let cover = probe
         .streams
@@ -177,15 +261,50 @@ impl AudioService {
         input: &AudioInput,
         cover_dir: Option<&Path>,
     ) -> Result<AudioFileMetadata> {
+        if let Some(path) = input.local_path.clone()
+            && is_mp4_file(&path)
+        {
+            let cover_dir = cover_dir.map(Path::to_path_buf);
+            let native = tokio::task::spawn_blocking(move || {
+                let metadata = super::mp4::read_metadata(&path)?;
+                let mut audio = audio_metadata_from_mp4(&metadata);
+                let cover = metadata
+                    .pictures
+                    .iter()
+                    .find(|picture| picture.is_front_cover)
+                    .or_else(|| metadata.pictures.first());
+                if let (Some(dir), Some(picture)) = (cover_dir.as_deref(), cover) {
+                    audio.cover_url = Some(save_cover_bytes(dir, &picture.data)?);
+                } else if let Some(dir) = cover_dir.as_deref() {
+                    audio.cover_url = existing_cover_path(dir);
+                }
+                Ok::<_, TingError>(audio)
+            })
+            .await
+            .map_err(|error| {
+                let message = error.to_string();
+                TingError::task(TaskErrorKind::Join, "read_file_metadata::task", message)
+                    .with_source(anyhow::anyhow!(error))
+            })?;
+            match native {
+                Ok(metadata) => return Ok(metadata),
+                Err(error) => tracing::warn!(
+                    path = %input.source.to_string_lossy(),
+                    error = %error,
+                    "Native MP4 metadata read failed; falling back to FFprobe"
+                ),
+            }
+        }
+
         let mut command = Self::ffprobe_command()?;
         command.args(["-v", "error"]);
         input.configure(&mut command);
         command.args([
             "-show_entries",
-            "format=duration:format_tags:stream=index,codec_name,codec_type:stream_tags:stream_disposition=attached_pic",
+            "format=duration:format_tags:stream=index,codec_name,codec_type:stream_tags:stream_disposition=attached_pic:chapter=start_time,end_time:chapter_tags=title",
             "-of", "json",
         ]).arg(&input.source);
-        let bytes = Self::bounded_output(command, 1024 * 1024, Duration::from_secs(30)).await?;
+        let bytes = Self::bounded_output(command, 4 * 1024 * 1024, Duration::from_secs(30)).await?;
         let (mut metadata, cover) = parse_probe(&bytes)?;
         if let (Some(dir), Some(index)) = (cover_dir, cover) {
             match Self::extract_cover(input, index, dir).await {
@@ -198,12 +317,34 @@ impl AudioService {
         Ok(metadata)
     }
 
+    /// Read only the embedded chapter table of a local MP4/M4B file.
+    pub(crate) async fn read_embedded_chapters(path: &Path) -> Result<Vec<AudioChapter>> {
+        let path = path.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            let metadata = super::mp4::read_metadata(&path)?;
+            let duration_ms = metadata.duration_ms;
+            Ok(metadata
+                .chapters
+                .into_iter()
+                .filter(|chapter| chapter.end_ms > chapter.start_ms)
+                .map(|chapter| AudioChapter {
+                    title: chapter.title,
+                    start_ms: chapter.start_ms,
+                    end_ms: chapter.end_ms.min(duration_ms.max(chapter.start_ms)),
+                })
+                .collect())
+        })
+        .await
+        .map_err(|error| {
+            let message = error.to_string();
+            TingError::task(TaskErrorKind::Join, "read_embedded_chapters::task", message)
+                .with_source(anyhow::anyhow!(error))
+        })?
+    }
+
     async fn extract_cover(input: &AudioInput, index: usize, dir: &Path) -> Result<String> {
-        for extension in ["jpg", "jpeg", "png", "webp", "gif"] {
-            let path = dir.join(format!("cover.{extension}"));
-            if path.is_file() {
-                return Ok(path.to_string_lossy().replace('\\', "/"));
-            }
+        if let Some(existing) = existing_cover_path(dir) {
+            return Ok(existing);
         }
         let mut command = Self::ffmpeg_command()?;
         command.args(["-v", "error", "-nostdin"]);
@@ -222,33 +363,14 @@ impl AudioService {
             "pipe:1",
         ]);
         let bytes = Self::bounded_output(command, MAX_COVER_BYTES, Duration::from_secs(30)).await?;
-        let extension = match image::guess_format(&bytes) {
-            Ok(image::ImageFormat::Jpeg) => "jpg",
-            Ok(image::ImageFormat::Png) => "png",
-            Ok(image::ImageFormat::WebP) => "webp",
-            Ok(image::ImageFormat::Gif) => "gif",
-            _ => {
-                return Err(TingError::invalid_request(
-                    InputErrorKind::InvalidValue,
-                    "extract_cover::invalid_request",
-                    "Invalid embedded cover image".into(),
-                ));
-            }
-        };
-        tokio::fs::create_dir_all(dir).await?;
-        let target = dir.join(format!("cover.{extension}"));
-        let staging = TemporaryAudioFile(dir.join(format!(".cover-{}.tmp", uuid::Uuid::new_v4())));
-        tokio::task::spawn_blocking(move || {
-            std::fs::write(&staging.0, bytes)?;
-            std::fs::rename(&staging.0, &target)?;
-            Ok::<_, TingError>(target.to_string_lossy().replace('\\', "/"))
-        })
-        .await
-        .map_err(|error| {
-            let message = error.to_string();
-            TingError::task(TaskErrorKind::Join, "extract_cover::task", message)
-                .with_source(anyhow::anyhow!(error))
-        })?
+        let dir = dir.to_path_buf();
+        tokio::task::spawn_blocking(move || save_cover_bytes(&dir, &bytes))
+            .await
+            .map_err(|error| {
+                let message = error.to_string();
+                TingError::task(TaskErrorKind::Join, "extract_cover::task", message)
+                    .with_source(anyhow::anyhow!(error))
+            })?
     }
 
     pub(crate) async fn write_file_metadata(
@@ -351,6 +473,114 @@ impl AudioService {
         tokio::fs::rename(&staging.0, path).await?;
         Ok(())
     }
+}
+
+/// Map the native MP4 tag set onto the normalized book metadata fields.
+fn audio_metadata_from_mp4(mp4: &super::mp4::Mp4Metadata) -> AudioFileMetadata {
+    let date = mp4.tag(&["\u{a9}day", "rldt"]);
+    AudioFileMetadata {
+        title: mp4.tag(&["\u{a9}nam"]),
+        album: mp4.tag(&["\u{a9}alb"]),
+        artist: mp4.tag(&["\u{a9}ART"]),
+        album_artist: mp4.tag(&["aART"]),
+        composer: mp4.tag(&["\u{a9}wrt"]),
+        genre: mp4.tag(&["\u{a9}gen"]).or_else(|| mp4.tag(&["gnre"])),
+        description: mp4.tag(&["desc", "ldes", "\u{a9}des", "\u{a9}cmt"]),
+        subtitle: mp4.tag(&[
+            "\u{a9}st3",
+            "st3",
+            "subtitle",
+            "com.apple.iTunes:SUBTITLE",
+            "com.apple.iTunes:subtitle",
+        ]),
+        publisher: mp4.tag(&["\u{a9}pub"]),
+        published_date: date.clone(),
+        language: mp4.tag(&["LANG", "\u{a9}lan", "language"]),
+        asin: mp4.tag(&["CDEK", "prID", "ASIN", "asin"]).or_else(|| {
+            // Audible files often only carry the product page URL.
+            mp4.tag(&["\u{a9}WWW"]).and_then(|url| {
+                url.trim_end_matches('/')
+                    .rsplit('/')
+                    .next()
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+            })
+        }),
+        isbn: mp4.tag(&["ISBN", "isbn"]),
+        explicit: mp4
+            .tag(&["cpil"])
+            .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true")),
+        codec: mp4
+            .audio
+            .as_ref()
+            .map(|audio| audio.codec.clone())
+            .filter(|value| !value.is_empty()),
+        bit_depth: mp4
+            .audio
+            .as_ref()
+            .map(|audio| audio.bit_depth)
+            .filter(|value| *value > 0),
+        bitrate_kbps: mp4
+            .audio
+            .as_ref()
+            .and_then(|audio| (audio.avg_bitrate > 0).then_some(audio.avg_bitrate / 1000)),
+        sample_rate: mp4
+            .audio
+            .as_ref()
+            .map(|audio| audio.sample_rate)
+            .filter(|value| *value > 0),
+        channels: mp4
+            .audio
+            .as_ref()
+            .map(|audio| audio.channels)
+            .filter(|value| *value > 0),
+        duration: (mp4.duration_ms.max(0) as f64) / 1000.0,
+        cover_url: None,
+        chapters: mp4
+            .chapters
+            .iter()
+            .filter(|chapter| chapter.end_ms > chapter.start_ms)
+            .map(|chapter| AudioChapter {
+                title: chapter.title.clone(),
+                start_ms: chapter.start_ms,
+                end_ms: chapter.end_ms,
+            })
+            .collect(),
+    }
+}
+
+fn is_mp4_file(path: &Path) -> bool {
+    super::mp4::is_mp4_family_extension(path) || detect_audio_format(path).as_deref() == Some("m4a")
+}
+
+fn existing_cover_path(dir: &Path) -> Option<String> {
+    ["jpg", "jpeg", "png", "webp", "gif"]
+        .iter()
+        .map(|extension| dir.join(format!("cover.{extension}")))
+        .find(|path| path.is_file())
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+}
+
+fn save_cover_bytes(dir: &Path, bytes: &[u8]) -> Result<String> {
+    let extension = match image::guess_format(bytes) {
+        Ok(image::ImageFormat::Jpeg) => "jpg",
+        Ok(image::ImageFormat::Png) => "png",
+        Ok(image::ImageFormat::WebP) => "webp",
+        Ok(image::ImageFormat::Gif) => "gif",
+        _ => {
+            return Err(TingError::invalid_request(
+                InputErrorKind::InvalidValue,
+                "save_cover_bytes::invalid_request",
+                "Invalid embedded cover image".into(),
+            ));
+        }
+    };
+    std::fs::create_dir_all(dir)?;
+    let target = dir.join(format!("cover.{extension}"));
+    let staging = TemporaryAudioFile(dir.join(format!(".cover-{}.tmp", uuid::Uuid::new_v4())));
+    std::fs::write(&staging.0, bytes)?;
+    std::fs::rename(&staging.0, &target)?;
+    Ok(target.to_string_lossy().replace('\\', "/"))
 }
 
 pub(super) fn copy_audio(

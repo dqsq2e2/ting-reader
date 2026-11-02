@@ -63,7 +63,7 @@ pub(super) async fn handle_strm_stream(
     } else {
         let (reader, _) = state
             .storage_service
-            .get_http_reader(&chapter.path, None)
+            .get_http_reader(&chapter.path, None, None, None)
             .await
             .map_err(|e| {
                 let message = format!("Failed to read strm URL: {}", e);

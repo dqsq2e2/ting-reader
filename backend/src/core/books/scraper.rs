@@ -35,7 +35,7 @@ struct SearchCacheEntry {
 
 /// Scraper service for coordinating scraper plugin operations
 pub struct ScraperService {
-    plugin_manager: Arc<PluginManager>,
+    pub(super) plugin_manager: Arc<PluginManager>,
     search_cache: RwLock<HashMap<SearchCacheKey, SearchCacheEntry>>,
     cache_ttl: Duration,
 }
@@ -60,16 +60,25 @@ impl ScraperService {
             .await
             .into_iter()
             .filter_map(|info| {
-                let aggregate_auto_scrape = info.capabilities.iter().any(|capability| {
-                    matches!(capability, crate::plugin::types::PluginCapability::MetadataProvider(cap)
-                        if cap.aggregate_auto_scrape)
-                });
+                // Metadata dispatch and the derived search form both use the
+                // first provider; discovery must describe that same provider.
+                let provider = info.capabilities.iter().find_map(|capability| {
+                    if let crate::plugin::types::PluginCapability::MetadataProvider(cap) =
+                        capability
+                    {
+                        Some(cap)
+                    } else {
+                        None
+                    }
+                })?;
+                let aggregate_auto_scrape = provider.aggregate_auto_scrape;
+                let book_source = provider.book_source;
                 info.scraper
                     .clone()
-                    .map(|capabilities| (info, capabilities, aggregate_auto_scrape))
+                    .map(|capabilities| (info, capabilities, aggregate_auto_scrape, book_source))
             })
             .map(|info| {
-                let (info, capabilities, aggregate_auto_scrape) = info;
+                let (info, capabilities, aggregate_auto_scrape, book_source) = info;
                 let search_fields = capabilities.search_fields.clone();
                 let result_fields = capabilities.result_fields.clone();
                 let result_field_labels = capabilities.result_field_labels.clone();
@@ -79,6 +88,7 @@ impl ScraperService {
                     description: Some(info.description),
                     version: info.version,
                     enabled: matches!(info.state, PluginState::Active),
+                    book_source,
                     auto_scrape: capabilities.auto_scrape,
                     aggregate_auto_scrape,
                     search_fields,

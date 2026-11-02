@@ -341,6 +341,13 @@ impl LibraryScanner {
                 )
             })?;
 
+        if library.library_type == "source" {
+            return Err(TingError::validation(
+                crate::core::app::error::InputErrorKind::UnsupportedValue,
+                "scan_library.book_source",
+                "Managed book source libraries cannot be scanned as folders".into(),
+            ));
+        }
         let scraper_config: crate::db::models::ScraperConfig = library
             .scraper_config
             .as_ref()

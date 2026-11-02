@@ -37,7 +37,6 @@ impl Default for HttpOptions {
 
 fn build_http_client(url: &Url, resolved: &[SocketAddr]) -> Result<reqwest::Client> {
     let mut builder = reqwest::Client::builder()
-        .timeout(DEFAULT_HTTP_TIMEOUT)
         .connect_timeout(Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy();
@@ -219,13 +218,77 @@ pub(crate) async fn request(
     options: Option<&Value>,
     allowed_domains: &[String],
 ) -> Result<HttpResponse> {
+    let response = send_response(
+        raw_url,
+        parse_http_options(options)?,
+        allowed_domains,
+        false,
+    )
+    .await?;
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_HTTP_RESPONSE_BYTES as u64)
+    {
+        anyhow::bail!("Plugin fetch response exceeds the 8 MiB limit");
+    }
+    let status = response.status().as_u16();
+    let headers = response
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.to_string(), value.to_string()))
+        })
+        .collect();
+    let mut body = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| {
+            anyhow::anyhow!("Plugin fetch response read failed: {}", error.without_url())
+        })?;
+        checked_http_body_len(body.len(), chunk.len())?;
+        body.extend_from_slice(&chunk);
+    }
+    Ok(HttpResponse {
+        status,
+        headers,
+        body,
+    })
+}
+
+/// Media stays streamed; the same domain, DNS pinning and redirect policy
+/// applies, without buffering it in the plugin's bounded JSON HTTP response.
+pub(crate) async fn media_response(
+    raw_url: &str,
+    headers: HeaderMap,
+    allowed_domains: &[String],
+) -> Result<reqwest::Response> {
+    send_response(
+        raw_url,
+        HttpOptions {
+            headers,
+            ..Default::default()
+        },
+        allowed_domains,
+        true,
+    )
+    .await
+}
+
+async fn send_response(
+    raw_url: &str,
+    mut options: HttpOptions,
+    allowed_domains: &[String],
+    streaming: bool,
+) -> Result<reqwest::Response> {
     let mut current_url = Url::parse(raw_url).map_err(|error| {
         anyhow::anyhow!(
             "Invalid plugin fetch URL {}: {error}",
             redacted_http_url_str(raw_url)
         )
     })?;
-    let mut options = parse_http_options(options)?;
     let deadline = tokio::time::Instant::now() + options.timeout;
     let mut redirect_count = 0_usize;
 
@@ -260,13 +323,18 @@ pub(crate) async fn request(
         let client = build_http_client(&current_url, &resolved)?;
         let mut request = client
             .request(options.method.clone(), current_url.clone())
-            .headers(options.headers.clone())
-            .timeout(remaining);
+            .headers(options.headers.clone());
+        if !streaming {
+            request = request.timeout(remaining);
+        }
         if let Some(body) = &options.body {
             request = request.body(body.clone());
         }
 
-        let response = match request.send().await {
+        let response = match tokio::time::timeout(remaining, request.send())
+            .await
+            .map_err(|_| anyhow::anyhow!("Plugin fetch timed out"))?
+        {
             Ok(response) => response,
             Err(error) => {
                 let error = error.without_url().to_string();
@@ -328,65 +396,7 @@ pub(crate) async fn request(
             continue;
         }
 
-        if response
-            .content_length()
-            .is_some_and(|length| length > MAX_HTTP_RESPONSE_BYTES as u64)
-        {
-            anyhow::bail!(
-                "Plugin fetch response exceeds the {} MiB limit",
-                MAX_HTTP_RESPONSE_BYTES / (1024 * 1024)
-            );
-        }
-
-        let headers = response
-            .headers()
-            .iter()
-            .filter_map(|(name, value)| {
-                value
-                    .to_str()
-                    .ok()
-                    .map(|value| (name.to_string(), value.to_string()))
-            })
-            .collect();
-        let capacity = response
-            .content_length()
-            .unwrap_or_default()
-            .min(MAX_HTTP_RESPONSE_BYTES as u64) as usize;
-        let mut body = Vec::with_capacity(capacity);
-        let mut stream = response.bytes_stream();
-        while let Some(chunk) = stream.next().await {
-            let chunk = match chunk {
-                Ok(chunk) => chunk,
-                Err(error) => {
-                    let error = error.without_url().to_string();
-                    debug!(
-                        url = %redacted_url,
-                        error = %error,
-                        message_key = "plugin.fetch.body_read_failed",
-                        message_params = %serde_json::json!({ "error": &error }),
-                        "Plugin fetch body read failed"
-                    );
-                    return Err(anyhow::anyhow!(
-                        "Plugin fetch response read failed: {error}"
-                    ));
-                }
-            };
-            checked_http_body_len(body.len(), chunk.len())?;
-            body.extend_from_slice(&chunk);
-        }
-
-        info!(
-            url = %redacted_url,
-            status = %status,
-            body_length = body.len(),
-            redirects = redirect_count,
-            "Plugin fetch request completed"
-        );
-        return Ok(HttpResponse {
-            status: status.as_u16(),
-            headers,
-            body,
-        });
+        return Ok(response);
     }
 }
 

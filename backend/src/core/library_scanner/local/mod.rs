@@ -365,9 +365,10 @@ impl LibraryScanner {
                 state.config_fingerprint.as_deref() != Some(state_config_fingerprint.as_str())
             });
             if let Some((book_id, _, _)) = existing_info.as_ref()
-                && chapter_counts
-                    .get(book_id)
-                    .is_some_and(|counts| counts.missing_duration == 0)
+                && chapter_counts.get(book_id).is_some_and(|counts| {
+                    counts.missing_duration == 0
+                        && !processing::embedded_chapters_pending(&files, counts)
+                })
                 && cached_states.get(&dir_path_string).is_some_and(|state| {
                     !files_changed
                         && state.config_fingerprint.as_deref()

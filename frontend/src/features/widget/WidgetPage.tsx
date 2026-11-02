@@ -17,7 +17,7 @@ const WidgetPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
   const { setToken, setAuth, isAuthenticated } = useAuthStore();
-  const { playChapter } = usePlayerStore();
+  const playChapter = usePlayerStore((state) => state.playChapter);
   const coverShape = useBookshelfCoverShape(isAuthenticated);
   
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

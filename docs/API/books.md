@@ -259,12 +259,16 @@
     "duration": 0,
     "chapter_index": 0,
     "is_extra": 0,
+    "start_time": 0,
+    "end_time": 38173,
     "created_at": "RFC3339",
     "progress_position": 0.0,
     "progress_updated_at": "RFC3339 | null"
   }
 ]
 ```
+
+`start_time` / `end_time`（毫秒）仅出现在单文件 M4B/M4A 的内嵌章节上，表示章节在 `path` 同一个音频文件内的起止位置；此时 `duration` 为章节区间时长。普通“一文件一章节”的书籍不返回这两个字段。
 
 传入分页参数时返回分页对象：
 
@@ -279,6 +283,8 @@
       "duration": 0,
       "chapter_index": 0,
       "is_extra": 0,
+      "start_time": 0,
+      "end_time": 38173,
       "created_at": "RFC3339",
       "progress_position": 0.0,
       "progress_updated_at": "RFC3339 | null"

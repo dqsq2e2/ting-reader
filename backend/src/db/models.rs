@@ -63,6 +63,12 @@ pub struct Chapter {
     // V7
     #[serde(default)]
     pub manual_corrected: i32, // 0 or 1
+    // V31: milliseconds inside `path` for chapters read from an embedded
+    // chapter table. Both values stay empty for one-file-per-chapter books.
+    #[serde(default)]
+    pub start_time: Option<i64>,
+    #[serde(default)]
+    pub end_time: Option<i64>,
     pub created_at: String,
 }
 

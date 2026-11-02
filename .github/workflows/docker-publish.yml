@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Existing release tag to rebuild from the selected source ref, e.g. v2.0.2'
+        description: 'Existing release tag to rebuild from the selected source ref, e.g. v2.0.7'
         type: string
         default: ''
       deployment_packages_only:
@@ -18,7 +18,7 @@ on:
 env:
   FNPACK_VERSION: "1.2.3"
   FYGOPACK_VERSION: "1.2.3"
-  TING_PLUGIN_STORE_VERSION: "2.0.2"
+  TING_PLUGIN_STORE_VERSION: "2.0.4"
   FFMPEG_BUILD_VERSION: "8.1.2-2"
 
 jobs:

@@ -21,7 +21,7 @@ pub use management::{
     update_plugin_config,
 };
 pub use routes::{call_plugin_route, call_public_plugin_route, sign_plugin_route};
-pub use scraper::{get_scraper_sources, scraper_search};
+pub use scraper::{add_source_book, get_scraper_sources, scraper_search};
 
 #[cfg(test)]
 #[path = "../../../../tests/unit/api/plugins.rs"]

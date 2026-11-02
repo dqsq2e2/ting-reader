@@ -357,6 +357,7 @@ const enUS = {
     selectionMode: "Selection Mode",
     selectBooksFirst: "Select books below first",
     batchOperations: "Actions",
+    batchOperationsWithCount: "Actions ({{count}})",
     allLibraries: "All Libraries",
     searchPlaceholder: "Search title, author, or narrator",
     sortBy: "Sort By",
@@ -484,6 +485,23 @@ const enUS = {
     noMatchedBooks: "No matching books",
   },
   searchPage: {
+    scope: "Search in",
+    allScope: "All",
+    localScope: "Bookshelf",
+    onlineScope: "Online",
+    allOnlineSources: "All online sources",
+    selectedOnlineSources: "{{count}} sources selected",
+    noOnlineSources: "No online sources available",
+    sourceAdd: "Add to bookshelf",
+    sourceAddAction: "Add",
+    sourceAdded: "Added",
+    sourceAdding: "Adding",
+    sourceEmptyHint: "Enter a keyword to search this source",
+    sourceSearchFailed: "Source search failed",
+    sourceAddFailed: "Could not add this book",
+    sourcePages: "Source search pages",
+    previousPage: "Previous page",
+    nextPage: "Next page",
     title: "Discover",
     subtitle: "Search titles, authors, narrators, or descriptions",
     placeholder: "Enter keywords...",
@@ -767,6 +785,8 @@ const enUS = {
   adminLibraries: {
     localStorage: "Local Storage",
     rssSubscription: "RSS",
+    onlineSource: "Online Source",
+    sourceLibraryHint: "Manage books added from this source",
     title: "Library Management",
     subtitle:
       "Configure WebDAV, local storage, or RSS subscriptions and sync resources",
@@ -828,6 +848,12 @@ const enUS = {
     scanStarted: "Scan task started",
     scanStartFailed: "Failed to start scan",
     deleteFailed: "Delete failed",
+    sourceBooksLoading: "Loading added books...",
+    sourceBooksEmpty: "No books have been added to this online library",
+    sourceBookDeleteConfirm: 'Remove "{{title}}" from this online library?',
+    sourceBookDeleteFailed: "Failed to delete online book",
+    deleteSourceBook: "Delete book",
+    unknownBookCredit: "Unknown",
   },
   scrapeDiff: {
     loadFailed: "Load failed",
@@ -1480,6 +1506,8 @@ const enUS = {
         "Scan completed: {{total}} total, {{created}} created, {{updated}} updated, {{deleted}} deleted, {{errors}} errors",
       "scan.library.completed":
         'Library "{{library_name}}" scan completed: {{created}} created, {{updated}} updated, {{deleted}} deleted',
+      "source.library.sync.completed":
+        'Online library "{{library_name}}" synchronized: {{updated}} updated',
       "library.watcher.start_failed":
         "Library watcher failed to start: {{error}}",
       "metadata.chapter.writing":

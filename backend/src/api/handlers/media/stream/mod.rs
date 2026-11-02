@@ -57,6 +57,7 @@ struct StreamContext {
     method: axum::http::Method,
     headers: axum::http::HeaderMap,
     user: Option<AuthUser>,
+    source_audio: Option<crate::core::books::sources::SourceAudio>,
 }
 
 fn stream_mime_type_from_path(path: &str) -> String {
@@ -73,12 +74,20 @@ fn is_download_query(params: &StreamQuery) -> bool {
     )
 }
 
-async fn get_remote_media_reader(
+pub(crate) async fn get_remote_media_reader(
     state: &AppState,
     library: &Library,
     path: &str,
     range: Option<(u64, u64)>,
 ) -> Result<(Box<dyn tokio::io::AsyncRead + Send + Unpin>, u64)> {
+    if library.library_type == "source" {
+        return state
+            .scraper_service
+            .resolve_source_audio(library, path)
+            .await?
+            .reader(&state.storage_service, range)
+            .await;
+    }
     if library.library_type == "webdav" {
         return state
             .storage_service
@@ -99,7 +108,7 @@ async fn get_remote_media_reader(
     {
         return state
             .storage_service
-            .get_http_reader(path, range)
+            .get_http_reader(path, range, None, None)
             .await
             .map_err(|e| {
                 let message = format!("Remote media not found: {}", e);
@@ -175,7 +184,7 @@ pub async fn stream_chapter(
     let is_download_request = is_download_query(&params);
 
     // STRM playback resolves redirects before returning the final source URL.
-    if ext == "strm" {
+    if library.library_type != "source" && ext == "strm" {
         if !is_download_request {
             preload::cancel_auto_preload(&state, user.as_ref()).await;
         }
@@ -204,6 +213,16 @@ pub async fn stream_chapter(
         return transcode::transcode_stream(&state, &chapter, &library, &params).await;
     }
 
+    let source_audio = if library.library_type == "source" {
+        Some(
+            state
+                .scraper_service
+                .resolve_source_audio(&library, &chapter.path)
+                .await?,
+        )
+    } else {
+        None
+    };
     source::stream_source(StreamContext {
         state,
         chapter,
@@ -213,6 +232,7 @@ pub async fn stream_chapter(
         method,
         headers,
         user,
+        source_audio,
     })
     .await
 }

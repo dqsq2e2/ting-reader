@@ -85,6 +85,13 @@ async fn get_input(
     library: &Library,
     is_strm: bool,
 ) -> Result<HlsInput> {
+    if library.library_type == "source" {
+        let (reader, _) =
+            super::get_remote_media_reader(state, library, &chapter.path, None).await?;
+        return Ok(HlsInput::Decrypted(
+            tokio_util::io::ReaderStream::new(reader).boxed(),
+        ));
+    }
     if is_strm {
         let reader: Box<dyn tokio::io::AsyncRead + Send + Unpin> =
             if library.library_type == "local" {
